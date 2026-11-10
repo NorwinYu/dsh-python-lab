@@ -1,0 +1,11 @@
+{
+  "session_dir": ".minidsh/sessions",
+  "features": {
+    "core.tools": true,
+    "tools.list_dir": true,
+    "tools.read_file": true,
+    "session.jsonl": true,
+    "llm.mock": true,
+    "agent.core": true
+  }
+}
