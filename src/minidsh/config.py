@@ -1,15 +1,17 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Iterable, Optional
 
 
 DEFAULT_FEATURES: Dict[str, bool] = {
+    "core.system-prompt": True,
     "core.tools": True,
-    "tools.list_dir": True,
-    "tools.read_file": True,
+    "tools.glob": True,
+    "tools.read": True,
     "session.jsonl": True,
     "llm.mock": True,
+    "llm.deepseek": False,
     "agent.core": True,
 }
 

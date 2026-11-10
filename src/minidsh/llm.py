@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .plugins import Plugin, ServiceContext
 
@@ -14,55 +14,112 @@ class ToolCall:
 
 @dataclass
 class ModelResponse:
-    content: str = ""
-    tool_calls: List[ToolCall] = field(default_factory=list)
+    blocks: List[Dict[str, object]] = field(default_factory=list)
+    finish_reason: Dict[str, object] = field(default_factory=lambda: {"kind": "stop"})
+    usage: Optional[Dict[str, int]] = None
+    replay_state: Optional[Dict[str, object]] = None
+
+    @property
+    def content(self) -> str:
+        return "".join(str(block.get("text", "")) for block in self.blocks if block.get("type") == "text")
+
+    @property
+    def tool_calls(self) -> List[ToolCall]:
+        calls: List[ToolCall] = []
+        for block in self.blocks:
+            if block.get("type") != "tool-call":
+                continue
+            arguments = block.get("arguments", {})
+            if not isinstance(arguments, dict):
+                raise ValueError("工具参数必须是对象")
+            calls.append(
+                ToolCall(
+                    name=str(block["name"]),
+                    arguments=arguments,
+                    call_id=str(block["id"]),
+                )
+            )
+        return calls
 
 
 class Model(ABC):
     @abstractmethod
     def complete(
         self,
+        system: str,
         messages: List[Dict[str, object]],
         tool_definitions: List[Dict[str, object]],
+        session_id: Optional[str] = None,
     ) -> ModelResponse:
         pass
 
 
+def text_block(text: str) -> Dict[str, object]:
+    return {"type": "text", "text": text}
+
+
+def tool_call_block(call: ToolCall) -> Dict[str, object]:
+    return {
+        "type": "tool-call",
+        "id": call.call_id,
+        "name": call.name,
+        "arguments": call.arguments,
+    }
+
+
 class MockModel(Model):
+    provider = "mock"
+    model_id = "mock"
+
     def complete(
         self,
+        system: str,
         messages: List[Dict[str, object]],
         tool_definitions: List[Dict[str, object]],
+        session_id: Optional[str] = None,
     ) -> ModelResponse:
         if messages[-1]["role"] == "tool":
-            return ModelResponse(content=f"工具已经执行完成：\n{messages[-1]['content']}")
+            content = messages[-1]["content"]
+            if isinstance(content, list):
+                text = "".join(str(block.get("text", "")) for block in content if isinstance(block, dict))
+            else:
+                text = str(content)
+            return ModelResponse(blocks=[text_block(f"工具已经执行完成：\n{text}")])
 
-        prompt = next(
-            (str(message["content"]) for message in reversed(messages) if message["role"] == "user"),
-            "",
-        ).strip()
+        prompt = ""
+        for message in reversed(messages):
+            if message["role"] != "user":
+                continue
+            source = message.get("source", {})
+            if isinstance(source, dict) and source.get("kind") == "runtime-context":
+                continue
+            content = message["content"]
+            if isinstance(content, list):
+                prompt = "".join(str(block.get("text", "")) for block in content if isinstance(block, dict)).strip()
+            else:
+                prompt = str(content).strip()
+            if prompt:
+                break
+
         available = {definition["name"] for definition in tool_definitions}
+        if ("目录" in prompt or prompt.lower().startswith("list")) and "glob" in available:
+            call = ToolCall(name="glob", arguments={"pattern": "*"}, call_id="mock-1")
+            return ModelResponse(blocks=[text_block("我先查看目录。"), tool_call_block(call)])
 
-        if ("目录" in prompt or prompt.lower().startswith("list")) and "list_dir" in available:
-            return ModelResponse(
-                content="我先查看目录。",
-                tool_calls=[ToolCall(name="list_dir", arguments={"path": "."}, call_id="mock-1")],
-            )
-
-        if (prompt.startswith("读取") or prompt.lower().startswith("read ")) and "read_file" in available:
+        if (prompt.startswith("读取") or prompt.lower().startswith("read ")) and "read" in available:
             path = prompt[2:].strip() if prompt.startswith("读取") else prompt[5:].strip()
-            return ModelResponse(
-                content="我先读取文件。",
-                tool_calls=[ToolCall(name="read_file", arguments={"path": path}, call_id="mock-1")],
-            )
+            call = ToolCall(name="read", arguments={"file_path": path}, call_id="mock-1")
+            return ModelResponse(blocks=[text_block("我先读取文件。"), tool_call_block(call)])
 
         return ModelResponse(
-            content=(
-                "MockModel 已收到你的消息。当前可尝试：\n"
-                "- 请列出当前目录\n"
-                "- 读取 README.md\n"
-                "也可以禁用某个工具，观察工具目录和插件状态如何变化。"
-            )
+            blocks=[
+                text_block(
+                    "MockModel 已收到你的消息。当前可尝试：\n"
+                    "- 请列出当前目录\n"
+                    "- 读取 README.md\n"
+                    "也可以禁用某个工具，观察工具目录和插件状态如何变化。"
+                )
+            ]
         )
 
 

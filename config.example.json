@@ -1,11 +1,13 @@
 {
   "session_dir": ".minidsh/sessions",
   "features": {
+    "core.system-prompt": true,
     "core.tools": true,
-    "tools.list_dir": true,
-    "tools.read_file": true,
+    "tools.glob": true,
+    "tools.read": true,
     "session.jsonl": true,
     "llm.mock": true,
+    "llm.deepseek": false,
     "agent.core": true
   }
 }

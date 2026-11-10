@@ -19,8 +19,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("config", help="输出合并后的配置")
     subparsers.add_parser("plugins", help="查看插件及依赖状态")
     subparsers.add_parser("tools", help="列出当前启用的工具")
+    subparsers.add_parser("prompt", help="输出当前系统提示词与 runtime context")
 
-    run_parser = subparsers.add_parser("run", help="运行一次 Mock Agent")
+    run_parser = subparsers.add_parser("run", help="运行一次 Agent")
     run_parser.add_argument("prompt", nargs="+", help="用户提示词")
     run_parser.add_argument("--trace", action="store_true", help="输出工具事件轨迹")
 
@@ -57,6 +58,19 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         if args.command == "tools":
             print(json.dumps(app.tools.definitions(), ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "prompt":
+            print(
+                json.dumps(
+                    {
+                        "system": app.system_prompt.render(),
+                        "runtime_context": app.system_prompt.runtime_context(config.workspace),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             return 0
 
         if args.command == "session":

@@ -2,17 +2,19 @@ from typing import Optional
 
 from .agent import Agent
 from .config import AppConfig
+from .deepseek import DeepSeekModelPlugin
 from .events import EventBus
 from .llm import MockModelPlugin, Model
 from .plugins import Plugin, PluginManager, ServiceContext
 from .session import JsonlSessionPlugin, SessionStore
-from .tools import CoreToolsPlugin, SingleToolPlugin, ToolRegistry, make_list_dir_tool, make_read_file_tool
+from .system_prompt import GLOB_GUIDANCE, READ_GUIDANCE, SystemPrompt, SystemPromptPlugin
+from .tools import CoreToolsPlugin, SingleToolPlugin, ToolRegistry, make_glob_tool, make_read_tool
 
 
 class AgentPlugin(Plugin):
     name = "agent.core"
     provides = ("agent",)
-    requires = ("llm", "tools")
+    requires = ("llm", "tools", "systemPrompt")
 
     def __init__(self, config: AppConfig) -> None:
         self.config = config
@@ -20,13 +22,17 @@ class AgentPlugin(Plugin):
     def activate(self, ctx: ServiceContext) -> None:
         model = ctx.require("llm")
         tools = ctx.require("tools")
+        prompt = ctx.require("systemPrompt")
         session = ctx.optional("session")
         assert isinstance(model, Model)
         assert isinstance(tools, ToolRegistry)
+        assert isinstance(prompt, SystemPrompt)
         assert session is None or isinstance(session, SessionStore)
         agent = Agent(
             model=model,
             tools=tools,
+            system_prompt=prompt,
+            workspace=self.config.workspace,
             events=ctx.events,
             session=session,
         )
@@ -39,11 +45,13 @@ class Application:
         self.events = EventBus()
         self.ctx = ServiceContext(self.events)
         self.manager = PluginManager(self.ctx, config.features)
+        self.manager.register(SystemPromptPlugin())
         self.manager.register(CoreToolsPlugin())
-        self.manager.register(SingleToolPlugin("tools.list_dir", make_list_dir_tool(config.workspace)))
-        self.manager.register(SingleToolPlugin("tools.read_file", make_read_file_tool(config.workspace)))
+        self.manager.register(SingleToolPlugin("tools.glob", make_glob_tool(config.workspace), ("tool:glob", 1400, GLOB_GUIDANCE)))
+        self.manager.register(SingleToolPlugin("tools.read", make_read_tool(config.workspace), ("tool:read", 1100, READ_GUIDANCE)))
         self.manager.register(JsonlSessionPlugin(config.session_dir))
         self.manager.register(MockModelPlugin())
+        self.manager.register(DeepSeekModelPlugin())
         self.manager.register(AgentPlugin(config))
         self.manager.activate_all()
 
@@ -58,6 +66,12 @@ class Application:
         tools = self.ctx.require("tools")
         assert isinstance(tools, ToolRegistry)
         return tools
+
+    @property
+    def system_prompt(self) -> SystemPrompt:
+        prompt = self.ctx.require("systemPrompt")
+        assert isinstance(prompt, SystemPrompt)
+        return prompt
 
     @property
     def session(self) -> Optional[SessionStore]:
