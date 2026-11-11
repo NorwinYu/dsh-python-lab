@@ -5,14 +5,18 @@ from .approval import ApprovalPlugin, ApprovalService
 from .config import AppConfig
 from .deepseek import DeepSeekModelPlugin
 from .events import EventBus
+from .jobs import JobPlugin
 from .llm import MockModelPlugin, Model
 from .observations import ObservationPlugin
 from .plugins import Plugin, PluginManager, ServiceContext
 from .sandbox import SandboxPolicy, SandboxPolicyPlugin
 from .session import JsonlSessionPlugin, SessionStore
+from .shell import BashToolPlugin, JobToolsPlugin, make_bash_tool
 from .system_prompt import (
+    BASH_GUIDANCE,
     EDIT_GUIDANCE,
     GLOB_GUIDANCE,
+    JOBS_GUIDANCE,
     READ_GUIDANCE,
     WRITE_GUIDANCE,
     SystemPrompt,
@@ -68,6 +72,7 @@ class Application:
         self.manager.register(SandboxPolicyPlugin(config.sandbox_mode, config.workspace))
         self.manager.register(ApprovalPlugin(config.resolved_approval_policy(), answerer))
         self.manager.register(ObservationPlugin())
+        self.manager.register(JobPlugin(config.session_dir.parent / "jobs"))
         self.manager.register(CoreToolsPlugin())
         self.manager.register(SingleToolPlugin("tools.read", make_read_tool(config.workspace), ("tool:read", 1100, READ_GUIDANCE)))
         write_guidance = WRITE_GUIDANCE
@@ -77,6 +82,8 @@ class Application:
         self.manager.register(SingleToolPlugin("tools.write", make_write_tool(config.workspace), ("tool:write", 1200, write_guidance)))
         self.manager.register(SingleToolPlugin("tools.edit", make_edit_tool(config.workspace), ("tool:edit", 1300, EDIT_GUIDANCE)))
         self.manager.register(SingleToolPlugin("tools.glob", make_glob_tool(config.workspace), ("tool:glob", 1400, GLOB_GUIDANCE)))
+        self.manager.register(BashToolPlugin("tools.bash", make_bash_tool(config.workspace), ("tool:bash", 1000, BASH_GUIDANCE)))
+        self.manager.register(JobToolsPlugin(("tool:jobs", 1600, JOBS_GUIDANCE)))
         self.manager.register(JsonlSessionPlugin(config.session_dir))
         self.manager.register(MockModelPlugin())
         self.manager.register(DeepSeekModelPlugin())

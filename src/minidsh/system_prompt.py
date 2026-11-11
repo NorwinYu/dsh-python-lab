@@ -14,6 +14,12 @@ READ_GUIDANCE = (
 GLOB_GUIDANCE = "Use the glob tool — not shell find — to discover files by path pattern."
 WRITE_GUIDANCE = "Read an existing file before overwriting it with write"
 EDIT_GUIDANCE = "Read a file before editing it unless you just created or edited it in this session."
+BASH_GUIDANCE = "Check the [exit code: N] marker on every bash result; investigate failures before moving on."
+JOBS_GUIDANCE = (
+    "Track every background job id you start. You are not notified in-session when a job finishes — do not busy-poll or sleep on one; "
+    "keep working on independent steps and do not duplicate a running job's work. Before giving a final answer, collect every "
+    "still-relevant job with job_output (set wait: true only when you are genuinely blocked on it), and job_kill jobs that stopped mattering."
+)
 
 
 @dataclass

@@ -1,18 +1,18 @@
 # MiniDSH：从 0 学 Agent Harness
 
-这是一个用于拆解 DeepSeek Harness（DSH）核心思想的 Python 学习项目。它不是官方 DSH 的完整移植，而是通过可运行的小切片逐层理解插件、工具、模型、审批、会话和 Agent Loop。
+这是一个用于拆解 DeepSeek Harness（DSH）核心思想的 Python 学习项目。它不是官方 DSH 的完整移植，而是通过可运行的小切片逐层理解插件、工具、模型、审批、Shell、后台任务、会话和 Agent Loop。
 
 当前只使用 Python 标准库，支持 Python 3.9+。MockModel 不需要 API Key；真实 DeepSeek 模型插件可独立开关。
 
 ## Git 与上游基线
 
-项目使用 Git 分阶段提交。当前对照的上游 commit 为：
+项目使用 Git 分阶段提交，对照的上游 commit 为：
 
 ```text
 fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159
 ```
 
-已对齐和未对齐的边界记录在 `docs/upstream-parity.md`。当前已实现的工具提示词和 runtime-context 文案使用上游英文原文。
+已对齐和未对齐的边界记录在 `docs/upstream-parity.md`。工具提示词和 runtime-context 文案使用上游英文原文。
 
 ```bash
 git log --oneline
@@ -43,33 +43,34 @@ minidsh run "请列出当前目录"
 
 - `core.system-prompt`：身份段、工具段和 runtime context。
 - `core.sandbox-policy`：文件策略与工作区边界。
-- `core.approval`：写操作审批与失败关闭。
+- `core.approval`：写/Shell 操作审批与失败关闭。
 - `core.fs-observation`：同会话文件读取版本。
+- `core.jobs`：进程、输出、任务隔离和生命周期。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
 - `tools.write`：官方 `write` 创建/覆盖工具。
 - `tools.edit`：官方 `edit` 字面替换工具。
+- `tools.bash`：官方 `bash` 进程工具。
+- `tools.jobs`：官方 `job_output/job_list/job_kill` 工具组。
 - `session.jsonl`：JSONL 会话持久化。
 - `llm.mock`：确定性模拟模型，默认启用。
 - `llm.deepseek`：真实 DeepSeek Messages 模型，默认禁用。
 - `agent.core`：Agent Loop。
 
-示例：
-
 ```bash
 PYTHONPATH=src python3 -m minidsh --disable tools.glob tools
 PYTHONPATH=src python3 -m minidsh --disable tools.edit prompt
-PYTHONPATH=src python3 -m minidsh --disable llm.mock plugins
+PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 ```
 
-禁用全部模型后，`agent.core` 因缺少 `llm` 服务而保持 `pending`。禁用 `session.jsonl` 后 Agent 仍可运行，但不会保存会话或审批审计。
+禁用全部模型后，`agent.core` 因缺少 `llm` 服务而保持 `pending`。禁用 `session.jsonl` 后 Agent 仍可运行，但不会保存会话、审批或任务事件。
 
 完整配置示例见 `config.example.json`。配置文件先合并，命令行的 `--enable` 和 `--disable` 后生效。
 
 ## 文件策略与写操作
 
-默认文件策略是 `read-only`，因此写操作会被拒绝。若要允许工作区写入，需要同时：
+默认文件策略是 `read-only`，写操作和 Shell 都会被拒绝。若要允许工作区写入：
 
 1. 设置 `--sandbox-mode workspace-write`。
 2. 在交互提示中允许，或显式传入 `--yes`。
@@ -90,24 +91,42 @@ PYTHONPATH=src python3 -m minidsh \
   run "编辑 demo.txt：把hello替换为world"
 ```
 
-`--yes` 会允许本次进程内的所有写操作，不应在内容不可信时使用。交互终端中省略 `--yes` 会逐次询问；非交互环境没有可用审批者时，写操作返回 `unavailable`。
-
-其他策略：
+`--yes` 会允许本次进程内的所有写和 Shell 操作，不应在内容不可信时使用。交互终端省略 `--yes` 会逐次询问；非交互环境没有可用审批者时返回 `unavailable`。
 
 ```bash
-# 所有需要审批的写操作都自动拒绝
+# 自动拒绝需要审批的操作
 PYTHONPATH=src python3 -m minidsh \
   --sandbox-mode workspace-write \
   --approval-policy never \
   run "写入 denied.txt：hello"
 
-# 完全访问：不限制工作区路径，也不触发写前审批
+# 不限制工作区路径，也不触发写/Shell 审批
 PYTHONPATH=src python3 -m minidsh \
   --sandbox-mode danger-full-access \
   run "写入 full.txt：hello"
 ```
 
 `write` 覆盖已有文件前必须读过它；`edit` 默认要求旧文本恰好出现一次。读取后如果文件被外部修改，也会拒绝继续覆盖。
+
+## Shell 与后台任务
+
+```bash
+# 前台命令
+PYTHONPATH=src python3 -m minidsh \
+  --sandbox-mode workspace-write \
+  --yes \
+  run "执行 printf 'hello'"
+
+# 后台命令，立即返回 job id
+PYTHONPATH=src python3 -m minidsh \
+  --sandbox-mode workspace-write \
+  --yes \
+  run "执行后台 sleep 10"
+```
+
+每次调用使用新的 `bash -c`；cwd、变量和函数不会跨调用保留。前台命令超时后转为后台任务，而不是直接杀死。后台任务支持独立 stdout/stderr 游标、输出上限、完整输出落盘、任务列表、进程组终止和会话事件。
+
+当前 CLI 是短进程，退出时会回收后台任务；长期运行、任务通知和跨进程恢复需要后面的常驻宿主阶段。
 
 ## 接入真实 DeepSeek
 
@@ -131,7 +150,7 @@ PYTHONPATH=src python3 -m minidsh \
 | `DEEPSEEK_MAX_TOKENS` | `256000` |
 | `DEEPSEEK_STREAM_IDLE_TIMEOUT_MS` | `300000` |
 
-真实调用会访问网络并产生费用。密钥只从环境变量读取，不写入配置或会话。当前在线验收尚未执行；本地 Messages/SSE 端到端验收已通过。
+真实调用会访问网络并产生费用。密钥只从环境变量读取，不写入配置、会话或 Shell 环境。当前在线验收尚未执行；本地 Messages/SSE 端到端验收已通过。
 
 ## 当前架构
 
@@ -145,10 +164,11 @@ CLI
           ├─ SandboxPolicy：read-only / workspace-write / danger-full-access
           ├─ ApprovalService：ask / never / allowed-once / unavailable
           ├─ ObservationStore：同会话文件版本
+          ├─ JobService：进程、输出环、任务隔离、终止与回收
           ├─ ToolRegistry：策略、审批和工具执行管线
-          │   ├─ read / glob
-          │   └─ write / edit
-          ├─ JsonlSessionStore：追加式会话与审批事件
+          │   ├─ read / glob / write / edit
+          │   └─ bash / job_output / job_list / job_kill
+          ├─ JsonlSessionStore：会话、审批和任务事件
           ├─ MockModel：离线模型适配器
           ├─ DeepSeekModel：Messages/SSE 模型适配器
           └─ Agent：turn / step / tool call 循环
@@ -164,11 +184,13 @@ CLI
 6. `src/minidsh/approval.py`：审批结果与审计事件。
 7. `src/minidsh/observations.py`：同会话文件版本观察。
 8. `src/minidsh/tools.py`：工具 schema、执行链、原子写入和路径边界。
-9. `src/minidsh/llm.py`：模型接口、内容块和 MockModel。
-10. `src/minidsh/deepseek.py`：Messages 请求、SSE 和原生 replay。
-11. `src/minidsh/agent.py`：完整的最小 Agent Loop。
-12. `src/minidsh/session.py`：事件追加与读取。
-13. `src/minidsh/cli.py`：命令行与交互审批。
+9. `src/minidsh/jobs.py`：进程、输出环、任务隔离、等待、kill 和回收。
+10. `src/minidsh/shell.py`：Bash 与 jobs 工具及输出渲染。
+11. `src/minidsh/llm.py`：模型接口、内容块和 MockModel。
+12. `src/minidsh/deepseek.py`：Messages 请求、SSE 和原生 replay。
+13. `src/minidsh/agent.py`：完整的最小 Agent Loop。
+14. `src/minidsh/session.py`：事件追加与读取。
+15. `src/minidsh/cli.py`：命令行与交互审批。
 
 ## 观察会话
 
@@ -180,15 +202,12 @@ session/start
 user/message
 step/start
 assistant/message
-approval/asked
-approval/decided
-tool/call
-tool/result
+approval/asked / approval/decided
+job/registered / job/settled
+tool/call / tool/result
 step/end
 turn/end
 ```
-
-查看会话：
 
 ```bash
 PYTHONPATH=src python3 -m minidsh session <session-id>
@@ -198,36 +217,37 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 ### 第 0 层：插件内核
 
-理解插件为什么激活、工具怎样执行、事件怎样落盘。
+理解插件激活、工具执行和事件落盘。
 
 ### 第 1 层：真实模型适配器
 
 理解 Messages API、SSE、工具调用和原生思考回放。
 
-### 第 2 层：审批与写操作（当前）
+### 第 2 层：审批与写操作
 
-理解文件策略、失败关闭、审批审计、同会话观察、原子写入和路径安全。对照 `docs/upstream-parity.md` 阅读。
+理解文件策略、失败关闭、审批审计、同会话观察、原子写入和路径安全。
 
-### 第 3 层：Shell 与后台任务
+### 第 3 层：Shell 与后台任务（当前）
 
-增加官方 `bash`、`job_output`、`job_list`、`job_kill`，实现进程组、超时、后台任务、输出上限和取消。不要把 Shell 命令字符串检查误当成完整沙箱。
+理解进程组、前后台任务、超时转后台、输出上限、完整输出落盘、取消和资源回收。对照 `docs/upstream-parity.md` 阅读。
 
 ### 第 4 层：会话恢复与压缩
 
 从 JSONL 重建模型消息，支持 resume、fork、transcript；随后增加 token meter 和 compaction。
 
-### 第 5 层：HTTP 与 Web UI
+### 第 5 层：HTTP 与常驻宿主/Web UI
 
-先暴露 HTTP，再增加 SSE/WebSocket 流式事件，最后接前端。不要在 UI 中复制 Agent 逻辑。
+增加 HTTP、SSE/WebSocket、任务通知和 Agent 唤醒；不要在 UI 中复制 Agent 逻辑。
 
 ### 第 6 层：外部插件与发行包
 
-把内置插件迁移到独立 Python 包，通过 entry points 发现；提供 headless、web、desktop 等 profile，重依赖按需安装。
+通过 entry points 发现独立 Python 插件；提供 headless、web、desktop 等 profile，重依赖按需安装。
 
 ## 当前边界
 
-- 只有 `read/glob/write/edit`，尚无 Shell、PTY、子代理和完整官方工具集。
+- 有 `read/glob/write/edit/bash` 和三个 job 工具，仍不是完整官方工具集。
 - 插件依赖在启动时收敛，尚不支持运行中热重载。
 - 会话只有追加和读取，尚未实现 resume 和消息投影。
-- 尚未实现内核沙箱、审批升级、图片、重试、模型 listing 和真实在线验收。
-- 这是教学代码，不应直接暴露为公网服务。
+- 尚无内核沙箱、PTY、持久 Shell、任务通知、审批升级、图片、重试和模型 listing。
+- 当前 Shell 固定使用 `/bin/bash`，尚未支持 Windows 原生进程后端。
+- 尚未进行真实 DeepSeek 在线验收；这是教学代码，不应直接暴露为公网服务。

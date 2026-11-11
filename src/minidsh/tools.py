@@ -47,6 +47,7 @@ class Tool:
     parameters: Dict[str, object]
     handler: Callable[[Dict[str, object], Execution], str]
     mutating: bool = False
+    kind: str = "filesystem"
 
     def definition(self) -> Dict[str, object]:
         return {
@@ -87,7 +88,7 @@ class ToolRegistry:
         execution = Execution(self._ctx, session_id, call_id)
         try:
             if tool.mutating:
-                self._authorize(execution, tool.name)
+                self._authorize(execution, tool.name, tool.kind)
             result = tool.handler(arguments, execution)
         except Exception as exc:
             self._events.emit("tools/post-execute", {"name": name, "error": str(exc)})
@@ -95,18 +96,19 @@ class ToolRegistry:
         self._events.emit("tools/post-execute", {"name": name, "result": result})
         return result
 
-    def _authorize(self, execution: Execution, tool_name: str) -> None:
+    def _authorize(self, execution: Execution, tool_name: str, kind: str) -> None:
         sandbox = execution.service("sandboxPolicy")
         assert isinstance(sandbox, SandboxPolicy)
         if sandbox.mode == "read-only":
-            raise ToolError("[sandbox] 当前文件策略为 read-only，写操作被拒绝")
+            action = "Shell 命令" if kind == "shell" else "写操作"
+            raise ToolError(f"[sandbox] 当前文件策略为 read-only，{action}被拒绝")
         if sandbox.mode == "danger-full-access":
             return
         approval = execution.service("approval")
         assert isinstance(approval, ApprovalService)
         outcome = approval.request(tool_name, execution.call_id, execution.session_id, execution.session())
         if outcome != "allowed-once":
-            raise ToolError(f"[sandbox] 写操作审批结果: {outcome}")
+            raise ToolError(f"[sandbox] 操作审批结果: {outcome}")
 
 
 class CoreToolsPlugin(Plugin):

@@ -33,7 +33,8 @@ class ApprovalService:
         session: Optional[SessionStore],
     ) -> str:
         request_id = uuid.uuid4().hex
-        reason = f"{tool_name} 请求修改文件"
+        action = "执行 Shell 命令" if tool_name == "bash" else "修改文件"
+        reason = f"{tool_name} 请求{action}"
         if session is not None and session_id is not None:
             payload: Dict[str, object] = {"id": request_id, "toolName": tool_name, "reason": reason}
             if call_id is not None:

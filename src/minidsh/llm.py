@@ -102,6 +102,31 @@ class MockModel(Model):
                 text = str(content)
             return ModelResponse(blocks=[text_block(f"工具已经执行完成：\n{text}")])
 
+        if (prompt.startswith("执行") or prompt.startswith("执行后台")) and "bash" in available:
+            background = prompt.startswith("执行后台")
+            command = prompt[4:].strip() if background else prompt[2:].strip()
+            arguments = {
+                "description": "Run the requested shell command",
+                "command": command,
+                "run_in_background": background,
+            }
+            call = ToolCall(name="bash", arguments=arguments, call_id="mock-1")
+            return ModelResponse(blocks=[text_block("我准备执行 Shell 命令，请先完成审批。"), tool_call_block(call)])
+
+        if prompt.startswith("任务列表") and "job_list" in available:
+            call = ToolCall(name="job_list", arguments={}, call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("读取任务") and "job_output" in available:
+            job_id = prompt[4:].strip()
+            call = ToolCall(name="job_output", arguments={"job_id": job_id, "wait": True}, call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("终止任务") and "job_kill" in available:
+            job_id = prompt[4:].strip()
+            call = ToolCall(name="job_kill", arguments={"job_id": job_id}, call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
         if prompt.startswith("写入") and "write" in available:
             request = prompt[2:].strip()
             separator = "：" if "：" in request else ":"
