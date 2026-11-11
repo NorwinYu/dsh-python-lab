@@ -2,12 +2,13 @@ from typing import Callable, Optional
 
 from .agent import Agent
 from .approval import ApprovalPlugin, ApprovalService
+from .compaction import CompactionPlugin, CompactionService
 from .config import AppConfig
 from .deepseek import DeepSeekModelPlugin
 from .events import EventBus
 from .jobs import JobPlugin
 from .llm import MockModelPlugin, Model
-from .observations import ObservationPlugin
+from .observations import ObservationPlugin, ObservationStore
 from .plugins import Plugin, PluginManager, ServiceContext
 from .sandbox import SandboxPolicy, SandboxPolicyPlugin
 from .session import JsonlSessionPlugin, SessionStore
@@ -40,12 +41,16 @@ class AgentPlugin(Plugin):
         sandbox = ctx.require("sandboxPolicy")
         approval = ctx.require("approval")
         session = ctx.optional("session")
+        observations = ctx.optional("observations")
+        compaction = ctx.optional("compaction")
         assert isinstance(model, Model)
         assert isinstance(tools, ToolRegistry)
         assert isinstance(prompt, SystemPrompt)
         assert isinstance(sandbox, SandboxPolicy)
         assert isinstance(approval, ApprovalService)
         assert session is None or isinstance(session, SessionStore)
+        assert observations is None or isinstance(observations, ObservationStore)
+        assert compaction is None or isinstance(compaction, CompactionService)
         runtime_context = prompt.runtime_context(self.config.workspace, sandbox.context(), approval.context())
         agent = Agent(
             model=model,
@@ -54,6 +59,8 @@ class AgentPlugin(Plugin):
             runtime_context=runtime_context,
             events=ctx.events,
             session=session,
+            observations=observations,
+            compaction=compaction,
         )
         ctx.provide("agent", agent, self.name)
 
@@ -87,6 +94,7 @@ class Application:
         self.manager.register(JsonlSessionPlugin(config.session_dir))
         self.manager.register(MockModelPlugin())
         self.manager.register(DeepSeekModelPlugin())
+        self.manager.register(CompactionPlugin(config.context_window))
         self.manager.register(AgentPlugin(config))
         self.manager.activate_all()
 

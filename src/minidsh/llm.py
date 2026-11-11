@@ -90,6 +90,18 @@ class MockModel(Model):
                 break
 
         available = {definition["name"] for definition in tool_definitions}
+        if system.startswith("You are now acting as a compaction engine"):
+            summary = (
+                "## Primary Request and Intent\n- (none)\n\n"
+                "## Key Technical Concepts\n- (none)\n\n"
+                "## Files and Code\n- (none)\n\n"
+                "## Errors and Fixes\n- (none)\n\n"
+                "## Pending Jobs\n- (none)\n\n"
+                "## Current Work\n- (none)\n\n"
+                "## Next Step\n- (none)\n\n"
+                "## Critical Context\n- (none)"
+            )
+            return ModelResponse(blocks=[text_block(summary)])
         if messages[-1]["role"] == "tool":
             last = messages[-1]
             if prompt.startswith("编辑") and last.get("name") == "read" and not last.get("isError"):

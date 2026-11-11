@@ -10,6 +10,7 @@
 - 审批与文件策略：`packages/interaction/user-approval`、`packages/sandbox/sandbox-policy`
 - 文件工具：`packages/fs/tool-fs`、`packages/fs/tool-fs-search`
 - Shell 与任务：`packages/shell/tool-bash`、`packages/jobs/{jobs-local,tool-jobs}`
+- 会话与压缩：`packages/core/session`、`packages/session/session-persistence-jsonl`、`packages/compaction/compaction-basic`
 
 一致性声明只覆盖下文列出的切片，不代表完整 DSH 已移植完成。
 
@@ -23,8 +24,6 @@
 - 禁用工具会同时移除工具 schema 和对应提示词段；缺少 `jobs` 时 Shell/jobs 插件保持 pending。
 - runtime context 依次包含工作目录、文件策略和审批策略，并作为独立用户快照放在用户指令之后。
 - 助手消息包含有序的 `text / reasoning / tool-call` 内容块，工具结果通过 `toolCallId` 回填。
-
-检查方式：
 
 ```bash
 PYTHONPATH=src python3 -m minidsh prompt
@@ -70,15 +69,27 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 会话记录 `job/registered` 和 `job/settled`。
 - Shell 环境过滤 `KEY/TOKEN/SECRET/PASSWORD` 形态变量和原 `DSH_*`，再注入受管 `DSH_HOME`、`DSH_SESSION_ID`。
 
+### 会话与压缩
+
+- `resume` 从 JSONL 重建用户、助手和工具消息，递增 turn，写入 `session/resume`，并按当前配置刷新系统提示词与 runtime context。
+- `fs/observed` 随会话持久化，resume 时恢复文件版本观察，而不是绕过写前读取。
+- `fork` 可复制完整会话或指定事件序号前缀，生成独立 session id。
+- 支持会话列表和 transcript 可读投影。
+- 自动压力阈值为上下文容量的 80%，默认保留 16% 尾部消息。
+- 使用上游 compaction-engine prompt 和 `<compacted-summary>` 标记，写入 `compaction/start/end`。
+- 压缩只影响发给模型的投影，不删除原始事件；压缩后的会话可以继续 resume。
+- token meter 当前是学习版 UTF-8/JSON 启发式估算，不是官方精确 tokenizer。
+
 ## 尚未对齐
 
 - 官方完整工具集、profile/bundle 格式、运行时热重载和外部 npm 插件。
-- Landlock/bwrap 等内核沙箱；当前 `read-only` 保守拒绝全部 Shell，而不是允许只读 Shell 并以内核机制阻止写入。
+- Landlock/bwrap 等内核沙箱；当前 `read-only` 保守拒绝全部 Shell。
 - `sandbox_permissions` 升级、会话中切换审批/文件策略和审批取消。
 - PTY、持久 Shell、Windows 原生 Shell；当前进程后端固定使用 `/bin/bash`。
 - 任务完成通知、Agent 自动唤醒、跨进程任务恢复和长期常驻宿主。
 - 图片与 Files API、模型 listing、请求重试、扩展请求头和遥测。
-- 流式 UI 增量事件、会话 resume/fork、消息投影、压缩和跨进程锁。
+- 官方 surface generation/replacement、会话格式迁移、崩溃修复、跨进程锁和原子多进程发布。
+- 官方压缩区间选择、token 校准、tool-result pruner、模型切换压缩、重试和取消。
 - `read` 尚未实现大文件流式扫描；`glob` 尚未完全复刻 ripgrep 语义和 spill 行为。
 - 匿名用户 ID 只在进程内稳定，尚未持久化。
 - 尚未对真实 DeepSeek 服务做带凭据的在线验收。
@@ -91,10 +102,10 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 文件策略的允许、拒绝、无应答者失败关闭和审批审计。
 - 未读覆盖、读取后外部修改、多次匹配、`replace_all`、路径穿越和符号链接检查。
 - Mock CLI 的写入及先读后编辑流程。
-- Shell 前台 stdout/stderr/exit code、fresh shell、workdir 和非零退出。
-- 后台启动、任务列表、独立增量输出、有界等待、前台超时转后台、进程组 kill。
-- 大输出内存裁剪和完整输出落盘；环境凭据清理；job 会话事件。
-- 每 session 10 个任务上限、应用退出回收、read-only Shell 拒绝。
-- Shell 接入后的 write/edit 回归。
+- Shell 前台/后台、fresh shell、workdir、超时转后台、增量读取、kill 和回收。
+- 大输出裁剪和落盘、环境凭据清理、任务会话事件、并发上限。
+- 跨进程 resume、turn 递增、观察恢复、transcript、fork 及分支独立性。
+- 手动压缩保留原始事件并支持 resume；自动压力压缩、token meter 和功能开关。
+- 无效 context window 被拒绝；Shell 接入后的 write/edit 回归。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

@@ -3,6 +3,7 @@
   "sandbox_mode": "read-only",
   "approval_policy": "ask",
   "approve_all": false,
+  "context_window": 1048576,
   "features": {
     "core.system-prompt": true,
     "core.tools": true,
@@ -10,6 +11,7 @@
     "core.approval": true,
     "core.fs-observation": true,
     "core.jobs": true,
+    "core.compaction": true,
     "tools.glob": true,
     "tools.read": true,
     "tools.write": true,

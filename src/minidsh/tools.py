@@ -236,7 +236,7 @@ def make_read_tool(workspace: Path) -> Tool:
             footer = f"(End of file - total {total_lines} lines)"
         numbered = "\n".join(lines)
         body = f"{numbered}\n\n{footer}" if lines else footer
-        observations(execution).record(execution.session_id, path)
+        observations(execution).record(execution.session_id, path, execution.session())
         return f"<path>{path}</path>\n<type>file</type>\n<content>\n{body}\n</content>"
 
     return Tool(
@@ -333,7 +333,7 @@ def make_write_tool(workspace: Path) -> Tool:
             except ValueError as exc:
                 raise ToolError(str(exc)) from exc
         atomic_write(path, content)
-        observations(execution).record(execution.session_id, path)
+        observations(execution).record(execution.session_id, path, execution.session())
         verb = "Created" if operation == "create" else "Updated"
         return f"<path>{path}</path>\n<type>file</type>\n<content>\n{verb} file\n</content>"
 
@@ -391,7 +391,7 @@ def make_edit_tool(workspace: Path) -> Tool:
             raise ToolError(f"old_string must appear exactly once; found {occurrences} occurrences")
         updated = text.replace(old_string, new_string, -1 if replace_all else 1)
         atomic_write(path, updated)
-        observations(execution).record(execution.session_id, path)
+        observations(execution).record(execution.session_id, path, execution.session())
         if replace_all:
             return f"The file {path} has been updated. All occurrences were successfully replaced."
         return f"The file {path} has been updated successfully."

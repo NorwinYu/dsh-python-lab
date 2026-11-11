@@ -17,20 +17,37 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--disable", action="append", default=[], metavar="FEATURE", help="禁用功能，可重复")
     parser.add_argument("--sandbox-mode", choices=sorted(SANDBOX_MODES), help="文件策略")
     parser.add_argument("--approval-policy", choices=["ask", "never"], help="审批策略")
-    parser.add_argument("--yes", action="store_true", help="允许本次进程中的所有写操作审批")
+    parser.add_argument("--yes", action="store_true", help="允许本次进程中的所有写/Shell 操作审批")
+    parser.add_argument("--context-window", type=int, help="压缩使用的上下文容量")
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("config", help="输出合并后的配置")
     subparsers.add_parser("plugins", help="查看插件及依赖状态")
     subparsers.add_parser("tools", help="列出当前启用的工具")
     subparsers.add_parser("prompt", help="输出当前系统提示词与 runtime context")
+    subparsers.add_parser("sessions", help="列出本地会话")
 
-    run_parser = subparsers.add_parser("run", help="运行一次 Agent")
+    run_parser = subparsers.add_parser("run", help="新建会话并运行 Agent")
     run_parser.add_argument("prompt", nargs="+", help="用户提示词")
     run_parser.add_argument("--trace", action="store_true", help="输出工具事件轨迹")
 
+    resume_parser = subparsers.add_parser("resume", help="恢复会话并继续运行")
+    resume_parser.add_argument("session_id")
+    resume_parser.add_argument("prompt", nargs="+", help="新的用户提示词")
+    resume_parser.add_argument("--trace", action="store_true", help="输出工具事件轨迹")
+
     session_parser = subparsers.add_parser("session", help="读取一份 JSONL 会话")
     session_parser.add_argument("session_id")
+
+    transcript_parser = subparsers.add_parser("transcript", help="输出会话的可读消息投影")
+    transcript_parser.add_argument("session_id")
+
+    fork_parser = subparsers.add_parser("fork", help="复制会话到新分支")
+    fork_parser.add_argument("session_id")
+    fork_parser.add_argument("--at-seq", type=int, help="只保留到指定事件序号")
+
+    compact_parser = subparsers.add_parser("compact", help="手动创建压缩检查点")
+    compact_parser.add_argument("session_id")
     return parser
 
 
@@ -58,12 +75,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             sandbox_mode=args.sandbox_mode,
             approval_policy=args.approval_policy,
             approve_all=args.yes,
+            context_window=args.context_window,
         )
         if args.command == "config":
             print(json.dumps(config.public_dict(), ensure_ascii=False, indent=2))
             return 0
 
-        app = Application(config, interactive_answerer if args.command == "run" else None)
+        app = Application(config, interactive_answerer if args.command in {"run", "resume"} else None)
         if args.command == "plugins":
             for row in app.manager.status():
                 missing = f" missing={','.join(row['missing'])}" if row["missing"] else ""
@@ -75,23 +93,38 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         if args.command == "prompt":
-            print(
-                json.dumps(
-                    {"system": app.system_prompt.render(), "runtime_context": app.runtime_context},
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
+            print(json.dumps({"system": app.system_prompt.render(), "runtime_context": app.runtime_context}, ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "sessions":
+            if app.session is None:
+                raise RuntimeError("session.jsonl 当前被禁用")
+            print(json.dumps(app.session.list_sessions(), ensure_ascii=False, indent=2))
             return 0
 
         if args.command == "session":
             if app.session is None:
                 raise RuntimeError("session.jsonl 当前被禁用")
-            events = app.session.load(args.session_id)
-            print(json.dumps(events, ensure_ascii=False, indent=2))
+            print(json.dumps(app.session.load(args.session_id), ensure_ascii=False, indent=2))
             return 0
 
-        if args.trace:
+        if args.command == "transcript":
+            if app.session is None:
+                raise RuntimeError("session.jsonl 当前被禁用")
+            print(app.session.transcript(args.session_id))
+            return 0
+
+        if args.command == "fork":
+            if app.session is None:
+                raise RuntimeError("session.jsonl 当前被禁用")
+            print(app.session.fork(args.session_id, args.at_seq))
+            return 0
+
+        if args.command == "compact":
+            print(app.agent.compact(args.session_id))
+            return 0
+
+        if hasattr(args, "trace") and args.trace:
             for event_name in ("tools/pre-execute", "tools/post-execute", "turn/start", "turn/end"):
                 app.events.on(
                     event_name,
@@ -100,9 +133,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                         file=sys.stderr,
                     ),
                 )
-        print(app.agent.run(" ".join(args.prompt)))
+        if args.command == "resume":
+            print(app.agent.run(" ".join(args.prompt), args.session_id))
+        else:
+            print(app.agent.run(" ".join(args.prompt)))
         return 0
-    except (ConfigError, KeyError, RuntimeError, OSError) as exc:
+    except (ConfigError, KeyError, RuntimeError, OSError, ValueError) as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 2
     finally:

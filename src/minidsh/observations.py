@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from .plugins import Plugin, ServiceContext
+from .session import SessionStore
 
 
 class ObservationStore:
@@ -13,9 +14,16 @@ class ObservationStore:
         stat = path.stat()
         return stat.st_mtime_ns, stat.st_size
 
-    def record(self, session_id: Optional[str], path: Path) -> None:
-        if session_id is not None:
-            self._versions[(session_id, str(path))] = self.version(path)
+    def record(self, session_id: Optional[str], path: Path, session: Optional[SessionStore] = None) -> None:
+        if session_id is None:
+            return
+        version = self.version(path)
+        self._versions[(session_id, str(path))] = version
+        if session is not None:
+            session.append(session_id, "fs/observed", {"path": str(path), "version": list(version)})
+
+    def restore(self, session_id: str, path: Path, version: Tuple[int, int]) -> None:
+        self._versions[(session_id, str(path))] = version
 
     def require_current(self, session_id: Optional[str], path: Path) -> None:
         if session_id is None or (session_id, str(path)) not in self._versions:
