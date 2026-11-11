@@ -3,12 +3,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Optional
 
+from .sandbox import SANDBOX_MODES
+
 
 DEFAULT_FEATURES: Dict[str, bool] = {
     "core.system-prompt": True,
     "core.tools": True,
+    "core.sandbox-policy": True,
+    "core.approval": True,
+    "core.fs-observation": True,
     "tools.glob": True,
     "tools.read": True,
+    "tools.write": True,
+    "tools.edit": True,
     "session.jsonl": True,
     "llm.mock": True,
     "llm.deepseek": False,
@@ -25,6 +32,9 @@ class AppConfig:
     workspace: Path
     session_dir: Path
     features: Dict[str, bool]
+    sandbox_mode: str = "read-only"
+    approval_policy: Optional[str] = None
+    approve_all: bool = False
 
     @classmethod
     def load(
@@ -33,10 +43,16 @@ class AppConfig:
         config_path: Optional[Path] = None,
         enable: Iterable[str] = (),
         disable: Iterable[str] = (),
+        sandbox_mode: Optional[str] = None,
+        approval_policy: Optional[str] = None,
+        approve_all: bool = False,
     ) -> "AppConfig":
         workspace = workspace.expanduser().resolve()
         features = dict(DEFAULT_FEATURES)
         session_dir = Path(".minidsh/sessions")
+        resolved_sandbox = "read-only"
+        resolved_approval: Optional[str] = None
+        resolved_approve_all = False
 
         if config_path is not None:
             config_path = config_path.expanduser().resolve()
@@ -46,7 +62,8 @@ class AppConfig:
                 raise ConfigError(f"无法读取配置 {config_path}: {exc}") from exc
             if not isinstance(data, dict):
                 raise ConfigError("配置文件顶层必须是 JSON 对象")
-            unknown_keys = set(data) - {"session_dir", "features"}
+            allowed = {"session_dir", "features", "sandbox_mode", "approval_policy", "approve_all"}
+            unknown_keys = set(data) - allowed
             if unknown_keys:
                 raise ConfigError(f"未知配置项: {', '.join(sorted(unknown_keys))}")
             configured_features = data.get("features", {})
@@ -57,13 +74,32 @@ class AppConfig:
                     raise ConfigError(f"无效功能开关: {name}={value!r}")
                 features[name] = value
             session_dir = Path(data.get("session_dir", session_dir))
+            resolved_sandbox = data.get("sandbox_mode", resolved_sandbox)
+            resolved_approval = data.get("approval_policy", resolved_approval)
+            resolved_approve_all = data.get("approve_all", resolved_approve_all)
 
         cls._apply_overrides(features, enable, True)
         cls._apply_overrides(features, disable, False)
+        resolved_sandbox = sandbox_mode or resolved_sandbox
+        resolved_approval = approval_policy or resolved_approval
+        resolved_approve_all = approve_all or resolved_approve_all
 
+        if resolved_sandbox not in SANDBOX_MODES:
+            raise ConfigError(f"未知文件策略: {resolved_sandbox}")
+        if resolved_approval not in {None, "ask", "never"}:
+            raise ConfigError(f"未知审批策略: {resolved_approval}")
+        if not isinstance(resolved_approve_all, bool):
+            raise ConfigError("approve_all 必须是布尔值")
         if not session_dir.is_absolute():
             session_dir = workspace / session_dir
-        return cls(workspace=workspace, session_dir=session_dir, features=features)
+        return cls(
+            workspace=workspace,
+            session_dir=session_dir,
+            features=features,
+            sandbox_mode=resolved_sandbox,
+            approval_policy=resolved_approval,
+            approve_all=resolved_approve_all,
+        )
 
     @staticmethod
     def _apply_overrides(features: Dict[str, bool], names: Iterable[str], value: bool) -> None:
@@ -72,9 +108,17 @@ class AppConfig:
                 raise ConfigError(f"未知功能: {name}")
             features[name] = value
 
+    def resolved_approval_policy(self) -> str:
+        if self.approval_policy is not None:
+            return self.approval_policy
+        return "never" if self.sandbox_mode == "danger-full-access" else "ask"
+
     def public_dict(self) -> Dict[str, object]:
         return {
             "workspace": str(self.workspace),
             "session_dir": str(self.session_dir),
+            "sandbox_mode": self.sandbox_mode,
+            "approval_policy": self.resolved_approval_policy(),
+            "approve_all": self.approve_all,
             "features": self.features,
         }

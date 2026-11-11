@@ -1,6 +1,6 @@
 # MiniDSH：从 0 学 Agent Harness
 
-这是一个用于拆解 DeepSeek Harness（DSH）核心思想的 Python 学习项目。它不是官方 DSH 的完整移植，而是通过可运行的小切片逐层理解插件、工具、模型、会话和 Agent Loop。
+这是一个用于拆解 DeepSeek Harness（DSH）核心思想的 Python 学习项目。它不是官方 DSH 的完整移植，而是通过可运行的小切片逐层理解插件、工具、模型、审批、会话和 Agent Loop。
 
 当前只使用 Python 标准库，支持 Python 3.9+。MockModel 不需要 API Key；真实 DeepSeek 模型插件可独立开关。
 
@@ -12,9 +12,7 @@
 fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159
 ```
 
-已对齐和未对齐的边界记录在 `docs/upstream-parity.md`。不要根据“MiniDSH”这个名字推断系统提示词：当前已实现的提示词使用上游英文原文。
-
-查看阶段历史：
+已对齐和未对齐的边界记录在 `docs/upstream-parity.md`。当前已实现的工具提示词和 runtime-context 文案使用上游英文原文。
 
 ```bash
 git log --oneline
@@ -22,8 +20,6 @@ git status
 ```
 
 ## 立即运行
-
-在本目录执行：
 
 ```bash
 PYTHONPATH=src python3 -m minidsh plugins
@@ -45,43 +41,73 @@ minidsh run "请列出当前目录"
 
 ## 功能开关
 
-当前每个功能都是插件，都有独立开关：
-
-- `core.system-prompt`：官方身份段、工具段和 runtime context 组装。
+- `core.system-prompt`：身份段、工具段和 runtime context。
+- `core.sandbox-policy`：文件策略与工作区边界。
+- `core.approval`：写操作审批与失败关闭。
+- `core.fs-observation`：同会话文件读取版本。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
+- `tools.write`：官方 `write` 创建/覆盖工具。
+- `tools.edit`：官方 `edit` 字面替换工具。
 - `session.jsonl`：JSONL 会话持久化。
 - `llm.mock`：确定性模拟模型，默认启用。
 - `llm.deepseek`：真实 DeepSeek Messages 模型，默认禁用。
 - `agent.core`：Agent Loop。
 
-临时禁用工具：
+示例：
 
 ```bash
 PYTHONPATH=src python3 -m minidsh --disable tools.glob tools
-PYTHONPATH=src python3 -m minidsh --disable tools.read plugins
-```
-
-禁用会话后，Agent 仍能运行，只是不再落盘：
-
-```bash
-PYTHONPATH=src python3 -m minidsh --disable session.jsonl run "请列出当前目录"
-```
-
-禁用全部模型后，`agent.core` 因缺少 `llm` 服务而保持 `pending`：
-
-```bash
+PYTHONPATH=src python3 -m minidsh --disable tools.edit prompt
 PYTHONPATH=src python3 -m minidsh --disable llm.mock plugins
 ```
 
-完整配置示例见 `config.example.json`：
+禁用全部模型后，`agent.core` 因缺少 `llm` 服务而保持 `pending`。禁用 `session.jsonl` 后 Agent 仍可运行，但不会保存会话或审批审计。
+
+完整配置示例见 `config.example.json`。配置文件先合并，命令行的 `--enable` 和 `--disable` 后生效。
+
+## 文件策略与写操作
+
+默认文件策略是 `read-only`，因此写操作会被拒绝。若要允许工作区写入，需要同时：
+
+1. 设置 `--sandbox-mode workspace-write`。
+2. 在交互提示中允许，或显式传入 `--yes`。
 
 ```bash
-PYTHONPATH=src python3 -m minidsh --config config.example.json config
+PYTHONPATH=src python3 -m minidsh \
+  --sandbox-mode workspace-write \
+  --yes \
+  run "写入 demo.txt：hello"
 ```
 
-配置文件先合并，命令行的 `--enable` 和 `--disable` 后生效。
+Mock 编辑会先 `read`，再在同一会话中 `edit`：
+
+```bash
+PYTHONPATH=src python3 -m minidsh \
+  --sandbox-mode workspace-write \
+  --yes \
+  run "编辑 demo.txt：把hello替换为world"
+```
+
+`--yes` 会允许本次进程内的所有写操作，不应在内容不可信时使用。交互终端中省略 `--yes` 会逐次询问；非交互环境没有可用审批者时，写操作返回 `unavailable`。
+
+其他策略：
+
+```bash
+# 所有需要审批的写操作都自动拒绝
+PYTHONPATH=src python3 -m minidsh \
+  --sandbox-mode workspace-write \
+  --approval-policy never \
+  run "写入 denied.txt：hello"
+
+# 完全访问：不限制工作区路径，也不触发写前审批
+PYTHONPATH=src python3 -m minidsh \
+  --sandbox-mode danger-full-access \
+  run "写入 full.txt：hello"
+```
+
+`write` 覆盖已有文件前必须读过它；`edit` 默认要求旧文本恰好出现一次。读取后如果文件被外部修改，也会拒绝继续覆盖。
 
 ## 接入真实 DeepSeek
 
@@ -116,40 +142,33 @@ CLI
           └─ ServiceContext：服务注册与解析
           └─ EventBus：工具与回合事件
           ├─ SystemPrompt：身份段、工具段、runtime context
-          ├─ ToolRegistry：工具目录与执行管线
-          │   ├─ glob
-          │   └─ read
-          ├─ JsonlSessionStore：追加式会话事件
+          ├─ SandboxPolicy：read-only / workspace-write / danger-full-access
+          ├─ ApprovalService：ask / never / allowed-once / unavailable
+          ├─ ObservationStore：同会话文件版本
+          ├─ ToolRegistry：策略、审批和工具执行管线
+          │   ├─ read / glob
+          │   └─ write / edit
+          ├─ JsonlSessionStore：追加式会话与审批事件
           ├─ MockModel：离线模型适配器
           ├─ DeepSeekModel：Messages/SSE 模型适配器
           └─ Agent：turn / step / tool call 循环
 ```
 
-与官方 DSH 的概念对应：
-
-| MiniDSH | DSH 中对应的概念 |
-|---|---|
-| `PluginManager` | Cordis 插件生命周期与依赖收敛的简化版 |
-| `ServiceContext` | Cordis 的共享 Context 和服务注入 |
-| `features` | profile / bundle 的功能组合入口，不等于完整 profile 格式 |
-| `SystemPrompt` | `ctx.systemPrompt` 的有序段落和 runtime context 子集 |
-| `ToolRegistry` | `ctx.tools` 和工具执行管线 |
-| `JsonlSessionStore` | 追加式 `SessionEvent` 日志 |
-| `Model` | LLM adapter seam |
-| `Agent.run()` | turn / step / tool call 的最小 Agent Loop |
-
 ## 源码阅读顺序
 
-1. `src/minidsh/config.py`：默认配置、JSON 配置和命令行覆盖。
+1. `src/minidsh/config.py`：配置、文件策略、审批策略和功能开关。
 2. `src/minidsh/plugins.py`：服务、插件、依赖与生命周期。
 3. `src/minidsh/app.py`：唯一的组装入口。
 4. `src/minidsh/system_prompt.py`：官方提示词和 runtime context。
-5. `src/minidsh/tools.py`：`glob/read` 的 schema、提示词与执行。
-6. `src/minidsh/llm.py`：模型接口、内容块和 MockModel。
-7. `src/minidsh/deepseek.py`：Messages 请求序列化、SSE、原生 replay。
-8. `src/minidsh/agent.py`：完整的最小 Agent Loop。
-9. `src/minidsh/session.py`：事件追加与读取。
-10. `src/minidsh/cli.py`：最外层用户入口。
+5. `src/minidsh/sandbox.py`：文件策略和对应文案。
+6. `src/minidsh/approval.py`：审批结果与审计事件。
+7. `src/minidsh/observations.py`：同会话文件版本观察。
+8. `src/minidsh/tools.py`：工具 schema、执行链、原子写入和路径边界。
+9. `src/minidsh/llm.py`：模型接口、内容块和 MockModel。
+10. `src/minidsh/deepseek.py`：Messages 请求、SSE 和原生 replay。
+11. `src/minidsh/agent.py`：完整的最小 Agent Loop。
+12. `src/minidsh/session.py`：事件追加与读取。
+13. `src/minidsh/cli.py`：命令行与交互审批。
 
 ## 观察会话
 
@@ -161,13 +180,15 @@ session/start
 user/message
 step/start
 assistant/message
+approval/asked
+approval/decided
 tool/call
 tool/result
 step/end
 turn/end
 ```
 
-把文件名（不含 `.jsonl`）传给下面的命令即可查看：
+查看会话：
 
 ```bash
 PYTHONPATH=src python3 -m minidsh session <session-id>
@@ -177,40 +198,36 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 ### 第 0 层：插件内核
 
-目标：能解释插件为什么激活、工具怎样执行、事件怎样落盘。
+理解插件为什么激活、工具怎样执行、事件怎样落盘。
 
-练习：禁用 `core.tools`，观察所有依赖 `tools` 的插件；给 MockModel 增加一个工具调用分支。
+### 第 1 层：真实模型适配器
 
-### 第 1 层：真实模型适配器（当前）
+理解 Messages API、SSE、工具调用和原生思考回放。
 
-目标：理解 Messages API、SSE、工具调用和原生思考回放。
+### 第 2 层：审批与写操作（当前）
 
-当前已支持文本、reasoning、工具调用、usage 和 replay metadata。对照 `docs/upstream-parity.md` 阅读，不要把本地协议子集误认为完整官方适配器。
+理解文件策略、失败关闭、审批审计、同会话观察、原子写入和路径安全。对照 `docs/upstream-parity.md` 阅读。
 
-### 第 2 层：审批与安全边界
+### 第 3 层：Shell 与后台任务
 
-在 `tools/pre-execute` 和实际执行之间加入 ApprovalService。分别实现只读、工作区可写、完全访问；不要让路径检查代替 Shell 审批。
-
-### 第 3 层：更多工具与事件管线
-
-增加官方 `write`、`edit`、`bash`，为每个工具建立独立开关、输入 schema、输出上限、取消和超时。实现 `waterfall` 事件，让插件可以改写或拒绝工具调用。
+增加官方 `bash`、`job_output`、`job_list`、`job_kill`，实现进程组、超时、后台任务、输出上限和取消。不要把 Shell 命令字符串检查误当成完整沙箱。
 
 ### 第 4 层：会话恢复与压缩
 
-从 JSONL 重建模型消息，支持 resume、fork、transcript；随后增加 token meter 和 compaction，区分“持久化事实”和“发给模型的投影”。
+从 JSONL 重建模型消息，支持 resume、fork、transcript；随后增加 token meter 和 compaction。
 
 ### 第 5 层：HTTP 与 Web UI
 
-先把 `run` 暴露为 HTTP，再增加 SSE/WebSocket 流式事件，最后接前端。不要在 UI 中复制 Agent 逻辑。
+先暴露 HTTP，再增加 SSE/WebSocket 流式事件，最后接前端。不要在 UI 中复制 Agent 逻辑。
 
 ### 第 6 层：外部插件与发行包
 
-把内置插件迁移到独立 Python 包，通过 entry points 发现；再提供 headless、web、desktop 等 profile。Office、语音、浏览器等重依赖按需安装。
+把内置插件迁移到独立 Python 包，通过 entry points 发现；提供 headless、web、desktop 等 profile，重依赖按需安装。
 
 ## 当前边界
 
-- 只实现 `glob/read` 两个只读工具，不是官方完整工具集。
+- 只有 `read/glob/write/edit`，尚无 Shell、PTY、子代理和完整官方工具集。
 - 插件依赖在启动时收敛，尚不支持运行中热重载。
 - 会话只有追加和读取，尚未实现 resume 和消息投影。
-- 尚未实现审批、写操作、Shell、图片、重试、模型 listing 和真实在线验收。
+- 尚未实现内核沙箱、审批升级、图片、重试、模型 listing 和真实在线验收。
 - 这是教学代码，不应直接暴露为公网服务。

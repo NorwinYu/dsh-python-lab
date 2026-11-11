@@ -1,12 +1,17 @@
 import fnmatch
 import os
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
+from .approval import ApprovalService
 from .events import EventBus
+from .observations import ObservationStore
 from .plugins import Plugin, ServiceContext
-from .system_prompt import GLOB_GUIDANCE, READ_GUIDANCE, SystemPrompt
+from .sandbox import SandboxPolicy
+from .session import SessionStore
+from .system_prompt import SystemPrompt
 
 
 READ_LIMIT = 2000
@@ -21,11 +26,27 @@ class ToolError(ValueError):
 
 
 @dataclass
+class Execution:
+    ctx: ServiceContext
+    session_id: Optional[str]
+    call_id: Optional[str]
+
+    def service(self, name: str) -> object:
+        return self.ctx.require(name)
+
+    def session(self) -> Optional[SessionStore]:
+        session = self.ctx.optional("session")
+        assert session is None or isinstance(session, SessionStore)
+        return session
+
+
+@dataclass
 class Tool:
     name: str
     description: str
     parameters: Dict[str, object]
-    handler: Callable[[Dict[str, object]], str]
+    handler: Callable[[Dict[str, object], Execution], str]
+    mutating: bool = False
 
     def definition(self) -> Dict[str, object]:
         return {
@@ -36,9 +57,10 @@ class Tool:
 
 
 class ToolRegistry:
-    def __init__(self, events: EventBus) -> None:
+    def __init__(self, ctx: ServiceContext) -> None:
         self._tools: Dict[str, Tool] = {}
-        self._events = events
+        self._events = ctx.events
+        self._ctx = ctx
 
     def register(self, tool: Tool) -> None:
         if tool.name in self._tools:
@@ -51,17 +73,40 @@ class ToolRegistry:
     def definitions(self) -> List[Dict[str, object]]:
         return [tool.definition() for tool in self._tools.values()]
 
-    def execute(self, name: str, arguments: Dict[str, object]) -> str:
+    def execute(
+        self,
+        name: str,
+        arguments: Dict[str, object],
+        session_id: Optional[str] = None,
+        call_id: Optional[str] = None,
+    ) -> str:
         self._events.emit("tools/pre-execute", {"name": name, "arguments": arguments})
         if name not in self._tools:
             raise ToolError(f"工具未启用或不存在: {name}")
+        tool = self._tools[name]
+        execution = Execution(self._ctx, session_id, call_id)
         try:
-            result = self._tools[name].handler(arguments)
+            if tool.mutating:
+                self._authorize(execution, tool.name)
+            result = tool.handler(arguments, execution)
         except Exception as exc:
             self._events.emit("tools/post-execute", {"name": name, "error": str(exc)})
             raise
         self._events.emit("tools/post-execute", {"name": name, "result": result})
         return result
+
+    def _authorize(self, execution: Execution, tool_name: str) -> None:
+        sandbox = execution.service("sandboxPolicy")
+        assert isinstance(sandbox, SandboxPolicy)
+        if sandbox.mode == "read-only":
+            raise ToolError("[sandbox] 当前文件策略为 read-only，写操作被拒绝")
+        if sandbox.mode == "danger-full-access":
+            return
+        approval = execution.service("approval")
+        assert isinstance(approval, ApprovalService)
+        outcome = approval.request(tool_name, execution.call_id, execution.session_id, execution.session())
+        if outcome != "allowed-once":
+            raise ToolError(f"[sandbox] 写操作审批结果: {outcome}")
 
 
 class CoreToolsPlugin(Plugin):
@@ -69,18 +114,13 @@ class CoreToolsPlugin(Plugin):
     provides = ("tools",)
 
     def activate(self, ctx: ServiceContext) -> None:
-        ctx.provide("tools", ToolRegistry(ctx.events), self.name)
+        ctx.provide("tools", ToolRegistry(ctx), self.name)
 
 
 class SingleToolPlugin(Plugin):
     requires = ("tools", "systemPrompt")
 
-    def __init__(
-        self,
-        name: str,
-        tool: Tool,
-        prompt_section: Tuple[str, int, str],
-    ) -> None:
+    def __init__(self, name: str, tool: Tool, prompt_section: Tuple[str, int, str]) -> None:
         self.name = name
         self.tool = tool
         self.prompt_section = prompt_section
@@ -102,15 +142,39 @@ class SingleToolPlugin(Plugin):
         prompt.unregister(self.prompt_section[0])
 
 
-def workspace_path(workspace: Path, value: object, field: str = "path") -> Path:
+def workspace_path(workspace: Path, value: object, field: str = "path", allow_outside: bool = False) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise ToolError(f"{field} 必须是非空字符串")
     candidate = (workspace / value).expanduser().resolve()
-    try:
-        candidate.relative_to(workspace)
-    except ValueError as exc:
-        raise ToolError("路径不能离开当前工作区") from exc
+    if not allow_outside:
+        try:
+            candidate.relative_to(workspace)
+        except ValueError as exc:
+            raise ToolError("路径不能离开当前工作区") from exc
     return candidate
+
+
+def mutation_path(execution: Execution, workspace: Path, value: object) -> Path:
+    sandbox = execution.service("sandboxPolicy")
+    assert isinstance(sandbox, SandboxPolicy)
+    return workspace_path(workspace, value, "file_path", allow_outside=sandbox.mode == "danger-full-access")
+
+
+def observations(execution: Execution) -> ObservationStore:
+    store = execution.service("observations")
+    assert isinstance(store, ObservationStore)
+    return store
+
+
+def atomic_write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.parent / f".{path.name}.{uuid.uuid4().hex}.minidsh.tmp"
+    try:
+        temporary.write_text(content, encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def positive_integer(value: object, name: str) -> int:
@@ -126,7 +190,7 @@ def truncate_line(line: str) -> str:
 
 
 def make_read_tool(workspace: Path) -> Tool:
-    def read(arguments: Dict[str, object]) -> str:
+    def read(arguments: Dict[str, object], execution: Execution) -> str:
         file_path = arguments.get("file_path")
         if not isinstance(file_path, str) or not file_path.strip():
             raise ToolError("file_path must be a non-empty string")
@@ -170,6 +234,7 @@ def make_read_tool(workspace: Path) -> Tool:
             footer = f"(End of file - total {total_lines} lines)"
         numbered = "\n".join(lines)
         body = f"{numbered}\n\n{footer}" if lines else footer
+        observations(execution).record(execution.session_id, path)
         return f"<path>{path}</path>\n<type>file</type>\n<content>\n{body}\n</content>"
 
     return Tool(
@@ -178,18 +243,9 @@ def make_read_tool(workspace: Path) -> Tool:
         parameters={
             "type": "object",
             "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Path to read, resolved by the filesystem backend.",
-                },
-                "offset": {
-                    "type": "number",
-                    "description": "1-based first line to return. Defaults to 1.",
-                },
-                "limit": {
-                    "type": "number",
-                    "description": f"Maximum number of lines to return. Defaults to {READ_LIMIT}.",
-                },
+                "file_path": {"type": "string", "description": "Path to read, resolved by the filesystem backend."},
+                "offset": {"type": "number", "description": "1-based first line to return. Defaults to 1."},
+                "limit": {"type": "number", "description": f"Maximum number of lines to return. Defaults to {READ_LIMIT}."},
             },
             "required": ["file_path"],
         },
@@ -198,7 +254,7 @@ def make_read_tool(workspace: Path) -> Tool:
 
 
 def make_glob_tool(workspace: Path) -> Tool:
-    def glob(arguments: Dict[str, object]) -> str:
+    def glob(arguments: Dict[str, object], execution: Execution) -> str:
         pattern = arguments.get("pattern")
         if not isinstance(pattern, str) or not pattern.strip():
             raise ToolError("pattern must be a non-empty string")
@@ -254,4 +310,112 @@ def make_glob_tool(workspace: Path) -> Tool:
             "required": ["pattern"],
         },
         handler=glob,
+    )
+
+
+def make_write_tool(workspace: Path) -> Tool:
+    def write(arguments: Dict[str, object], execution: Execution) -> str:
+        file_path = arguments.get("file_path")
+        content = arguments.get("content")
+        if not isinstance(file_path, str) or not file_path.strip():
+            raise ToolError("file_path must be a non-empty string")
+        if not isinstance(content, str):
+            raise ToolError("content must be a string")
+        path = mutation_path(execution, workspace, file_path)
+        operation = "update" if path.exists() else "create"
+        if operation == "update":
+            if not path.is_file():
+                raise ToolError(f"不是文件: {path}")
+            try:
+                observations(execution).require_current(execution.session_id, path)
+            except ValueError as exc:
+                raise ToolError(str(exc)) from exc
+        atomic_write(path, content)
+        observations(execution).record(execution.session_id, path)
+        verb = "Created" if operation == "create" else "Updated"
+        return f"<path>{path}</path>\n<type>file</type>\n<content>\n{verb} file\n</content>"
+
+    return Tool(
+        name="write",
+        description="Create or fully replace a UTF-8 text file.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to write, resolved by the filesystem backend. Provide `file_path` before `content` in the arguments.",
+                },
+                "content": {"type": "string", "description": "Full UTF-8 text content to write."},
+            },
+            "required": ["file_path", "content"],
+        },
+        handler=write,
+        mutating=True,
+    )
+
+
+def make_edit_tool(workspace: Path) -> Tool:
+    def edit(arguments: Dict[str, object], execution: Execution) -> str:
+        file_path = arguments.get("file_path")
+        old_string = arguments.get("old_string")
+        new_string = arguments.get("new_string")
+        replace_all = arguments.get("replace_all", False)
+        if not isinstance(file_path, str) or not file_path.strip():
+            raise ToolError("file_path must be a non-empty string")
+        if not isinstance(old_string, str) or not old_string:
+            raise ToolError("old_string must be a non-empty string")
+        if not isinstance(new_string, str):
+            raise ToolError("new_string must be a string")
+        if old_string == new_string:
+            raise ToolError("old_string and new_string must differ")
+        if not isinstance(replace_all, bool):
+            raise ToolError("replace_all must be a boolean")
+
+        path = mutation_path(execution, workspace, file_path)
+        if not path.is_file():
+            raise ToolError(f"不是文件: {path}")
+        try:
+            observations(execution).require_current(execution.session_id, path)
+            text = path.read_text(encoding="utf-8")
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+        except UnicodeDecodeError as exc:
+            raise ToolError("edit 只读取 UTF-8 文本") from exc
+
+        occurrences = text.count(old_string)
+        if occurrences == 0:
+            raise ToolError("old_string was not found in the file")
+        if not replace_all and occurrences != 1:
+            raise ToolError(f"old_string must appear exactly once; found {occurrences} occurrences")
+        updated = text.replace(old_string, new_string, -1 if replace_all else 1)
+        atomic_write(path, updated)
+        observations(execution).record(execution.session_id, path)
+        if replace_all:
+            return f"The file {path} has been updated. All occurrences were successfully replaced."
+        return f"The file {path} has been updated successfully."
+
+    return Tool(
+        name="edit",
+        description="Edit an existing UTF-8 text file by replacing literal text.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to edit, resolved by the filesystem backend. Provide `file_path` before `old_string` and `new_string` in the arguments.",
+                },
+                "old_string": {"type": "string", "description": "Literal text to replace."},
+                "new_string": {
+                    "type": "string",
+                    "description": "Literal replacement text. Use an empty string to delete the match.",
+                },
+                "replace_all": {
+                    "type": "boolean",
+                    "description": "Replace all matches. Defaults to false; when false, old_string must appear exactly once.",
+                },
+            },
+            "required": ["file_path", "old_string", "new_string"],
+        },
+        handler=edit,
+        mutating=True,
     )

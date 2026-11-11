@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 from .plugins import Plugin, ServiceContext
 
@@ -12,6 +12,8 @@ READ_GUIDANCE = (
     "Use offset and limit to read a line range or continue a large file."
 )
 GLOB_GUIDANCE = "Use the glob tool — not shell find — to discover files by path pattern."
+WRITE_GUIDANCE = "Read an existing file before overwriting it with write"
+EDIT_GUIDANCE = "Read a file before editing it unless you just created or edited it in this session."
 
 
 @dataclass
@@ -43,12 +45,14 @@ class SystemPrompt:
         )
         return "\n\n".join(section.text for section in sections if section.text)
 
-    def runtime_context(self, workspace: Path) -> str:
-        current = f"Current working directory: {json.dumps(str(workspace), ensure_ascii=False)}."
-        return (
-            "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\n"
-            f"{current}"
-        )
+    def runtime_context(self, workspace: Path, sandbox_context: str = "", approval_context: str = "") -> str:
+        sections = [
+            f"Current working directory: {json.dumps(str(workspace), ensure_ascii=False)}.",
+            sandbox_context,
+            approval_context,
+        ]
+        body = "\n\n".join(section for section in sections if section)
+        return f"Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\n{body}"
 
 
 class SystemPromptPlugin(Plugin):

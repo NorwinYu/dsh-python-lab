@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from .app import Application
 from .config import AppConfig, ConfigError
+from .sandbox import SANDBOX_MODES
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -14,6 +15,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, help="JSON 配置文件")
     parser.add_argument("--enable", action="append", default=[], metavar="FEATURE", help="启用功能，可重复")
     parser.add_argument("--disable", action="append", default=[], metavar="FEATURE", help="禁用功能，可重复")
+    parser.add_argument("--sandbox-mode", choices=sorted(SANDBOX_MODES), help="文件策略")
+    parser.add_argument("--approval-policy", choices=["ask", "never"], help="审批策略")
+    parser.add_argument("--yes", action="store_true", help="允许本次进程中的所有写操作审批")
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("config", help="输出合并后的配置")
@@ -30,6 +34,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def interactive_answerer(reason: str) -> str:
+    if not sys.stdin.isatty():
+        raise RuntimeError("无交互式审批者")
+    answer = input(f"{reason}\n允许这一次吗？[y/N] ").strip().lower()
+    return "allowed-once" if answer in {"y", "yes"} else "rejected"
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -44,16 +55,19 @@ def main(argv: Optional[List[str]] = None) -> int:
             config_path=args.config,
             enable=args.enable,
             disable=args.disable,
+            sandbox_mode=args.sandbox_mode,
+            approval_policy=args.approval_policy,
+            approve_all=args.yes,
         )
         if args.command == "config":
             print(json.dumps(config.public_dict(), ensure_ascii=False, indent=2))
             return 0
 
-        app = Application(config)
+        app = Application(config, interactive_answerer if args.command == "run" else None)
         if args.command == "plugins":
             for row in app.manager.status():
                 missing = f" missing={','.join(row['missing'])}" if row["missing"] else ""
-                print(f"{row['state']:<8} {row['name']:<18}{missing}")
+                print(f"{row['state']:<8} {row['name']:<22}{missing}")
             return 0
 
         if args.command == "tools":
@@ -63,10 +77,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.command == "prompt":
             print(
                 json.dumps(
-                    {
-                        "system": app.system_prompt.render(),
-                        "runtime_context": app.system_prompt.runtime_context(config.workspace),
-                    },
+                    {"system": app.system_prompt.render(), "runtime_context": app.runtime_context},
                     ensure_ascii=False,
                     indent=2,
                 )

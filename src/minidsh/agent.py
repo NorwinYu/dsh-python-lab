@@ -1,5 +1,4 @@
 import uuid
-from pathlib import Path
 from typing import Dict, List, Optional
 
 from .events import EventBus
@@ -15,7 +14,7 @@ class Agent:
         model: Model,
         tools: ToolRegistry,
         system_prompt: SystemPrompt,
-        workspace: Path,
+        runtime_context: str,
         events: EventBus,
         session: Optional[SessionStore] = None,
         max_steps: int = 4,
@@ -23,7 +22,7 @@ class Agent:
         self.model = model
         self.tools = tools
         self.system_prompt = system_prompt
-        self.workspace = workspace
+        self.runtime_context = runtime_context
         self.events = events
         self.session = session
         self.max_steps = max_steps
@@ -35,7 +34,7 @@ class Agent:
             {"role": "user", "content": [text_block(prompt)]},
             {
                 "role": "user",
-                "content": [text_block(self.system_prompt.runtime_context(self.workspace))],
+                "content": [text_block(self.runtime_context)],
                 "source": {"kind": "runtime-context"},
             },
         ]
@@ -93,7 +92,7 @@ class Agent:
                 )
                 is_error = False
                 try:
-                    result = self.tools.execute(call.name, call.arguments)
+                    result = self.tools.execute(call.name, call.arguments, session_id, call.call_id)
                 except ToolError as exc:
                     result = f"工具执行失败: {exc}"
                     is_error = True

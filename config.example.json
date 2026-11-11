@@ -1,10 +1,18 @@
 {
   "session_dir": ".minidsh/sessions",
+  "sandbox_mode": "read-only",
+  "approval_policy": "ask",
+  "approve_all": false,
   "features": {
     "core.system-prompt": true,
     "core.tools": true,
+    "core.sandbox-policy": true,
+    "core.approval": true,
+    "core.fs-observation": true,
     "tools.glob": true,
     "tools.read": true,
+    "tools.write": true,
+    "tools.edit": true,
     "session.jsonl": true,
     "llm.mock": true,
     "llm.deepseek": false,
