@@ -27,16 +27,19 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("plugins", help="查看插件及依赖状态")
     subparsers.add_parser("tools", help="列出当前启用的工具")
     subparsers.add_parser("models", help="列出当前模型提供方的模型")
+    subparsers.add_parser("files", help="列出 DeepSeek Files API 文件")
     subparsers.add_parser("prompt", help="输出当前系统提示词与 runtime context")
     subparsers.add_parser("sessions", help="列出本地会话")
 
     run_parser = subparsers.add_parser("run", help="新建会话并运行 Agent")
     run_parser.add_argument("prompt", nargs="+", help="用户提示词")
+    run_parser.add_argument("--image", action="append", default=[], metavar="PATH", help="附加图片，可重复")
     run_parser.add_argument("--trace", action="store_true", help="输出工具事件轨迹")
 
     resume_parser = subparsers.add_parser("resume", help="恢复会话并继续运行")
     resume_parser.add_argument("session_id")
     resume_parser.add_argument("prompt", nargs="+", help="新的用户提示词")
+    resume_parser.add_argument("--image", action="append", default=[], metavar="PATH", help="附加图片，可重复")
     resume_parser.add_argument("--trace", action="store_true", help="输出工具事件轨迹")
 
     session_parser = subparsers.add_parser("session", help="读取一份 JSONL 会话")
@@ -70,7 +73,7 @@ def interactive_answerer(reason: str) -> str:
 
 
 def _with_default_command(argv: List[str], command: str) -> List[str]:
-    commands = {"config", "plugins", "tools", "models", "prompt", "sessions", "run", "resume", "session", "transcript", "fork", "compact", "serve", "desktop"}
+    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "run", "resume", "session", "transcript", "fork", "compact", "serve", "desktop"}
     options_with_values = {"--workspace", "--config", "--enable", "--disable", "--sandbox-mode", "--approval-policy", "--context-window"}
     index = 0
     while index < len(argv):
@@ -147,6 +150,12 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
             print(json.dumps(app.model.list_models(), ensure_ascii=False, indent=2))
             return 0
 
+        if args.command == "files":
+            if not config.features["llm.files"]:
+                raise RuntimeError("llm.files 当前被禁用")
+            print(json.dumps(app.model.list_files(), ensure_ascii=False, indent=2))
+            return 0
+
         if args.command == "prompt":
             print(json.dumps({"system": app.system_prompt.render(), "runtime_context": app.runtime_context}, ensure_ascii=False, indent=2))
             return 0
@@ -189,9 +198,9 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
                     ),
                 )
         if args.command == "resume":
-            print(app.agent.run(" ".join(args.prompt), args.session_id))
+            print(app.agent.run(" ".join(args.prompt), args.session_id, image_paths=args.image))
         else:
-            print(app.agent.run(" ".join(args.prompt)))
+            print(app.agent.run(" ".join(args.prompt), image_paths=args.image))
         return 0
     except (ConfigError, KeyError, RuntimeError, OSError, ValueError) as exc:
         print(f"错误: {exc}", file=sys.stderr)

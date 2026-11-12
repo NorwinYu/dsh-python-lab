@@ -1,4 +1,6 @@
+import base64
 import copy
+import hashlib
 import json
 import os
 import socket
@@ -6,8 +8,9 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -15,6 +18,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .cancellation import CancellationToken, RunCancelled
 from .events import EventBus
+from .files import DEFAULT_FILE_EXPIRY_SECONDS, DEFAULT_FILES_API_TIMEOUT_MS, FILES_BETA, DeepSeekFilesClient, FilesError
+from .images import ImageAttachment, ImageError, assert_inline_budget, materialize_images
 from .llm import Model, ModelResponse
 from .plugins import Plugin, ServiceContext
 from .retry import RetryPolicy
@@ -59,6 +64,9 @@ class DeepSeekConfig:
     models_timeout_ms: int
     models_max_age_ms: int
     retry_policy: RetryPolicy
+    files_timeout_ms: int
+    file_expiry_seconds: int
+    image_mode: str
 
     @classmethod
     def from_env(cls, retry_enabled: bool = True) -> "DeepSeekConfig":
@@ -72,16 +80,23 @@ class DeepSeekConfig:
         effort = os.environ.get("DEEPSEEK_REASONING_EFFORT", "high")
         if effort not in {"off", "low", "high", "max"}:
             raise LlmError(f"不支持的 reasoning effort: {effort}", "UNSUPPORTED_REASONING_EFFORT")
+        image_mode = os.environ.get("DEEPSEEK_IMAGE_MODE", "auto")
+        if image_mode not in {"auto", "inline", "required"}:
+            raise LlmError("DEEPSEEK_IMAGE_MODE 必须是 auto、inline 或 required", "INVALID_REQUEST")
         try:
             max_tokens = int(os.environ.get("DEEPSEEK_MAX_TOKENS", str(DEFAULT_MAX_TOKENS)))
             timeout = int(os.environ.get("DEEPSEEK_STREAM_IDLE_TIMEOUT_MS", str(DEFAULT_STREAM_IDLE_TIMEOUT_MS)))
             models_timeout = int(os.environ.get("DEEPSEEK_MODELS_TIMEOUT_MS", str(DEFAULT_MODELS_TIMEOUT_MS)))
             models_max_age = int(os.environ.get("DEEPSEEK_MODELS_MAX_AGE_MS", str(DEFAULT_MODELS_MAX_AGE_MS)))
+            files_timeout = int(os.environ.get("DEEPSEEK_FILES_API_TIMEOUT_MS", str(DEFAULT_FILES_API_TIMEOUT_MS)))
+            file_expiry = int(os.environ.get("DEEPSEEK_FILE_EXPIRY_SECONDS", str(DEFAULT_FILE_EXPIRY_SECONDS)))
             retry_policy = RetryPolicy.from_env(retry_enabled)
         except ValueError as exc:
             raise LlmError(f"DeepSeek 数值或重试配置无效: {exc}", "INVALID_REQUEST") from exc
-        if max_tokens <= 0 or timeout <= 0 or models_timeout <= 0 or models_max_age < 0:
+        if max_tokens <= 0 or timeout <= 0 or models_timeout <= 0 or models_max_age < 0 or files_timeout <= 0:
             raise LlmError("DeepSeek 容量和超时必须大于 0，列表缓存时间不能为负数", "INVALID_REQUEST")
+        if not 3_600 <= file_expiry <= 2_592_000:
+            raise LlmError("DeepSeek 文件生命周期必须在 3600 到 2592000 秒之间", "INVALID_REQUEST")
         return cls(
             api_key=api_key,
             base_url=base_url,
@@ -92,6 +107,9 @@ class DeepSeekConfig:
             models_timeout_ms=models_timeout,
             models_max_age_ms=models_max_age,
             retry_policy=retry_policy,
+            files_timeout_ms=files_timeout,
+            file_expiry_seconds=file_expiry,
+            image_mode=image_mode,
         )
 
     @property
@@ -132,13 +150,52 @@ def replay_signatures(message: Dict[str, object], target_model: str) -> Dict[int
     return signatures
 
 
-def serialize_history(messages: List[Dict[str, object]], target_model: str) -> List[Dict[str, object]]:
+def serialize_input_blocks(
+    blocks: List[Dict[str, object]],
+    images: Dict[str, ImageAttachment],
+    file_ids: Optional[Dict[str, str]],
+) -> List[Dict[str, object]]:
+    content: List[Dict[str, object]] = []
+    for block in blocks:
+        if block.get("type") == "text":
+            if block.get("text"):
+                content.append({"type": "text", "text": block["text"]})
+            continue
+        if block.get("type") != "image":
+            continue
+        attachment = block.get("attachment", {})
+        sha256 = str(attachment.get("sha256", "")) if isinstance(attachment, dict) else ""
+        if sha256 not in images:
+            raise LlmError("DeepSeek Messages 请求图片缺失", "INVALID_REQUEST")
+        image = images[sha256]
+        content.append({"type": "text", "text": f"[Image: {image.path.name}; sha256={image.sha256[:16]}]"})
+        if file_ids is not None:
+            if sha256 not in file_ids:
+                raise LlmError("DeepSeek Messages 请求图片 file id 缺失", "INVALID_REQUEST")
+            source = {"type": "file", "file_id": file_ids[sha256]}
+        else:
+            source = {
+                "type": "base64",
+                "media_type": image.media_type,
+                "data": base64.b64encode(image.data).decode("ascii"),
+            }
+        content.append({"type": "image", "source": source})
+    return content
+
+
+def serialize_history(
+    messages: List[Dict[str, object]],
+    target_model: str,
+    images: Optional[Dict[str, ImageAttachment]] = None,
+    file_ids: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, object]]:
     wire: List[Dict[str, object]] = []
+    resolved_images = images or {}
     for message in messages:
         role = str(message.get("role", ""))
         blocks = text_content(message.get("content", []))
         if role == "user":
-            content = [block for block in blocks if block.get("type") == "text" and block.get("text")]
+            content = serialize_input_blocks(blocks, resolved_images, file_ids)
             wire_role = "user"
         elif role == "assistant":
             content = []
@@ -166,7 +223,7 @@ def serialize_history(messages: List[Dict[str, object]], target_model: str) -> L
                     )
             wire_role = "assistant"
         elif role == "tool":
-            result_content = [block for block in blocks if block.get("type") == "text"]
+            result_content = serialize_input_blocks(blocks, resolved_images, file_ids)
             item = {
                 "type": "tool_result",
                 "tool_use_id": message.get("toolCallId", message.get("tool_call_id")),
@@ -195,12 +252,14 @@ def serialize_request(
     system: str,
     messages: List[Dict[str, object]],
     tool_definitions: List[Dict[str, object]],
+    images: Optional[Dict[str, ImageAttachment]] = None,
+    file_ids: Optional[Dict[str, str]] = None,
 ) -> Dict[str, object]:
     effort = config.reasoning_effort
     body: Dict[str, object] = {
         "model": config.model,
         "stream": True,
-        "messages": serialize_history(messages, config.model),
+        "messages": serialize_history(messages, config.model, images, file_ids),
         "max_tokens": config.max_tokens,
         "thinking": {"type": "disabled" if effort == "off" else "enabled"},
         "tools": [
@@ -498,15 +557,28 @@ class DeepSeekModel(Model):
     def model_id(self) -> str:
         return os.environ.get("DEEPSEEK_MODEL", "deepseek-flash")
 
-    def __init__(self, events: Optional[EventBus] = None, retry_enabled: bool = True, listing_enabled: bool = True) -> None:
+    def __init__(
+        self,
+        events: Optional[EventBus] = None,
+        retry_enabled: bool = True,
+        listing_enabled: bool = True,
+        files_enabled: bool = True,
+        workspace: Optional[Path] = None,
+        allow_outside: bool = False,
+    ) -> None:
         self.user_id = uuid.uuid4().hex
         self.events = events
         self.retry_enabled = retry_enabled
         self.listing_enabled = listing_enabled
+        self.files_enabled = files_enabled
+        self.workspace = (workspace or Path.cwd()).resolve()
+        self.allow_outside = allow_outside
         self._opener = build_opener(NoRedirect)
         self._listing_lock = threading.Lock()
         self._listing_cached_at = 0.0
         self._listing_cache: Optional[Dict[str, object]] = None
+        self._file_cache: Dict[Tuple[str, str, str], Dict[str, object]] = {}
+        self._file_lock = threading.Lock()
 
     def complete(
         self,
@@ -518,23 +590,8 @@ class DeepSeekModel(Model):
     ) -> ModelResponse:
         config = DeepSeekConfig.from_env(self.retry_enabled)
         token = cancel_token or CancellationToken()
-        body = serialize_request(config, system, messages, tool_definitions)
-        headers = {
-            "content-type": "application/json",
-            "accept": "text/event-stream",
-            "x-api-key": config.api_key,
-            "anthropic-version": "2023-06-01",
-            "user-agent": USER_AGENT,
-            "x-deepseek-harness-user-id": self.user_id,
-        }
-        if session_id is not None:
-            headers["x-deepseek-harness-session-id"] = session_id
-        request = Request(
-            config.messages_url,
-            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
+        images, file_ids = self._prepare_images(messages, config, token)
+        request = self._messages_request(config, system, messages, tool_definitions, images, file_ids, session_id)
         retries = 0
         while True:
             token.throw_if_cancelled()
@@ -543,6 +600,18 @@ class DeepSeekModel(Model):
             except RunCancelled:
                 raise
             except LlmError as exc:
+                if file_ids is not None and config.image_mode == "auto" and exc.code == "INVALID_REQUEST":
+                    stale_ids = set(file_ids.values())
+                    with self._file_lock:
+                        for key, cached in list(self._file_cache.items()):
+                            if cached["id"] in stale_ids:
+                                del self._file_cache[key]
+                    if self.events is not None:
+                        self.events.emit("llm/image-fallback", {"reason": exc.code, "run_id": token.run_id, "session_id": session_id})
+                    file_ids = None
+                    assert_inline_budget(messages, images)
+                    request = self._messages_request(config, system, messages, tool_definitions, images, None, session_id)
+                    continue
                 if not config.retry_policy.allows(exc.code, retries):
                     raise
                 delay = config.retry_policy.delay_ms(retries, exc.retry_after_ms)
@@ -562,6 +631,100 @@ class DeepSeekModel(Model):
                     )
                 if token.wait(delay / 1000):
                     raise RunCancelled("运行已取消")
+
+    def _prepare_images(
+        self,
+        messages: List[Dict[str, object]],
+        config: DeepSeekConfig,
+        token: CancellationToken,
+    ) -> Tuple[Dict[str, ImageAttachment], Optional[Dict[str, str]]]:
+        try:
+            images = materialize_images(messages, self.workspace, self.allow_outside)
+        except ImageError as exc:
+            raise LlmError(str(exc), "INVALID_REQUEST") from exc
+        if not images:
+            return images, None
+        if config.image_mode == "inline" or not self.files_enabled:
+            if config.image_mode == "required" and not self.files_enabled:
+                raise LlmError("llm.files 被禁用，不能使用 required 图片模式", "INVALID_REQUEST")
+            assert_inline_budget(messages, images)
+            return images, None
+        client = self._files_client(config)
+        file_ids: Dict[str, str] = {}
+        try:
+            for sha256, image in images.items():
+                token.throw_if_cancelled()
+                credential_scope = hashlib.sha256(config.api_key.encode("utf-8")).hexdigest()
+                cache_key = (config.base_url, credential_scope, sha256)
+                file, uploaded = self._resolve_image_file(client, image, config, token, cache_key)
+                file_ids[sha256] = str(file["id"])
+                if self.events is not None:
+                    self.events.emit(
+                        "llm/image-upload",
+                        {"sha256": sha256, "file_id": file["id"], "uploaded": uploaded, "run_id": token.run_id},
+                    )
+            return images, file_ids
+        except FilesError as exc:
+            if config.image_mode == "required":
+                raise LlmError(str(exc), exc.code, exc.status) from exc
+            assert_inline_budget(messages, images)
+            if self.events is not None:
+                self.events.emit("llm/image-fallback", {"reason": exc.code, "run_id": token.run_id})
+            return images, None
+
+    def _resolve_image_file(
+        self,
+        client: DeepSeekFilesClient,
+        image: ImageAttachment,
+        config: DeepSeekConfig,
+        token: CancellationToken,
+        cache_key: Tuple[str, str, str],
+    ) -> Tuple[Dict[str, object], bool]:
+        with self._file_lock:
+            cached = self._file_cache.get(cache_key)
+            if cached is not None and int(cached["expiresAt"]) > int(time.time()) + 3_600:
+                return cached, False
+            file = client.upload(image, config.file_expiry_seconds, token)
+            self._file_cache[cache_key] = file
+            return file, True
+
+    def _files_client(self, config: DeepSeekConfig) -> DeepSeekFilesClient:
+        return DeepSeekFilesClient(config.base_url, config.api_key, self.user_id, USER_AGENT, config.files_timeout_ms)
+
+    def _messages_request(
+        self,
+        config: DeepSeekConfig,
+        system: str,
+        messages: List[Dict[str, object]],
+        tool_definitions: List[Dict[str, object]],
+        images: Dict[str, ImageAttachment],
+        file_ids: Optional[Dict[str, str]],
+        session_id: Optional[str],
+    ) -> Request:
+        body = serialize_request(config, system, messages, tool_definitions, images, file_ids)
+        headers = {
+            "content-type": "application/json",
+            "accept": "text/event-stream",
+            "x-api-key": config.api_key,
+            "anthropic-version": "2023-06-01",
+            "user-agent": USER_AGENT,
+            "x-deepseek-harness-user-id": self.user_id,
+        }
+        if file_ids:
+            headers["anthropic-beta"] = FILES_BETA
+        if session_id is not None:
+            headers["x-deepseek-harness-session-id"] = session_id
+        return Request(
+            config.messages_url,
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+    def list_files(self) -> Dict[str, object]:
+        if not self.files_enabled:
+            raise LlmError("llm.files 当前被禁用", "DISABLED")
+        return self._files_client(DeepSeekConfig.from_env(self.retry_enabled)).list()
 
     def _request_once(self, request: Request, config: DeepSeekConfig, token: CancellationToken) -> ModelResponse:
         token.throw_if_cancelled()
@@ -633,9 +796,30 @@ class DeepSeekModelPlugin(Plugin):
     name = "llm.deepseek"
     provides = ("llm",)
 
-    def __init__(self, retry_enabled: bool = True, listing_enabled: bool = True) -> None:
+    def __init__(
+        self,
+        retry_enabled: bool = True,
+        listing_enabled: bool = True,
+        files_enabled: bool = True,
+        workspace: Optional[Path] = None,
+        allow_outside: bool = False,
+    ) -> None:
         self.retry_enabled = retry_enabled
         self.listing_enabled = listing_enabled
+        self.files_enabled = files_enabled
+        self.workspace = workspace
+        self.allow_outside = allow_outside
 
     def activate(self, ctx: ServiceContext) -> None:
-        ctx.provide("llm", DeepSeekModel(ctx.events, self.retry_enabled, self.listing_enabled), self.name)
+        ctx.provide(
+            "llm",
+            DeepSeekModel(
+                ctx.events,
+                self.retry_enabled,
+                self.listing_enabled,
+                self.files_enabled,
+                self.workspace,
+                self.allow_outside,
+            ),
+            self.name,
+        )

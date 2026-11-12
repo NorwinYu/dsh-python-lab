@@ -102,6 +102,19 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 已建立响应流通过关闭 response 取消；前台 Bash 终止对应进程组，取消 `job_output` 等待不会终止后台任务。
 - 网络连接建立前仅能在边界检查取消，尚不是官方 AbortSignal 全生命周期兼容实现。
 
+### 图片附件与 Files API
+
+- 支持 PNG/JPEG/GIF/WebP 文件头识别，单张 32MiB、每请求 600 张和原始累计 128MiB；内联 base64 累计上限 20MiB。
+- 内部附件记录路径、media type、大小和 SHA-256，不把 base64 写入 JSONL；DeepSeek 准备时重新读取并拒绝变更。
+- 图片仅允许 user/tool 内容，普通文件策略限制在工作区内，`danger-full-access` 可读取外部路径。
+- Messages 内联格式为 `source.type=base64`，文件引用为 `source.type=file`；后者携带 `files-api-2025-04-14`。
+- Files 根目录复用 Messages `/v1` 规则；multipart 包含 `expires_after[anchor]=created_at`、秒数和文件，默认生命周期 604800 秒。
+- Files 默认操作超时 60000ms；实现上传、列表、读取和删除的对象校验，拒绝重定向并保留错误分类。
+- auto 默认优先上传，Files 失败或 Messages INVALID_REQUEST 时降级内联；required 失败关闭，inline 不上传。
+- 文件缓存按路由、凭据哈希和图片 SHA-256 隔离，提前一小时视为需要刷新；并发上传有锁，Messages 重试复用文件 id。
+- 被拒绝的文件引用会失效并在下次重新上传；提供 `llm/image-upload`、`llm/image-fallback` 和 `llm.files` 开关。
+- 尚未实现官方图片变换、token 定价、持久上传索引、独立共享等待者、配额清理与附件存储协议。
+
 ### 外部插件与产品组装（学习版等价分层）
 
 - 使用 Python 标准 `minidsh.plugins` entry points 发现独立发行包；外部功能默认禁用，只有显式启用才导入插件代码。
@@ -118,7 +131,7 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - `sandbox_permissions` 升级、会话中切换审批/文件策略和审批取消。
 - PTY、持久 Shell、Windows 原生 Shell；当前进程后端固定使用 `/bin/bash`。
 - 任务完成后的 Agent 自动唤醒、跨进程任务恢复和长期常驻宿主。
-- 图片与 Files API、扩展请求头和遥测；完整模型目录元数据、后台 listing 刷新及官方通用 LLM 重试插件仍未移植。
+- 完整附件存储、图片变换/定价、持久上传索引和配额恢复、扩展请求头及遥测；完整模型目录元数据、后台 listing 刷新及官方通用 LLM 重试插件仍未移植。
 - 官方 surface generation/replacement、会话格式迁移、崩溃修复、跨进程锁和原子多进程发布。
 - 官方压缩区间选择、token 校准、tool-result pruner、模型切换压缩、重试和取消。
 - `read` 尚未实现大文件流式扫描；`glob` 尚未完全复刻 ripgrep 语义和 spill 行为。
@@ -152,5 +165,11 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 完整 HTTP 运行取消使 Bash 进程组 killed、JSONL 记录 aborted；并发 SSE 在其他运行完成后仍保持当前流。
 - 浏览器实际点击“停止运行”收到 `run/cancelled`；新开关和原有 Mock 文件读取回归通过。
 - 最终 wheel 包含取消、重试和 Web 资源，离线安装后实际执行 Mock `models` 成功。
+- 本地 Files/Messages 服务验证 multipart 字段、图片字节、beta header、文件引用和 base64 内联格式。
+- 上传缓存复用、Messages 重试不重复上传、auto 上传失败/无效文件 id 降级、required 失败关闭均通过。
+- 无效文件 id 缓存被清除，下一次重新上传；5 个并发请求只上传一次。
+- Files 列表、读取、删除及模型列表命令在本地服务上通过；CLI/HTTP 图片会话不含 base64，支持 transcript 和 resume。
+- 非图片内容、路径越界和附件哈希变化均被拒绝。
+- 本阶段最终 wheel 包含图片、Files 和更新后的 Web 资源，离线安装及 Mock `models` 命令通过。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

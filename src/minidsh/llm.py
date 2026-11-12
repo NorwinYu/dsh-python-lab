@@ -52,6 +52,9 @@ class Model(ABC):
     def list_models(self) -> Dict[str, object]:
         return {"entries": [{"id": self.model_id, "name": self.model_id, "inputModalities": ["text"]}], "skipped": 0}
 
+    def list_files(self) -> Dict[str, object]:
+        raise RuntimeError("当前模型提供方不支持 Files API")
+
 
 def text_block(text: str) -> Dict[str, object]:
     return {"type": "text", "text": text}

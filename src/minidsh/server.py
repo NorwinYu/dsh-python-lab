@@ -18,6 +18,8 @@ EVENT_NAMES = (
     "turn/end",
     "assistant/message",
     "llm/retry",
+    "llm/image-upload",
+    "llm/image-fallback",
     "tools/pre-execute",
     "tools/post-execute",
     "job/settled",
@@ -55,7 +57,7 @@ class SseBroker:
             token = self._cancellations.get(run_id)
         return token.cancel() if token is not None else False
 
-    def start(self, prompt: str, session_id: Optional[str]) -> queue.Queue:
+    def start(self, prompt: str, session_id: Optional[str], image_paths: Optional[List[str]] = None) -> queue.Queue:
         listener = self.subscribe()
         actual_session_id = session_id
         operation_id = uuid.uuid4().hex
@@ -73,7 +75,7 @@ class SseBroker:
                         if payload.get("run_id") == operation_id:
                             actual_session_id = str(payload["session_id"])
                     stop_capture = self.agent.events.on("turn/start", capture)
-                result = self.agent.run(prompt, session_id, operation_id, token)
+                result = self.agent.run(prompt, session_id, operation_id, token, image_paths)
                 self.publish("run/result", {"session_id": actual_session_id, "result": result, "run_id": operation_id})
             except RunCancelled:
                 self.publish("run/cancelled", {"session_id": actual_session_id, "run_id": operation_id})
@@ -90,8 +92,8 @@ class SseBroker:
         threading.Thread(target=run, daemon=True).start()
         return listener
 
-    def wait(self, prompt: str, session_id: Optional[str]) -> Dict[str, object]:
-        listener = self.start(prompt, session_id)
+    def wait(self, prompt: str, session_id: Optional[str], image_paths: Optional[List[str]] = None) -> Dict[str, object]:
+        listener = self.start(prompt, session_id, image_paths)
         operation_id = listener.operation_id if hasattr(listener, "operation_id") else None
         try:
             while True:
@@ -167,6 +169,10 @@ class ApiServer:
                         if not app.config.features["llm.model-listing"]:
                             raise RuntimeError("llm.model-listing 当前被禁用")
                         self._send_json(app.model.list_models())
+                    elif path == "/v1/files":
+                        if not app.config.features["llm.files"]:
+                            raise RuntimeError("llm.files 当前被禁用")
+                        self._send_json(app.model.list_files())
                     elif path == "/v1/prompt":
                         self._send_json({"system": app.system_prompt.render(), "runtime_context": app.runtime_context})
                     elif path == "/v1/sessions":
@@ -187,7 +193,7 @@ class ApiServer:
                     elif path == "/v1/runs/stream":
                         prompt = query.get("prompt", [""])[0]
                         session_id = query.get("session_id", [None])[0] or None
-                        self._stream(prompt, session_id)
+                        self._stream(prompt, session_id, query.get("image", []))
                     else:
                         self._send_json({"error": "not found"}, 404)
                 except RunCancelled as exc:
@@ -204,9 +210,9 @@ class ApiServer:
                     if path == "/v1/runs":
                         prompt = self._prompt(body)
                         session_id = body.get("session_id") or None
-                        self._send_json(broker.wait(prompt, session_id))
+                        self._send_json(broker.wait(prompt, session_id, self._images(body)))
                     elif path == "/v1/runs/stream":
-                        self._stream(self._prompt(body), body.get("session_id") or None)
+                        self._stream(self._prompt(body), body.get("session_id") or None, self._images(body))
                     elif path.startswith("/v1/runs/"):
                         parts = path.split("/")
                         if len(parts) == 5 and parts[4] == "cancel":
@@ -218,7 +224,7 @@ class ApiServer:
                         session_id = parts[3]
                         action = parts[4] if len(parts) > 4 else ""
                         if action == "resume":
-                            self._send_json(broker.wait(self._prompt(body), session_id))
+                            self._send_json(broker.wait(self._prompt(body), session_id, self._images(body)))
                         elif action == "fork":
                             self._send_json({"session_id": app.session.fork(session_id, body.get("at_seq"))})
                         elif action == "compact":
@@ -272,6 +278,13 @@ class ApiServer:
                     raise ValueError("prompt 必须是非空字符串")
                 return prompt
 
+            @staticmethod
+            def _images(body: Dict[str, object]) -> List[str]:
+                images = body.get("images", [])
+                if not isinstance(images, list) or any(not isinstance(image, str) or not image.strip() for image in images):
+                    raise ValueError("images 必须是非空图片路径字符串数组")
+                return images
+
             def _session_get(self, path: str) -> None:
                 if app.session is None:
                     self._send_json({"error": "session.jsonl is disabled"}, 400)
@@ -285,10 +298,10 @@ class ApiServer:
                 else:
                     self._send_json({"error": "not found"}, 404)
 
-            def _stream(self, prompt: str, session_id: Optional[str]) -> None:
+            def _stream(self, prompt: str, session_id: Optional[str], image_paths: Optional[List[str]] = None) -> None:
                 if not prompt.strip():
                     raise ValueError("prompt 必须是非空字符串")
-                listener = broker.start(prompt, session_id)
+                listener = broker.start(prompt, session_id, image_paths)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")

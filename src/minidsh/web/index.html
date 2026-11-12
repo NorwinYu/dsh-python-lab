@@ -104,6 +104,7 @@
       transition: border-color .15s, box-shadow .15s, background .15s;
     }
     textarea:focus, input:focus { border-color: #8ca0f4; background: #fff; box-shadow: 0 0 0 3px #6279e814; }
+    .composer textarea.image-input { min-height: 58px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
     details { margin-top: 14px; }
     summary { color: #748096; cursor: pointer; font-size: 11px; user-select: none; }
     .session-field { padding-top: 12px; }
@@ -212,6 +213,10 @@
                   <label for="sessionId">Session ID · 留空创建新会话</label>
                   <input id="sessionId" placeholder="选择左侧会话或输入 session id" spellcheck="false">
                 </div>
+                <div class="session-field">
+                  <label for="images">图片路径 · 可选，多个路径用换行分隔</label>
+                  <textarea id="images" class="image-input" placeholder="images/example.png" spellcheck="false"></textarea>
+                </div>
                 <div class="actions">
                   <button class="button" id="compact">压缩上下文</button>
                   <button class="button" id="fork">创建分支</button>
@@ -316,6 +321,8 @@
       const sessionId = sessionInput.value.trim()
       const query = new URLSearchParams({ prompt })
       if (sessionId) query.set('session_id', sessionId)
+      const imagePaths = document.querySelector('#images').value.split('\n').map(path => path.trim()).filter(Boolean)
+      for (const path of imagePaths) query.append('image', path)
       events.textContent = ''
       currentRunId = null
       setRunning(true)
@@ -326,7 +333,7 @@
         setRunning(true)
         write(`turn/start: ${event.data}`)
       })
-      for (const name of ['assistant/message', 'llm/retry', 'tools/pre-execute', 'tools/post-execute', 'job/settled', 'turn/end']) {
+      for (const name of ['assistant/message', 'llm/retry', 'llm/image-upload', 'llm/image-fallback', 'tools/pre-execute', 'tools/post-execute', 'job/settled', 'turn/end']) {
         source.addEventListener(name, (event) => write(`${name}: ${event.data}`))
       }
       source.addEventListener('run/result', (event) => {

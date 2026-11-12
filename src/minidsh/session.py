@@ -158,7 +158,17 @@ class JsonlSessionStore(SessionStore):
             if isinstance(content, str):
                 text = content
             elif isinstance(content, list):
-                text = "".join(str(block.get("text", "")) for block in content if isinstance(block, dict))
+                parts = []
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "image":
+                        attachment = block.get("attachment", {})
+                        if isinstance(attachment, dict):
+                            parts.append(f"[image: {attachment.get('path', 'unknown')}]\n")
+                    else:
+                        parts.append(str(block.get("text", "")))
+                text = "".join(parts)
             else:
                 text = ""
             if text:

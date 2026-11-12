@@ -24,6 +24,7 @@
     "llm.deepseek": false,
     "llm.retry": true,
     "llm.model-listing": true,
+    "llm.files": true,
     "agent.core": true
   }
 }

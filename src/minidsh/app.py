@@ -61,6 +61,8 @@ class AgentPlugin(Plugin):
             session=session,
             observations=observations,
             compaction=compaction,
+            workspace=self.config.workspace,
+            allow_outside=sandbox.mode == "danger-full-access",
         )
         ctx.provide("agent", agent, self.name)
 
@@ -97,6 +99,9 @@ class Application:
             DeepSeekModelPlugin(
                 retry_enabled=config.features["llm.retry"],
                 listing_enabled=config.features["llm.model-listing"],
+                files_enabled=config.features["llm.files"],
+                workspace=config.workspace,
+                allow_outside=config.sandbox_mode == "danger-full-access",
             )
         )
         self.manager.register(CompactionPlugin(config.context_window))

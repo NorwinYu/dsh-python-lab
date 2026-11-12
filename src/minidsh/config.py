@@ -27,6 +27,7 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "llm.deepseek": False,
     "llm.retry": True,
     "llm.model-listing": True,
+    "llm.files": True,
     "agent.core": True,
 }
 

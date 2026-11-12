@@ -60,6 +60,7 @@ minidsh run "请列出当前目录"
 - `llm.deepseek`：真实 DeepSeek Messages 模型，默认禁用。
 - `llm.retry`：DeepSeek 有界瞬时错误重试，默认启用。
 - `llm.model-listing`：模型列表查询与缓存，默认启用。
+- `llm.files`：图片文件上传、进程内复用和 Files API 列表，默认启用。
 - `agent.core`：Agent Loop。
 
 ```bash
@@ -154,6 +155,42 @@ PYTHONPATH=src python3 -m minidsh --context-window 100 run "测试自动压缩"
 
 resume 会恢复消息、turn 编号和文件观察；runtime context 使用当前配置重新生成。fork 不会改写原会话。压缩只改变发给模型的投影，不删除原始 JSONL 事件。
 
+## 图片附件与 Files API
+
+CLI 和 resume 可重复传入 `--image`；HTTP 使用字符串数组，Web 在高级操作中每行填写一个工作区图片路径：
+
+```bash
+PYTHONPATH=src python3 -m minidsh run "描述这张图片" --image images/example.png
+```
+
+```json
+{
+  "prompt": "描述这张图片",
+  "images": ["images/example.png"]
+}
+```
+
+支持 PNG、JPEG、GIF、WebP 文件头识别。单张最大 32MiB，每请求最多 600 张、原始累计 128MiB，内联 base64 累计最大 20MiB。`read-only` 和 `workspace-write` 只允许工作区内路径，`danger-full-access` 才允许外部路径。
+
+JSONL 只保存路径、媒体类型、字节数和 SHA-256，不写 base64。DeepSeek 请求准备时重新读取并核对附件；文件变化、格式不符或路径越界会失败。Mock 只验证新输入的附件元数据，不读取或分析图片内容。
+
+| `DEEPSEEK_IMAGE_MODE` | 行为 |
+|---|---|
+| `auto`（默认） | 优先 Files 上传；上传失败或文件引用被拒绝时降级为内联 |
+| `inline` | 不上传，直接使用 base64 |
+| `required` | 必须取得文件 id，上传失败直接报错 |
+
+上传使用 `<Messages 根>/files`、multipart 和 `files-api-2025-04-14`，默认生命周期 7 天。同一路由、凭据作用域和图片哈希在进程内复用未临近过期的文件 id，并发请求共享上传锁。无效文件引用会清除缓存；Messages 重试不会重复上传。事件流提供 `llm/image-upload` 和 `llm/image-fallback`。
+
+查看远端文件列表：
+
+```bash
+PYTHONPATH=src python3 -m minidsh \
+  --disable llm.mock --enable llm.deepseek files
+```
+
+`--disable llm.files` 后 `auto` 自动使用内联，`required` 会拒绝图片请求，Files 列表不可用。当前没有持久上传索引、自动配额清理、图片变换或浏览器文件选择器。
+
 ## 模型列表、重试与取消
 
 查看模型不需要运行 Agent。默认 Mock 返回离线条目；查询真实 DeepSeek 列表时显式切换模型插件：
@@ -193,6 +230,7 @@ GET  /health
 GET  /v1/plugins
 GET  /v1/tools
 GET  /v1/models
+GET  /v1/files
 GET  /v1/prompt
 GET  /v1/sessions
 GET  /v1/sessions/<id>
@@ -306,6 +344,9 @@ PYTHONPATH=src python3 -m minidsh \
 | `DEEPSEEK_RETRY_INITIAL_DELAY_MS` | `500` |
 | `DEEPSEEK_RETRY_MAX_DELAY_MS` | `10000` |
 | `DEEPSEEK_RETRY_JITTER_RATIO` | `0.1` |
+| `DEEPSEEK_IMAGE_MODE` | `auto`，可选 `inline / required` |
+| `DEEPSEEK_FILES_API_TIMEOUT_MS` | `60000` |
+| `DEEPSEEK_FILE_EXPIRY_SECONDS` | `604800`，允许 `3600–2592000` |
 
 真实调用会访问网络并产生费用。密钥只从环境变量读取，不写入配置、会话或 Shell 环境。当前在线验收尚未执行；本地 Messages/SSE 端到端验收已通过。
 
@@ -352,16 +393,18 @@ minidsh-headless / minidsh-web / minidsh-desktop
 12. `src/minidsh/llm.py`：模型接口、模型列表和内容块。
 13. `src/minidsh/retry.py`：重试模式、瞬时错误和指数退避。
 14. `src/minidsh/cancellation.py`：协作式取消令牌与资源关闭回调。
-15. `src/minidsh/deepseek.py`：Messages、SSE、重试、列表缓存和原生 replay。
-16. `src/minidsh/session.py`：事件、消息投影、resume、fork、transcript。
-17. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
-18. `src/minidsh/agent.py`：Agent Loop 与取消终态。
-19. `src/minidsh/server.py`：HTTP API、SSE、run_id 关联和取消入口。
-20. `src/minidsh/web/index.html`：Web 工作台与停止运行。
-21. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
-22. `examples/minidsh-clock`：可独立安装的外部工具插件。
-23. `packages`：Headless、Web、Desktop 三个产品发行入口。
-24. `src/minidsh/cli.py`：命令行与常驻宿主入口。
+15. `src/minidsh/images.py`：图片路径、格式、哈希和请求预算。
+16. `src/minidsh/files.py`：multipart 上传、文件对象校验和 Files CRUD。
+17. `src/minidsh/deepseek.py`：Messages 图片、SSE、重试、列表缓存和原生 replay。
+18. `src/minidsh/session.py`：附件元数据、消息投影、resume、fork、transcript。
+19. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
+20. `src/minidsh/agent.py`：Agent Loop、图片输入与取消终态。
+21. `src/minidsh/server.py`：HTTP API、SSE、run_id 关联和取消入口。
+22. `src/minidsh/web/index.html`：Web 工作台、图片路径与停止运行。
+23. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
+24. `examples/minidsh-clock`：可独立安装的外部工具插件。
+25. `packages`：Headless、Web、Desktop 三个产品发行入口。
+26. `src/minidsh/cli.py`：命令行与常驻宿主入口。
 
 ## 观察会话
 
@@ -414,9 +457,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 通过 entry points 发现独立 Python 插件；提供 Headless、Web、Desktop 发行入口，重依赖按需安装。
 
-### 第 7 层：模型列表、重试与取消（当前）
+### 第 7 层：模型列表、重试与取消
 
-理解同源模型发现、成功缓存、瞬时错误分类、指数退避、取消令牌和资源回收。对照 `docs/upstream-parity.md` 阅读。
+理解同源模型发现、成功缓存、瞬时错误分类、指数退避、取消令牌和资源回收。
+
+### 第 8 层：图片附件与 Files API（当前）
+
+理解内容寻址附件、内联与文件引用、multipart 上传、缓存复用、失败降级和无效引用失效。对照 `docs/upstream-parity.md` 阅读。
 
 ## 当前边界
 
@@ -424,8 +471,9 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 - HTTP/SSE 是学习 API，不兼容官方 Web Host 的认证、RPC 和多路复用协议。
 - 插件依赖在启动时收敛，尚不支持运行中热重载。
 - 已支持 resume/fork/压缩，但尚无官方 surface replacement、格式迁移、跨进程锁和崩溃修复。
-- token meter 是启发式估算，尚无精确 tokenizer、tool-result pruner 和模型切换压缩。
-- 尚无内核沙箱、PTY、持久 Shell、审批升级、图片和 Files API。
+- token meter 是启发式估算，尚无精确 tokenizer、图片 token 定价、tool-result pruner 和模型切换压缩。
+- 尚无内核沙箱、PTY、持久 Shell 和审批升级。
+- 图片上传只有进程内缓存和锁，尚无持久索引、独立等待者取消、配额回收、图片变换和浏览器文件选择器。
 - 模型列表尚未实现官方 badge、客户端版本要求、后台刷新和完整能力目录；列表请求不支持外部取消。
 - 网络连接建立前只能检查取消状态，已建立的响应流可以主动关闭；`always` 重试不会自行设置次数上限。
 - 当前 Shell 固定使用 `/bin/bash`，尚未支持 Windows 原生进程后端。

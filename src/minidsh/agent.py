@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 from .cancellation import CancellationToken, RunCancelled
 from .compaction import CompactionService
 from .events import EventBus
+from .images import load_image_blocks
 from .llm import Model, text_block
 from .observations import ObservationStore
 from .session import SessionStore
@@ -24,6 +25,8 @@ class Agent:
         observations: Optional[ObservationStore] = None,
         compaction: Optional[CompactionService] = None,
         max_steps: int = 4,
+        workspace: Optional[Path] = None,
+        allow_outside: bool = False,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -34,6 +37,8 @@ class Agent:
         self.observations = observations
         self.compaction = compaction
         self.max_steps = max_steps
+        self.workspace = (workspace or Path.cwd()).resolve()
+        self.allow_outside = allow_outside
 
     def run(
         self,
@@ -41,9 +46,11 @@ class Agent:
         session_id: Optional[str] = None,
         run_id: Optional[str] = None,
         cancel_token: Optional[CancellationToken] = None,
+        image_paths: Optional[List[str]] = None,
     ) -> str:
         token = cancel_token or CancellationToken(run_id)
         token.throw_if_cancelled()
+        image_blocks = load_image_blocks(self.workspace, image_paths or [], self.allow_outside)
         system = self.system_prompt.render()
         messages: List[Dict[str, object]] = []
         turn = 1
@@ -67,7 +74,7 @@ class Agent:
             self._record(session_id, "session/start", {"prompt": prompt})
 
         messages = [message for message in messages if not self._is_runtime_context(message)]
-        user_message = {"role": "user", "content": [text_block(prompt)]}
+        user_message = {"role": "user", "content": [text_block(prompt)] + image_blocks}
         runtime_message = {
             "role": "user",
             "content": [text_block(self.runtime_context)],
