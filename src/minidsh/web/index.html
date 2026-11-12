@@ -138,6 +138,8 @@
     .button:active:not(:disabled) { transform: translateY(1px); }
     .button.primary { margin-left: auto; border-color: #536dde; color: #fff; background: #596fda; box-shadow: 0 4px 10px #596fda25; }
     .button.primary:hover:not(:disabled) { border-color: #465fca; background: #4e64ce; }
+    .button.danger:not(:disabled) { border-color: #e9c7c7; color: #b34a4a; background: #fffafa; }
+    .button.danger:hover:not(:disabled) { border-color: #dca7a7; background: #fff3f3; }
     .button svg { width: 13px; height: 13px; }
     .shortcut { margin-left: 4px; color: #a2abc0; font-size: 10px; }
     .terminal-card { margin-top: 20px; }
@@ -216,6 +218,7 @@
                 </div>
               </details>
               <div class="actions">
+                <button class="button danger" id="cancel" disabled>停止运行</button>
                 <span class="shortcut">⌘ / Ctrl + Enter 运行</span>
                 <button class="button primary" id="run">
                   <svg viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5z"/></svg>
@@ -247,9 +250,11 @@
     const events = document.querySelector('#events')
     const sessionInput = document.querySelector('#sessionId')
     const runButton = document.querySelector('#run')
+    const cancelButton = document.querySelector('#cancel')
     const status = document.querySelector('#status')
     const statusText = document.querySelector('#statusText')
     let running = false
+    let currentRunId = null
 
     const write = (text) => {
       events.textContent += `${text}\n`
@@ -258,6 +263,7 @@
     const setRunning = (value) => {
       running = value
       runButton.disabled = value
+      cancelButton.disabled = !value || !currentRunId
       status.classList.toggle('busy', value)
       statusText.textContent = value ? 'Agent 正在运行' : '本地服务已连接'
       document.querySelector('#runText').textContent = value ? '正在运行…' : '运行 Agent'
@@ -311,15 +317,28 @@
       const query = new URLSearchParams({ prompt })
       if (sessionId) query.set('session_id', sessionId)
       events.textContent = ''
+      currentRunId = null
       setRunning(true)
       const source = new EventSource(`/v1/runs/stream?${query}`)
-      for (const name of ['turn/start', 'assistant/message', 'tools/pre-execute', 'tools/post-execute', 'job/settled', 'turn/end']) {
+      source.addEventListener('turn/start', (event) => {
+        const data = JSON.parse(event.data)
+        currentRunId = data.run_id
+        setRunning(true)
+        write(`turn/start: ${event.data}`)
+      })
+      for (const name of ['assistant/message', 'llm/retry', 'tools/pre-execute', 'tools/post-execute', 'job/settled', 'turn/end']) {
         source.addEventListener(name, (event) => write(`${name}: ${event.data}`))
       }
       source.addEventListener('run/result', (event) => {
         const data = JSON.parse(event.data)
         if (!sessionInput.value && data.session_id) sessionInput.value = data.session_id
         write(`run/result: ${event.data}`)
+        source.close()
+        setRunning(false)
+        refreshSessions()
+      })
+      source.addEventListener('run/cancelled', (event) => {
+        write(`run/cancelled: ${event.data}`)
         source.close()
         setRunning(false)
         refreshSessions()
@@ -334,6 +353,16 @@
     }
 
     runButton.onclick = run
+    cancelButton.onclick = async () => {
+      if (!currentRunId) return
+      cancelButton.disabled = true
+      try {
+        await api(`/v1/runs/${currentRunId}/cancel`, { method: 'POST', body: '{}' })
+      } catch (error) {
+        write(`取消失败: ${error.message}`)
+        setRunning(running)
+      }
+    }
     document.querySelector('#prompt').addEventListener('keydown', (event) => {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') run()
     })

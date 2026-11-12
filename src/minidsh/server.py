@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from .agent import Agent
 from .app import Application
+from .cancellation import CancellationToken, RunCancelled
 from .jobs import JobRecord, JobService
 
 
@@ -16,6 +17,7 @@ EVENT_NAMES = (
     "turn/start",
     "turn/end",
     "assistant/message",
+    "llm/retry",
     "tools/pre-execute",
     "tools/post-execute",
     "job/settled",
@@ -23,9 +25,12 @@ EVENT_NAMES = (
 
 
 class SseBroker:
-    def __init__(self, agent: Agent) -> None:
+    def __init__(self, agent: Agent, cancellation_enabled: bool = True) -> None:
         self.agent = agent
+        self.cancellation_enabled = cancellation_enabled
         self._listeners: List[queue.Queue] = []
+        self._cancellations: Dict[str, CancellationToken] = {}
+        self._cancellation_lock = threading.Lock()
         for name in EVENT_NAMES:
             agent.events.on(name, lambda payload, event=name: self.publish(event, payload))
 
@@ -43,10 +48,20 @@ class SseBroker:
         if listener in self._listeners:
             self._listeners.remove(listener)
 
+    def cancel(self, run_id: str) -> bool:
+        if not self.cancellation_enabled:
+            raise RuntimeError("core.cancellation 当前被禁用")
+        with self._cancellation_lock:
+            token = self._cancellations.get(run_id)
+        return token.cancel() if token is not None else False
+
     def start(self, prompt: str, session_id: Optional[str]) -> queue.Queue:
         listener = self.subscribe()
         actual_session_id = session_id
         operation_id = uuid.uuid4().hex
+        token = CancellationToken(operation_id)
+        with self._cancellation_lock:
+            self._cancellations[operation_id] = token
 
         def run() -> None:
             nonlocal actual_session_id
@@ -58,13 +73,17 @@ class SseBroker:
                         if payload.get("run_id") == operation_id:
                             actual_session_id = str(payload["session_id"])
                     stop_capture = self.agent.events.on("turn/start", capture)
-                result = self.agent.run(prompt, session_id, operation_id)
+                result = self.agent.run(prompt, session_id, operation_id, token)
                 self.publish("run/result", {"session_id": actual_session_id, "result": result, "run_id": operation_id})
+            except RunCancelled:
+                self.publish("run/cancelled", {"session_id": actual_session_id, "run_id": operation_id})
             except Exception as exc:
                 self.publish("run/error", {"session_id": actual_session_id, "error": str(exc), "run_id": operation_id})
             finally:
                 if stop_capture is not None:
                     stop_capture()
+                with self._cancellation_lock:
+                    self._cancellations.pop(operation_id, None)
                 self.publish("run/done", {"session_id": actual_session_id, "run_id": operation_id})
 
         listener.operation_id = operation_id
@@ -83,6 +102,8 @@ class SseBroker:
                     return message["payload"]
                 if message["event"] == "run/error":
                     raise RuntimeError(str(message["payload"]["error"]))
+                if message["event"] == "run/cancelled":
+                    raise RunCancelled("运行已取消")
                 if message["event"] == "run/done":
                     raise RuntimeError("run finished without a result")
         finally:
@@ -104,7 +125,7 @@ def job_view(job: JobRecord) -> Dict[str, object]:
 class ApiServer:
     def __init__(self, app: Application, host: str = "127.0.0.1", port: int = 3080, token: Optional[str] = None) -> None:
         self.app = app
-        self.broker = SseBroker(app.agent)
+        self.broker = SseBroker(app.agent, app.config.features["core.cancellation"])
         self.token = token
         self.http = ThreadingHTTPServer((host, port), self._handler())
         self.host = host
@@ -142,6 +163,10 @@ class ApiServer:
                         self._send_json(app.manager.status())
                     elif path == "/v1/tools":
                         self._send_json(app.tools.definitions())
+                    elif path == "/v1/models":
+                        if not app.config.features["llm.model-listing"]:
+                            raise RuntimeError("llm.model-listing 当前被禁用")
+                        self._send_json(app.model.list_models())
                     elif path == "/v1/prompt":
                         self._send_json({"system": app.system_prompt.render(), "runtime_context": app.runtime_context})
                     elif path == "/v1/sessions":
@@ -165,6 +190,8 @@ class ApiServer:
                         self._stream(prompt, session_id)
                     else:
                         self._send_json({"error": "not found"}, 404)
+                except RunCancelled as exc:
+                    self._send_json({"error": str(exc), "code": "ABORTED"}, 409)
                 except Exception as exc:
                     self._send_json({"error": str(exc)}, 400)
 
@@ -180,6 +207,12 @@ class ApiServer:
                         self._send_json(broker.wait(prompt, session_id))
                     elif path == "/v1/runs/stream":
                         self._stream(self._prompt(body), body.get("session_id") or None)
+                    elif path.startswith("/v1/runs/"):
+                        parts = path.split("/")
+                        if len(parts) == 5 and parts[4] == "cancel":
+                            self._send_json({"run_id": parts[3], "cancelled": broker.cancel(parts[3])})
+                        else:
+                            self._send_json({"error": "not found"}, 404)
                     elif path.startswith("/v1/sessions/"):
                         parts = path.split("/")
                         session_id = parts[3]
@@ -203,6 +236,8 @@ class ApiServer:
                             self._send_json({"error": "not found"}, 404)
                     else:
                         self._send_json({"error": "not found"}, 404)
+                except RunCancelled as exc:
+                    self._send_json({"error": str(exc), "code": "ABORTED"}, 409)
                 except Exception as exc:
                     self._send_json({"error": str(exc)}, 400)
 
@@ -270,10 +305,16 @@ class ApiServer:
                             self.wfile.flush()
                             continue
                         event = message["event"]
+                        payload = message["payload"]
+                        operation_id = listener.operation_id
+                        if event.startswith("run/") and payload.get("run_id") != operation_id:
+                            continue
+                        if event != "job/settled" and payload.get("run_id") != operation_id:
+                            continue
                         if event == "run/done":
                             break
                         sequence += 1
-                        data = json.dumps(message["payload"], ensure_ascii=False)
+                        data = json.dumps(payload, ensure_ascii=False)
                         self.wfile.write(f"id: {sequence}\nevent: {event}\ndata: {data}\n\n".encode("utf-8"))
                         self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):

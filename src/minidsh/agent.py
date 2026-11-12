@@ -2,6 +2,7 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .cancellation import CancellationToken, RunCancelled
 from .compaction import CompactionService
 from .events import EventBus
 from .llm import Model, text_block
@@ -34,7 +35,15 @@ class Agent:
         self.compaction = compaction
         self.max_steps = max_steps
 
-    def run(self, prompt: str, session_id: Optional[str] = None, run_id: Optional[str] = None) -> str:
+    def run(
+        self,
+        prompt: str,
+        session_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        cancel_token: Optional[CancellationToken] = None,
+    ) -> str:
+        token = cancel_token or CancellationToken(run_id)
+        token.throw_if_cancelled()
         system = self.system_prompt.render()
         messages: List[Dict[str, object]] = []
         turn = 1
@@ -69,12 +78,35 @@ class Agent:
         self._record(session_id, "user/message", runtime_message)
         self._record(session_id, "turn/start", {"turn": turn})
         self.events.emit("turn/start", {"session_id": session_id, "prompt": prompt, "run_id": run_id})
+        try:
+            return self._run_steps(system, messages, session_id, turn, run_id, token)
+        except RunCancelled:
+            reason = {"kind": "aborted"}
+            self._record(session_id, "turn/end", {"turn": turn, "reason": reason})
+            self.events.emit("turn/end", {"session_id": session_id, "content": "", "reason": reason, "run_id": run_id})
+            raise
 
+    def _run_steps(
+        self,
+        system: str,
+        messages: List[Dict[str, object]],
+        session_id: str,
+        turn: int,
+        run_id: Optional[str],
+        token: CancellationToken,
+    ) -> str:
         for step in range(1, self.max_steps + 1):
+            token.throw_if_cancelled()
             self._record(session_id, "step/start", {"turn": turn, "step": step})
             if self.compaction is not None:
-                messages = self.compaction.compact_if_needed(system, messages, self.tools.definitions(), session_id)
-            response = self.model.complete(system, messages, self.tools.definitions(), session_id)
+                messages = self.compaction.compact_if_needed(
+                    system,
+                    messages,
+                    self.tools.definitions(),
+                    session_id,
+                    cancel_token=token,
+                )
+            response = self.model.complete(system, messages, self.tools.definitions(), session_id, token)
             model_name = getattr(self.model, "model_id", "mock")
             if response.replay_state is not None:
                 response_info = response.replay_state.get("response", {})
@@ -100,16 +132,17 @@ class Agent:
                 "assistant/message",
                 {"turn": turn, "step": step, "message": assistant_message, "usage": response.usage},
             )
-            self.events.emit("assistant/message", {"session_id": session_id, "message": assistant_message})
+            self.events.emit("assistant/message", {"session_id": session_id, "message": assistant_message, "run_id": run_id})
 
             if not response.tool_calls:
                 reason = response.finish_reason
                 self._record(session_id, "step/end", {"turn": turn, "step": step})
                 self._record(session_id, "turn/end", {"turn": turn, "reason": reason})
-                self.events.emit("turn/end", {"session_id": session_id, "content": response.content})
+                self.events.emit("turn/end", {"session_id": session_id, "content": response.content, "reason": reason, "run_id": run_id})
                 return response.content
 
             for call in response.tool_calls:
+                token.throw_if_cancelled()
                 self._record(
                     session_id,
                     "tool/call",
@@ -117,7 +150,14 @@ class Agent:
                 )
                 is_error = False
                 try:
-                    result = self.tools.execute(call.name, call.arguments, session_id, call.call_id)
+                    result = self.tools.execute(
+                        call.name,
+                        call.arguments,
+                        session_id,
+                        call.call_id,
+                        run_id,
+                        token,
+                    )
                 except ToolError as exc:
                     result = f"工具执行失败: {exc}"
                     is_error = True

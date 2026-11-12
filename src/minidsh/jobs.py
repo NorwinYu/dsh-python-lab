@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from .cancellation import CancellationToken
 from .events import EventBus
 from .plugins import Plugin, ServiceContext
 from .session import SessionStore
@@ -207,15 +208,26 @@ class JobService:
                 data["detail"] = job.detail
         job.session.append(job.owner, event_type, data)
 
-    def wait(self, job: JobRecord, timeout_ms: int) -> JobRecord:
+    def wait(self, job: JobRecord, timeout_ms: int, cancel_token: Optional[CancellationToken] = None) -> JobRecord:
         deadline = time.monotonic() + timeout_ms / 1000
-        with job.condition:
-            while job.status in {"running", "stopping"}:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                job.condition.wait(remaining)
-        return job
+
+        def wake() -> None:
+            with job.condition:
+                job.condition.notify_all()
+
+        unregister = cancel_token.on_cancel(wake) if cancel_token is not None else lambda: None
+        try:
+            with job.condition:
+                while job.status in {"running", "stopping"}:
+                    if cancel_token is not None:
+                        cancel_token.throw_if_cancelled()
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    job.condition.wait(remaining)
+            return job
+        finally:
+            unregister()
 
     def read(
         self,
@@ -225,10 +237,11 @@ class JobService:
         timeout_ms: int = 30_000,
         include_status: bool = True,
         allow_empty: bool = False,
+        cancel_token: Optional[CancellationToken] = None,
     ) -> str:
         job = self.expect(job_id, owner)
         if wait:
-            job = self.wait(job, timeout_ms)
+            job = self.wait(job, timeout_ms, cancel_token)
         with job.condition:
             out, out_lossy, out_path = job.stdout.read_from(job.stdout_cursor)
             err, err_lossy, err_path = job.stderr.read_from(job.stderr_cursor)

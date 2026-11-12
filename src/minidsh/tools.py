@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .approval import ApprovalService
+from .cancellation import CancellationToken
 from .events import EventBus
 from .observations import ObservationStore
 from .plugins import Plugin, ServiceContext
@@ -30,6 +31,8 @@ class Execution:
     ctx: ServiceContext
     session_id: Optional[str]
     call_id: Optional[str]
+    run_id: Optional[str] = None
+    cancel_token: Optional[CancellationToken] = None
 
     def service(self, name: str) -> object:
         return self.ctx.require(name)
@@ -80,20 +83,27 @@ class ToolRegistry:
         arguments: Dict[str, object],
         session_id: Optional[str] = None,
         call_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        cancel_token: Optional[CancellationToken] = None,
     ) -> str:
-        self._events.emit("tools/pre-execute", {"name": name, "arguments": arguments})
+        if cancel_token is not None:
+            cancel_token.throw_if_cancelled()
+        event_context = {"session_id": session_id, "call_id": call_id, "run_id": run_id}
+        self._events.emit("tools/pre-execute", {"name": name, "arguments": arguments, **event_context})
         if name not in self._tools:
             raise ToolError(f"工具未启用或不存在: {name}")
         tool = self._tools[name]
-        execution = Execution(self._ctx, session_id, call_id)
+        execution = Execution(self._ctx, session_id, call_id, run_id, cancel_token)
         try:
             if tool.mutating:
                 self._authorize(execution, tool.name, tool.kind)
             result = tool.handler(arguments, execution)
+            if cancel_token is not None:
+                cancel_token.throw_if_cancelled()
         except Exception as exc:
-            self._events.emit("tools/post-execute", {"name": name, "error": str(exc)})
+            self._events.emit("tools/post-execute", {"name": name, "error": str(exc), **event_context})
             raise
-        self._events.emit("tools/post-execute", {"name": name, "result": result})
+        self._events.emit("tools/post-execute", {"name": name, "result": result, **event_context})
         return result
 
     def _authorize(self, execution: Execution, tool_name: str, kind: str) -> None:

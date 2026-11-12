@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 from typing import Dict, Optional
 
+from .cancellation import RunCancelled
 from .jobs import JobRecord, JobService
 from .plugins import Plugin, ServiceContext
 from .system_prompt import SystemPrompt
@@ -107,7 +108,12 @@ def make_bash_tool(workspace: Path) -> Tool:
 
         if background:
             return f"Started background job {job.id}"
-        job = jobs.wait(job, timeout_ms)
+        try:
+            job = jobs.wait(job, timeout_ms, execution.cancel_token)
+        except RunCancelled:
+            jobs.kill(job.id, execution.session_id, "run cancelled")
+            jobs.wait(job, 5_000)
+            raise
         if job.status in {"running", "stopping"}:
             output = jobs.read(job.id, execution.session_id, include_status=False, allow_empty=True)
             if output and not output.endswith("\n"):
@@ -167,7 +173,13 @@ def make_job_output_tool() -> Tool:
         jobs = execution.service("jobs")
         assert isinstance(jobs, JobService)
         try:
-            return jobs.read(job_id, execution.session_id, wait, min(timeout_ms, JOB_WAIT_MAX_MS))
+            return jobs.read(
+                job_id,
+                execution.session_id,
+                wait,
+                min(timeout_ms, JOB_WAIT_MAX_MS),
+                cancel_token=execution.cancel_token,
+            )
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
 

@@ -47,6 +47,7 @@ minidsh run "请列出当前目录"
 - `core.fs-observation`：同会话文件读取版本及恢复。
 - `core.jobs`：进程、输出、任务隔离和生命周期。
 - `core.compaction`：自动/手动压缩检查点。
+- `core.cancellation`：HTTP/Web 运行取消及模型、工具、前台 Shell 取消传播。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
@@ -57,6 +58,8 @@ minidsh run "请列出当前目录"
 - `session.jsonl`：JSONL 会话持久化。
 - `llm.mock`：确定性模拟模型，默认启用。
 - `llm.deepseek`：真实 DeepSeek Messages 模型，默认禁用。
+- `llm.retry`：DeepSeek 有界瞬时错误重试，默认启用。
+- `llm.model-listing`：模型列表查询与缓存，默认启用。
 - `agent.core`：Agent Loop。
 
 ```bash
@@ -151,6 +154,28 @@ PYTHONPATH=src python3 -m minidsh --context-window 100 run "测试自动压缩"
 
 resume 会恢复消息、turn 编号和文件观察；runtime context 使用当前配置重新生成。fork 不会改写原会话。压缩只改变发给模型的投影，不删除原始 JSONL 事件。
 
+## 模型列表、重试与取消
+
+查看模型不需要运行 Agent。默认 Mock 返回离线条目；查询真实 DeepSeek 列表时显式切换模型插件：
+
+```bash
+PYTHONPATH=src python3 -m minidsh models
+PYTHONPATH=src python3 -m minidsh \
+  --disable llm.mock --enable llm.deepseek models
+```
+
+DeepSeek 列表请求使用 Messages 根地址同源 origin 的 `GET /models`，默认超时 5000ms，成功结果缓存 600000ms；设 `DEEPSEEK_MODELS_MAX_AGE_MS=0` 可每次刷新。列表请求不自动重试，重定向不会转发凭据。
+
+Messages 默认对 `EMPTY_RESPONSE/RATE_LIMIT/SERVER/TIMEOUT/TRANSPORT` 最多重试 5 次，首次退避 500ms，指数增长至 10000ms，带 10% 对称抖动，并接受有上限的 `Retry-After`。每次重试发出 `llm/retry` 事件；`--disable llm.retry` 可完全关闭。`DEEPSEEK_RETRY_MODE=always` 会按上游语义持续重试所有错误，只应在配合取消和受控测试时使用。
+
+SSE 的 `turn/start` 返回本次 `run_id`，可据此取消：
+
+```bash
+curl -X POST http://127.0.0.1:3080/v1/runs/<run-id>/cancel -d '{}'
+```
+
+取消会产生 `run/cancelled`，会话记录 `turn/end` 的 `aborted` 原因。模型流、重试等待、工具边界和前台 Shell 使用同一取消令牌；前台 Shell 被终止，而取消 `job_output` 等待不会杀掉被观察的后台任务。Web 的“停止运行”按钮调用同一 API。`--disable core.cancellation` 禁用外部取消入口。
+
 ## HTTP 宿主与 Web 页面
 
 启动本地 HTTP/SSE 宿主：
@@ -167,6 +192,7 @@ API 摘要：
 GET  /health
 GET  /v1/plugins
 GET  /v1/tools
+GET  /v1/models
 GET  /v1/prompt
 GET  /v1/sessions
 GET  /v1/sessions/<id>
@@ -175,6 +201,7 @@ GET  /v1/jobs
 GET  /v1/jobs/<id>/output
 POST /v1/runs
 POST /v1/runs/stream
+POST /v1/runs/<run-id>/cancel
 POST /v1/sessions/<id>/resume
 POST /v1/sessions/<id>/fork
 POST /v1/sessions/<id>/compact
@@ -187,7 +214,7 @@ POST /v1/jobs/<id>/kill
 Authorization: Bearer <token>
 ```
 
-SSE 包含 turn、assistant、工具执行、run result/error/done 和 job 完成通知。并发运行通过唯一 `run_id` 关联结果，相同 prompt 也不会串会话。
+SSE 包含 turn、assistant、重试、工具执行、run result/error/cancelled 和 job 完成通知；内部 run/done 只用于关闭对应当前流。并发运行通过唯一 `run_id` 过滤事件，相同 prompt 也不会串会话或相互提前结束。
 
 ## 外部 Python 插件
 
@@ -272,6 +299,13 @@ PYTHONPATH=src python3 -m minidsh \
 | `DEEPSEEK_REASONING_EFFORT` | `high`，可选 `off / low / high / max` |
 | `DEEPSEEK_MAX_TOKENS` | `256000` |
 | `DEEPSEEK_STREAM_IDLE_TIMEOUT_MS` | `300000` |
+| `DEEPSEEK_MODELS_TIMEOUT_MS` | `5000` |
+| `DEEPSEEK_MODELS_MAX_AGE_MS` | `600000`，`0` 表示每次刷新 |
+| `DEEPSEEK_RETRY_MODE` | `normal`，可显式设为 `always` |
+| `DEEPSEEK_RETRY_MAX` | `5` |
+| `DEEPSEEK_RETRY_INITIAL_DELAY_MS` | `500` |
+| `DEEPSEEK_RETRY_MAX_DELAY_MS` | `10000` |
+| `DEEPSEEK_RETRY_JITTER_RATIO` | `0.1` |
 
 真实调用会访问网络并产生费用。密钥只从环境变量读取，不写入配置、会话或 Shell 环境。当前在线验收尚未执行；本地 Messages/SSE 端到端验收已通过。
 
@@ -315,17 +349,19 @@ minidsh-headless / minidsh-web / minidsh-desktop
 9. `src/minidsh/tools.py`：工具 schema、执行链、原子写入和路径边界。
 10. `src/minidsh/jobs.py`：进程、输出环、任务隔离、等待、kill 和回收。
 11. `src/minidsh/shell.py`：Bash 与 jobs 工具及输出渲染。
-12. `src/minidsh/llm.py`：模型接口、内容块和 MockModel。
-13. `src/minidsh/deepseek.py`：Messages 请求、SSE 和原生 replay。
-14. `src/minidsh/session.py`：事件、消息投影、resume、fork、transcript。
-15. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
-16. `src/minidsh/agent.py`：完整的最小 Agent Loop。
-17. `src/minidsh/server.py`：HTTP API、SSE 和 run_id 关联。
-18. `src/minidsh/web/index.html`：最小 Web 页面。
-19. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
-20. `examples/minidsh-clock`：可独立安装的外部工具插件。
-21. `packages`：Headless、Web、Desktop 三个产品发行入口。
-22. `src/minidsh/cli.py`：命令行与常驻宿主入口。
+12. `src/minidsh/llm.py`：模型接口、模型列表和内容块。
+13. `src/minidsh/retry.py`：重试模式、瞬时错误和指数退避。
+14. `src/minidsh/cancellation.py`：协作式取消令牌与资源关闭回调。
+15. `src/minidsh/deepseek.py`：Messages、SSE、重试、列表缓存和原生 replay。
+16. `src/minidsh/session.py`：事件、消息投影、resume、fork、transcript。
+17. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
+18. `src/minidsh/agent.py`：Agent Loop 与取消终态。
+19. `src/minidsh/server.py`：HTTP API、SSE、run_id 关联和取消入口。
+20. `src/minidsh/web/index.html`：Web 工作台与停止运行。
+21. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
+22. `examples/minidsh-clock`：可独立安装的外部工具插件。
+23. `packages`：Headless、Web、Desktop 三个产品发行入口。
+24. `src/minidsh/cli.py`：命令行与常驻宿主入口。
 
 ## 观察会话
 
@@ -374,9 +410,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 理解 HTTP API、SSE、任务通知、run_id 关联、并发会话和最小 Web 页面。
 
-### 第 6 层：外部插件与发行包（当前）
+### 第 6 层：外部插件与发行包
 
-通过 entry points 发现独立 Python 插件；提供 Headless、Web、Desktop 发行入口，重依赖按需安装。对照 `docs/upstream-parity.md` 阅读。
+通过 entry points 发现独立 Python 插件；提供 Headless、Web、Desktop 发行入口，重依赖按需安装。
+
+### 第 7 层：模型列表、重试与取消（当前）
+
+理解同源模型发现、成功缓存、瞬时错误分类、指数退避、取消令牌和资源回收。对照 `docs/upstream-parity.md` 阅读。
 
 ## 当前边界
 
@@ -385,7 +425,9 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 - 插件依赖在启动时收敛，尚不支持运行中热重载。
 - 已支持 resume/fork/压缩，但尚无官方 surface replacement、格式迁移、跨进程锁和崩溃修复。
 - token meter 是启发式估算，尚无精确 tokenizer、tool-result pruner 和模型切换压缩。
-- 尚无内核沙箱、PTY、持久 Shell、审批升级、图片、重试和模型 listing。
+- 尚无内核沙箱、PTY、持久 Shell、审批升级、图片和 Files API。
+- 模型列表尚未实现官方 badge、客户端版本要求、后台刷新和完整能力目录；列表请求不支持外部取消。
+- 网络连接建立前只能检查取消状态，已建立的响应流可以主动关闭；`always` 重试不会自行设置次数上限。
 - 当前 Shell 固定使用 `/bin/bash`，尚未支持 Windows 原生进程后端。
 - 当前 Web 页面不支持自定义 Authorization 请求头；token 主要用于 API 客户端。
 - 尚未进行真实 DeepSeek 在线验收；这是教学代码，不应直接暴露为公网服务。

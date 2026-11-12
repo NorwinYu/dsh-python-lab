@@ -12,6 +12,7 @@
     "core.fs-observation": true,
     "core.jobs": true,
     "core.compaction": true,
+    "core.cancellation": true,
     "tools.glob": true,
     "tools.read": true,
     "tools.write": true,
@@ -21,6 +22,8 @@
     "session.jsonl": true,
     "llm.mock": true,
     "llm.deepseek": false,
+    "llm.retry": true,
+    "llm.model-listing": true,
     "agent.core": true
   }
 }

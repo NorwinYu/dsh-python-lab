@@ -1,6 +1,7 @@
 import json
 from typing import Dict, List, Optional
 
+from .cancellation import CancellationToken
 from .llm import Model, text_block
 from .plugins import Plugin, ServiceContext
 from .session import SessionStore
@@ -67,6 +68,7 @@ class CompactionService:
         tools: List[Dict[str, object]],
         session_id: str,
         force: bool = False,
+        cancel_token: Optional[CancellationToken] = None,
     ) -> List[Dict[str, object]]:
         if self.session is None:
             return messages
@@ -100,6 +102,7 @@ class CompactionService:
             ],
             [],
             session_id,
+            cancel_token,
         )
         summary = response.content.strip()
         if not summary:

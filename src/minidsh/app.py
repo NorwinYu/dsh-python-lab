@@ -93,7 +93,12 @@ class Application:
         self.manager.register(JobToolsPlugin(("tool:jobs", 1600, JOBS_GUIDANCE)))
         self.manager.register(JsonlSessionPlugin(config.session_dir))
         self.manager.register(MockModelPlugin())
-        self.manager.register(DeepSeekModelPlugin())
+        self.manager.register(
+            DeepSeekModelPlugin(
+                retry_enabled=config.features["llm.retry"],
+                listing_enabled=config.features["llm.model-listing"],
+            )
+        )
         self.manager.register(CompactionPlugin(config.context_window))
         self.manager.register(AgentPlugin(config))
         for spec in config.plugin_specs:
@@ -120,6 +125,12 @@ class Application:
         agent = self.ctx.require("agent")
         assert isinstance(agent, Agent)
         return agent
+
+    @property
+    def model(self) -> Model:
+        model = self.ctx.require("llm")
+        assert isinstance(model, Model)
+        return model
 
     @property
     def tools(self) -> ToolRegistry:

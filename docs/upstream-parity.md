@@ -85,10 +85,22 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 
 - 默认仅绑定 `127.0.0.1`；绑定非回环地址必须配置 `MINIDSH_TOKEN`，否则拒绝启动。
 - 提供健康、插件、工具、提示词、会话列表/事件/transcript、run/resume/fork/compact、jobs/output/kill API。
-- SSE 包含 turn、assistant、工具执行、run result/error/done 和 `job/settled`。
-- 每次运行都有唯一 `run_id`，捕获新 session id 和等待结果都按 `run_id` 匹配，避免并发运行串结果。
+- SSE 包含 turn、assistant、`llm/retry`、工具执行、run result/error/cancelled 和 `job/settled`；内部 run/done 用于关闭当前流。
+- 每次运行都有唯一 `run_id`，捕获 session id、等待结果和流事件都按 `run_id` 匹配，其他运行结束不会提前关闭当前 SSE。
 - 相同 prompt 的并发运行也能获得独立 session id；JSONL 追加和读取使用锁避免序号冲突与半行读取。
-- 提供一个使用 EventSource 的最小 Web 页面，复用同一 Application，不复制 Agent 逻辑。
+- 提供一个使用 EventSource 的 Web 工作台，复用同一 Application，支持停止运行，不复制 Agent 逻辑。
+
+### 模型列表、重试与取消
+
+- `GET /models` 使用 Messages base URL 的 origin，不继承路径；认证请求不跟随重定向，默认超时 5000ms。
+- 成功列表默认缓存 600000ms，`DEEPSEEK_MODELS_MAX_AGE_MS=0` 时每次刷新；返回深拷贝避免调用方修改缓存。
+- 列表保留有效 id 的顺序，跳过空 id 和重复 id，识别 text/image、上下文容量和 Messages 能力；尚未实现官方 badge 和客户端版本要求。
+- Messages 默认 normal 模式最多重试 5 次，覆盖 `EMPTY_RESPONSE/RATE_LIMIT/SERVER/TIMEOUT/TRANSPORT`；初始退避 500ms、最大 10000ms、抖动 0.1。
+- 支持有界 `Retry-After` 秒数或 HTTP 日期、认证/配额/请求/限流/服务端错误分类、`llm/retry` 事件，以及显式 always 模式。
+- `llm.retry` 和 `llm.model-listing` 可分别关闭；列表请求本身不自动重试。
+- `core.cancellation` 控制 HTTP/Web 取消；令牌传播到模型流、退避等待、压缩、工具和前台 Shell，取消产生 ABORTED 和 `run/cancelled`。
+- 已建立响应流通过关闭 response 取消；前台 Bash 终止对应进程组，取消 `job_output` 等待不会终止后台任务。
+- 网络连接建立前仅能在边界检查取消，尚不是官方 AbortSignal 全生命周期兼容实现。
 
 ### 外部插件与产品组装（学习版等价分层）
 
@@ -106,7 +118,7 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - `sandbox_permissions` 升级、会话中切换审批/文件策略和审批取消。
 - PTY、持久 Shell、Windows 原生 Shell；当前进程后端固定使用 `/bin/bash`。
 - 任务完成后的 Agent 自动唤醒、跨进程任务恢复和长期常驻宿主。
-- 图片与 Files API、模型 listing、请求重试、扩展请求头和遥测。
+- 图片与 Files API、扩展请求头和遥测；完整模型目录元数据、后台 listing 刷新及官方通用 LLM 重试插件仍未移植。
 - 官方 surface generation/replacement、会话格式迁移、崩溃修复、跨进程锁和原子多进程发布。
 - 官方压缩区间选择、token 校准、tool-result pruner、模型切换压缩、重试和取消。
 - `read` 尚未实现大文件流式扫描；`glob` 尚未完全复刻 ripgrep 语义和 spill 行为。
@@ -134,5 +146,11 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - Headless 实际运行 Mock 读取；Web 实际启动后健康、工具和外部插件元数据 API 正常，并完成浏览器端 SSE 运行。
 - 核心、Headless、Web、Desktop、外部插件均完成 wheel 构建；离线 wheel 安装的轻量包不含 pywebview，Web 静态资源完整。
 - Desktop wheel 安装 pywebview 后真实创建 macOS 窗口、加载新版页面、请求健康 API 并正常关闭；未验证官方 Electron 打包、签名或安装器。
+- 本地 Messages 服务模拟 429→500→成功，产生 RATE_LIMIT/SERVER 两次重试且成功；401 不重试，禁用重试后 429 立即失败。
+- `/models` 同源路由、认证、默认缓存、零缓存刷新、无效能力条目保留和返回值深拷贝隔离；列表超时归类 TIMEOUT。
+- 慢速 SSE 响应在取消后关闭 socket 并返回 ABORTED；重试等待也能取消且不会发起下一次请求。
+- 完整 HTTP 运行取消使 Bash 进程组 killed、JSONL 记录 aborted；并发 SSE 在其他运行完成后仍保持当前流。
+- 浏览器实际点击“停止运行”收到 `run/cancelled`；新开关和原有 Mock 文件读取回归通过。
+- 最终 wheel 包含取消、重试和 Web 资源，离线安装后实际执行 Mock `models` 成功。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

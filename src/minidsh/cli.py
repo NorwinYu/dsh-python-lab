@@ -26,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("config", help="输出合并后的配置")
     subparsers.add_parser("plugins", help="查看插件及依赖状态")
     subparsers.add_parser("tools", help="列出当前启用的工具")
+    subparsers.add_parser("models", help="列出当前模型提供方的模型")
     subparsers.add_parser("prompt", help="输出当前系统提示词与 runtime context")
     subparsers.add_parser("sessions", help="列出本地会话")
 
@@ -69,7 +70,7 @@ def interactive_answerer(reason: str) -> str:
 
 
 def _with_default_command(argv: List[str], command: str) -> List[str]:
-    commands = {"config", "plugins", "tools", "prompt", "sessions", "run", "resume", "session", "transcript", "fork", "compact", "serve", "desktop"}
+    commands = {"config", "plugins", "tools", "models", "prompt", "sessions", "run", "resume", "session", "transcript", "fork", "compact", "serve", "desktop"}
     options_with_values = {"--workspace", "--config", "--enable", "--disable", "--sandbox-mode", "--approval-policy", "--context-window"}
     index = 0
     while index < len(argv):
@@ -140,6 +141,12 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
             print(json.dumps(app.tools.definitions(), ensure_ascii=False, indent=2))
             return 0
 
+        if args.command == "models":
+            if not config.features["llm.model-listing"]:
+                raise RuntimeError("llm.model-listing 当前被禁用")
+            print(json.dumps(app.model.list_models(), ensure_ascii=False, indent=2))
+            return 0
+
         if args.command == "prompt":
             print(json.dumps({"system": app.system_prompt.render(), "runtime_context": app.runtime_context}, ensure_ascii=False, indent=2))
             return 0
@@ -173,7 +180,7 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
             return 0
 
         if hasattr(args, "trace") and args.trace:
-            for event_name in ("tools/pre-execute", "tools/post-execute", "turn/start", "turn/end"):
+            for event_name in ("tools/pre-execute", "tools/post-execute", "turn/start", "turn/end", "llm/retry"):
                 app.events.on(
                     event_name,
                     lambda payload, name=event_name: print(

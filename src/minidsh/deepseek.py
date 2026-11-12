@@ -1,14 +1,23 @@
+import copy
 import json
 import os
+import socket
+import threading
+import time
 import uuid
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
 from typing import Dict, Iterator, List, Optional, Tuple
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .cancellation import CancellationToken, RunCancelled
+from .events import EventBus
 from .llm import Model, ModelResponse
 from .plugins import Plugin, ServiceContext
+from .retry import RetryPolicy
 
 
 PUBLIC_BASE_URL = "https://api.deepseek.com/anthropic"
@@ -16,6 +25,8 @@ UPSTREAM_VERSION = "0.2.2-rc.1"
 USER_AGENT = f"deepseek-harness/{UPSTREAM_VERSION} (+https://github.com/deepseek-ai/deepseek-harness)"
 DEFAULT_MAX_TOKENS = 256_000
 DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
+DEFAULT_MODELS_TIMEOUT_MS = 5_000
+DEFAULT_MODELS_MAX_AGE_MS = 600_000
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -24,9 +35,17 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 class LlmError(RuntimeError):
-    def __init__(self, message: str, code: str) -> None:
+    def __init__(
+        self,
+        message: str,
+        code: str,
+        status: Optional[int] = None,
+        retry_after_ms: Optional[int] = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
+        self.status = status
+        self.retry_after_ms = retry_after_ms
 
 
 @dataclass
@@ -37,9 +56,12 @@ class DeepSeekConfig:
     reasoning_effort: str
     max_tokens: int
     stream_idle_timeout_ms: int
+    models_timeout_ms: int
+    models_max_age_ms: int
+    retry_policy: RetryPolicy
 
     @classmethod
-    def from_env(cls) -> "DeepSeekConfig":
+    def from_env(cls, retry_enabled: bool = True) -> "DeepSeekConfig":
         api_key = os.environ.get("DEEPSEEK_API_KEY", "")
         if not api_key:
             raise LlmError("缺少 DEEPSEEK_API_KEY；不会读取或写入其他密钥文件", "MISSING_CREDENTIAL")
@@ -53,10 +75,13 @@ class DeepSeekConfig:
         try:
             max_tokens = int(os.environ.get("DEEPSEEK_MAX_TOKENS", str(DEFAULT_MAX_TOKENS)))
             timeout = int(os.environ.get("DEEPSEEK_STREAM_IDLE_TIMEOUT_MS", str(DEFAULT_STREAM_IDLE_TIMEOUT_MS)))
+            models_timeout = int(os.environ.get("DEEPSEEK_MODELS_TIMEOUT_MS", str(DEFAULT_MODELS_TIMEOUT_MS)))
+            models_max_age = int(os.environ.get("DEEPSEEK_MODELS_MAX_AGE_MS", str(DEFAULT_MODELS_MAX_AGE_MS)))
+            retry_policy = RetryPolicy.from_env(retry_enabled)
         except ValueError as exc:
-            raise LlmError("DeepSeek 数值配置必须是整数", "INVALID_REQUEST") from exc
-        if max_tokens <= 0 or timeout <= 0:
-            raise LlmError("DeepSeek max tokens 和超时必须大于 0", "INVALID_REQUEST")
+            raise LlmError(f"DeepSeek 数值或重试配置无效: {exc}", "INVALID_REQUEST") from exc
+        if max_tokens <= 0 or timeout <= 0 or models_timeout <= 0 or models_max_age < 0:
+            raise LlmError("DeepSeek 容量和超时必须大于 0，列表缓存时间不能为负数", "INVALID_REQUEST")
         return cls(
             api_key=api_key,
             base_url=base_url,
@@ -64,11 +89,19 @@ class DeepSeekConfig:
             reasoning_effort=effort,
             max_tokens=max_tokens,
             stream_idle_timeout_ms=timeout,
+            models_timeout_ms=models_timeout,
+            models_max_age_ms=models_max_age,
+            retry_policy=retry_policy,
         )
 
     @property
     def messages_url(self) -> str:
         return f"{self.base_url}/messages" if self.base_url.endswith("/v1") else f"{self.base_url}/v1/messages"
+
+    @property
+    def models_url(self) -> str:
+        parsed = urlparse(self.base_url)
+        return f"{parsed.scheme}://{parsed.netloc}/models"
 
 
 def text_content(content: object) -> List[Dict[str, object]]:
@@ -186,10 +219,12 @@ def serialize_request(
     return body
 
 
-def iter_sse(response: object) -> Iterator[Dict[str, object]]:
+def iter_sse(response: object, cancel_token: Optional[CancellationToken] = None) -> Iterator[Dict[str, object]]:
     event_name: Optional[str] = None
     data_lines: List[str] = []
     for raw_line in response:  # type: ignore[attr-defined]
+        if cancel_token is not None:
+            cancel_token.throw_if_cancelled()
         line = raw_line.decode("utf-8").rstrip("\r\n")
         if not line:
             if not data_lines:
@@ -367,6 +402,95 @@ def translate_events(events: Iterator[Dict[str, object]], model: str) -> ModelRe
     raise LlmError("DeepSeek Messages 在 message_stop 前关闭", "STREAM_CLOSED")
 
 
+def retry_after_ms(value: Optional[str]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+        return max(1, round(seconds * 1000)) if seconds > 0 else None
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        delay = (parsed - datetime.now(timezone.utc)).total_seconds()
+        return max(1, round(delay * 1000)) if delay > 0 else None
+
+
+def messages_http_error(error: HTTPError) -> LlmError:
+    try:
+        detail = error.read().decode("utf-8", errors="replace")
+    except OSError:
+        detail = ""
+    try:
+        body = json.loads(detail) if detail else {}
+        provider_error = body.get("error", {}) if isinstance(body, dict) else {}
+        error_type = provider_error.get("type", "") if isinstance(provider_error, dict) else ""
+        message = provider_error.get("message", "") if isinstance(provider_error, dict) else ""
+    except json.JSONDecodeError:
+        error_type = ""
+        message = ""
+    if error.code in {401, 403} or error_type in {"authentication_error", "permission_error"}:
+        code = "AUTH"
+    elif error.code == 402:
+        code = "QUOTA"
+    elif error.code == 429 or error_type == "rate_limit_error":
+        code = "RATE_LIMIT"
+    elif error.code in {400, 413} or error_type == "invalid_request_error":
+        code = "INVALID_REQUEST"
+    elif error.code >= 500 or error_type in {"api_error", "overloaded_error"}:
+        code = "SERVER"
+    else:
+        code = f"HTTP_{error.code}"
+    text = str(message or detail or error.reason)
+    return LlmError(
+        f"DeepSeek Messages HTTP {error.code}: {text}",
+        code,
+        status=error.code,
+        retry_after_ms=retry_after_ms(error.headers.get("retry-after")),
+    )
+
+
+def parse_model_listing(body: object) -> Dict[str, object]:
+    if not isinstance(body, dict) or not isinstance(body.get("data"), list):
+        raise LlmError('DeepSeek model listing has no "data" array', "INVALID_RESPONSE")
+    entries: List[Dict[str, object]] = []
+    seen = set()
+    for row in body["data"]:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"] or row["id"] in seen:
+            continue
+        model_id = row["id"]
+        seen.add(model_id)
+        capabilities = row.get("api_capabilities", {})
+        messages = capabilities.get("anthropic_messages") if isinstance(capabilities, dict) else None
+        outputs = row.get("output_modalities", ["text"])
+        inputs = row.get("input_modalities", ["text"])
+        usable = isinstance(messages, dict) and isinstance(outputs, list) and "text" in outputs and isinstance(inputs, list)
+        known_inputs = [item for item in inputs if item in {"text", "image"}] if isinstance(inputs, list) else []
+        usable = usable and bool(known_inputs)
+        facts: Dict[str, object] = {"inputModalities": known_inputs}
+        for wire, local in (("context_window", "contextWindow"), ("max_output_tokens", "maxOutputTokens")):
+            value = row.get(wire)
+            if value is None:
+                continue
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                facts[local] = value
+            else:
+                usable = False
+        entry: Dict[str, object] = {
+            "id": model_id,
+            "capabilities": {"usable": usable, "facts": facts},
+        }
+        if isinstance(row.get("name"), str) and row["name"]:
+            entry["name"] = row["name"]
+        entries.append(entry)
+    if not entries:
+        raise LlmError("DeepSeek model listing contains no model entry", "INVALID_RESPONSE")
+    return {"entries": entries, "skipped": len(body["data"]) - len(entries)}
+
+
 class DeepSeekModel(Model):
     provider = "deepseek-official"
 
@@ -374,8 +498,15 @@ class DeepSeekModel(Model):
     def model_id(self) -> str:
         return os.environ.get("DEEPSEEK_MODEL", "deepseek-flash")
 
-    def __init__(self) -> None:
+    def __init__(self, events: Optional[EventBus] = None, retry_enabled: bool = True, listing_enabled: bool = True) -> None:
         self.user_id = uuid.uuid4().hex
+        self.events = events
+        self.retry_enabled = retry_enabled
+        self.listing_enabled = listing_enabled
+        self._opener = build_opener(NoRedirect)
+        self._listing_lock = threading.Lock()
+        self._listing_cached_at = 0.0
+        self._listing_cache: Optional[Dict[str, object]] = None
 
     def complete(
         self,
@@ -383,8 +514,10 @@ class DeepSeekModel(Model):
         messages: List[Dict[str, object]],
         tool_definitions: List[Dict[str, object]],
         session_id: Optional[str] = None,
+        cancel_token: Optional[CancellationToken] = None,
     ) -> ModelResponse:
-        config = DeepSeekConfig.from_env()
+        config = DeepSeekConfig.from_env(self.retry_enabled)
+        token = cancel_token or CancellationToken()
         body = serialize_request(config, system, messages, tool_definitions)
         headers = {
             "content-type": "application/json",
@@ -402,20 +535,107 @@ class DeepSeekModel(Model):
             headers=headers,
             method="POST",
         )
-        try:
-            with build_opener(NoRedirect).open(request, timeout=config.stream_idle_timeout_ms / 1000) as response:
-                return translate_events(iter_sse(response), config.model)
-        except HTTPError as exc:
+        retries = 0
+        while True:
+            token.throw_if_cancelled()
             try:
-                detail = exc.read().decode("utf-8", errors="replace")
-            except OSError:
-                detail = ""
-            raise LlmError(f"DeepSeek Messages HTTP {exc.code}: {detail}", "TRANSPORT") from exc
+                return self._request_once(request, config, token)
+            except RunCancelled:
+                raise
+            except LlmError as exc:
+                if not config.retry_policy.allows(exc.code, retries):
+                    raise
+                delay = config.retry_policy.delay_ms(retries, exc.retry_after_ms)
+                retries += 1
+                if self.events is not None:
+                    self.events.emit(
+                        "llm/retry",
+                        {
+                            "provider": self.provider,
+                            "model": config.model,
+                            "session_id": session_id,
+                            "run_id": token.run_id,
+                            "attempt": retries,
+                            "delay_ms": delay,
+                            "code": exc.code,
+                        },
+                    )
+                if token.wait(delay / 1000):
+                    raise RunCancelled("运行已取消")
+
+    def _request_once(self, request: Request, config: DeepSeekConfig, token: CancellationToken) -> ModelResponse:
+        token.throw_if_cancelled()
+        try:
+            response = self._opener.open(request, timeout=config.stream_idle_timeout_ms / 1000)
+        except HTTPError as exc:
+            raise messages_http_error(exc) from exc
+        except (URLError, TimeoutError, socket.timeout, OSError) as exc:
+            token.throw_if_cancelled()
+            is_timeout = isinstance(exc, (TimeoutError, socket.timeout)) or isinstance(getattr(exc, "reason", None), socket.timeout)
+            raise LlmError("DeepSeek Messages 请求超时" if is_timeout else "DeepSeek Messages 传输失败", "TIMEOUT" if is_timeout else "TRANSPORT") from exc
+        unregister = token.on_cancel(response.close)
+        try:
+            with response:
+                return translate_events(iter_sse(response, token), config.model)
+        except RunCancelled:
+            raise
+        except ValueError as exc:
+            token.throw_if_cancelled()
+            raise exc
+        except (URLError, TimeoutError, socket.timeout, OSError) as exc:
+            token.throw_if_cancelled()
+            is_timeout = isinstance(exc, (TimeoutError, socket.timeout)) or isinstance(getattr(exc, "reason", None), socket.timeout)
+            raise LlmError("DeepSeek Messages 流空闲超时" if is_timeout else "DeepSeek Messages 流传输失败", "TIMEOUT" if is_timeout else "TRANSPORT") from exc
+        finally:
+            unregister()
+
+    def list_models(self) -> Dict[str, object]:
+        if not self.listing_enabled:
+            raise LlmError("llm.model-listing 当前被禁用", "DISABLED")
+        config = DeepSeekConfig.from_env(self.retry_enabled)
+        with self._listing_lock:
+            age_ms = (time.monotonic() - self._listing_cached_at) * 1000
+            if self._listing_cache is not None and config.models_max_age_ms > 0 and age_ms < config.models_max_age_ms:
+                return copy.deepcopy(self._listing_cache)
+            request = Request(
+                config.models_url,
+                headers={
+                    "accept": "application/json",
+                    "x-api-key": config.api_key,
+                    "anthropic-version": "2023-06-01",
+                    "user-agent": USER_AGENT,
+                    "x-deepseek-harness-user-id": self.user_id,
+                },
+                method="GET",
+            )
+            try:
+                with self._opener.open(request, timeout=config.models_timeout_ms / 1000) as response:
+                    raw = response.read(1_000_001)
+            except HTTPError as exc:
+                raise LlmError(f"{config.models_url} answered HTTP {exc.code}", f"HTTP_{exc.code}", status=exc.code) from exc
+            except (URLError, TimeoutError, socket.timeout, OSError) as exc:
+                is_timeout = isinstance(exc, (TimeoutError, socket.timeout)) or isinstance(getattr(exc, "reason", None), socket.timeout)
+                code = "TIMEOUT" if is_timeout else "TRANSPORT"
+                raise LlmError(f"could not reach {config.models_url}", code) from exc
+            if len(raw) > 1_000_000:
+                raise LlmError("DeepSeek model listing response is too large", "INVALID_RESPONSE")
+            try:
+                body = json.loads(raw)
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise LlmError(f"{config.models_url} did not answer with JSON", "INVALID_RESPONSE") from exc
+            listing = parse_model_listing(body)
+            self._listing_cache = copy.deepcopy(listing)
+            self._listing_cached_at = time.monotonic()
+            return listing
 
 
 class DeepSeekModelPlugin(Plugin):
     name = "llm.deepseek"
     provides = ("llm",)
 
+    def __init__(self, retry_enabled: bool = True, listing_enabled: bool = True) -> None:
+        self.retry_enabled = retry_enabled
+        self.listing_enabled = listing_enabled
+
     def activate(self, ctx: ServiceContext) -> None:
-        ctx.provide("llm", DeepSeekModel(), self.name)
+        ctx.provide("llm", DeepSeekModel(ctx.events, self.retry_enabled, self.listing_enabled), self.name)

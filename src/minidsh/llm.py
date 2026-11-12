@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from .cancellation import CancellationToken
 from .plugins import Plugin, ServiceContext
 
 
@@ -44,8 +45,12 @@ class Model(ABC):
         messages: List[Dict[str, object]],
         tool_definitions: List[Dict[str, object]],
         session_id: Optional[str] = None,
+        cancel_token: Optional[CancellationToken] = None,
     ) -> ModelResponse:
         pass
+
+    def list_models(self) -> Dict[str, object]:
+        return {"entries": [{"id": self.model_id, "name": self.model_id, "inputModalities": ["text"]}], "skipped": 0}
 
 
 def text_block(text: str) -> Dict[str, object]:
@@ -73,7 +78,10 @@ class MockModel(Model):
         messages: List[Dict[str, object]],
         tool_definitions: List[Dict[str, object]],
         session_id: Optional[str] = None,
+        cancel_token: Optional[CancellationToken] = None,
     ) -> ModelResponse:
+        if cancel_token is not None:
+            cancel_token.throw_if_cancelled()
         prompt = ""
         for message in reversed(messages):
             if message["role"] != "user":

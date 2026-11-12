@@ -15,6 +15,7 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "core.fs-observation": True,
     "core.jobs": True,
     "core.compaction": True,
+    "core.cancellation": True,
     "tools.glob": True,
     "tools.read": True,
     "tools.write": True,
@@ -24,6 +25,8 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "session.jsonl": True,
     "llm.mock": True,
     "llm.deepseek": False,
+    "llm.retry": True,
+    "llm.model-listing": True,
     "agent.core": True,
 }
 
