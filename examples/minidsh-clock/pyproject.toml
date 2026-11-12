@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minidsh-clock-example"
+version = "0.1.0"
+description = "External MiniDSH entry-point plugin example"
+requires-python = ">=3.9"
+dependencies = ["minidsh==0.1.0"]
+
+[project.entry-points."minidsh.plugins"]
+"example.clock" = "minidsh_clock:ClockPlugin"
+
+[tool.setuptools.packages.find]
+where = ["src"]

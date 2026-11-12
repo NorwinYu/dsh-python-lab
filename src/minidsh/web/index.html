@@ -5,46 +5,263 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MiniDSH 学习台</title>
   <style>
-    :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
-    body { max-width: 1080px; margin: 0 auto; padding: 24px; line-height: 1.5; }
-    main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 20px; }
-    section { border: 1px solid #8884; border-radius: 12px; padding: 18px; }
-    textarea, input, button { width: 100%; box-sizing: border-box; font: inherit; }
-    textarea { min-height: 120px; padding: 10px; }
-    input { margin: 8px 0 14px; padding: 8px; }
-    button { margin: 4px 0; padding: 9px; cursor: pointer; }
-    #events { min-height: 300px; max-height: 60vh; overflow: auto; padding: 12px; background: #1112; white-space: pre-wrap; word-break: break-word; }
-    .session { display: block; padding: 6px 0; cursor: pointer; text-decoration: underline; }
-    .muted { opacity: .7; font-size: .9em; }
-    @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #172033;
+      background: #f4f6fa;
+      font-synthesis: none;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: wait; opacity: .55; }
+    .app { display: grid; grid-template-columns: 272px minmax(0, 1fr); min-height: 100vh; }
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      padding: 26px 18px;
+      color: #d9e1f2;
+      background: #111827;
+      border-right: 1px solid #ffffff0d;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 28px; }
+    .brand-mark {
+      display: grid;
+      width: 36px;
+      height: 36px;
+      place-items: center;
+      border-radius: 11px;
+      color: white;
+      background: linear-gradient(145deg, #7795ff, #4f46e5);
+      box-shadow: 0 8px 24px #4f46e540;
+      font-size: 15px;
+      font-weight: 750;
+      letter-spacing: -.5px;
+    }
+    .brand-name { color: #fff; font-size: 16px; font-weight: 650; letter-spacing: -.2px; }
+    .brand-subtitle { margin-top: 2px; color: #8994aa; font-size: 11px; }
+    .sidebar-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 12px; }
+    .sidebar-heading h2 { margin: 0; color: #8994aa; font-size: 11px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; }
+    .icon-button {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      place-items: center;
+      border: 0;
+      border-radius: 7px;
+      color: #a9b4c8;
+      background: transparent;
+    }
+    .icon-button:hover { color: #fff; background: #ffffff0d; }
+    .icon-button svg { width: 15px; height: 15px; }
+    #sessions { display: grid; gap: 5px; overflow: auto; }
+    .session {
+      width: 100%;
+      padding: 11px 12px;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      color: #c3cddd;
+      background: transparent;
+      text-align: left;
+      transition: background .15s, border-color .15s;
+    }
+    .session:hover, .session.active { border-color: #ffffff12; background: #ffffff09; }
+    .session.active { box-shadow: inset 2px 0 #8196ff; }
+    .session-id { display: block; overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .session-meta { display: block; margin-top: 5px; color: #7f8ba1; font-size: 10px; }
+    .empty-sessions { padding: 18px 10px; color: #748095; font-size: 12px; line-height: 1.7; text-align: center; }
+    .sidebar-footer { margin-top: auto; padding: 22px 9px 0; color: #68758c; font-size: 10px; line-height: 1.6; }
+    .workspace { width: 100%; max-width: 1240px; margin: 0 auto; padding: 30px 38px 38px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 30px; }
+    .eyebrow { margin-bottom: 5px; color: #68738a; font-size: 11px; font-weight: 600; letter-spacing: 1.3px; text-transform: uppercase; }
+    h1 { margin: 0; color: #131b2c; font-size: 25px; font-weight: 680; letter-spacing: -.6px; }
+    .status { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border: 1px solid #dde2eb; border-radius: 999px; color: #526078; background: #fff; font-size: 11px; box-shadow: 0 2px 5px #17203305; }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #24a576; box-shadow: 0 0 0 3px #24a57616; }
+    .status.busy .status-dot { background: #d99420; box-shadow: 0 0 0 3px #d9942016; }
+    .content-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(260px, .8fr); gap: 20px; align-items: start; }
+    .card { overflow: hidden; border: 1px solid #e0e5ee; border-radius: 14px; background: #fff; box-shadow: 0 3px 12px #17203305; }
+    .card-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 19px; border-bottom: 1px solid #edf0f5; }
+    .card-title { margin: 0; font-size: 13px; font-weight: 650; }
+    .card-kicker { color: #8993a6; font-size: 10px; }
+    .composer { padding: 19px; }
+    .composer label { display: block; margin-bottom: 8px; color: #59667d; font-size: 11px; font-weight: 600; }
+    textarea {
+      display: block;
+      width: 100%;
+      min-height: 146px;
+      resize: vertical;
+      padding: 14px;
+      border: 1px solid #dfe4ed;
+      border-radius: 10px;
+      outline: none;
+      color: #1b263b;
+      background: #fafbfc;
+      font-size: 13px;
+      line-height: 1.7;
+      transition: border-color .15s, box-shadow .15s, background .15s;
+    }
+    textarea:focus, input:focus { border-color: #8ca0f4; background: #fff; box-shadow: 0 0 0 3px #6279e814; }
+    details { margin-top: 14px; }
+    summary { color: #748096; cursor: pointer; font-size: 11px; user-select: none; }
+    .session-field { padding-top: 12px; }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #dfe4ed;
+      border-radius: 8px;
+      outline: none;
+      color: #28344a;
+      background: #fafbfc;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+    }
+    .actions { display: flex; align-items: center; gap: 9px; margin-top: 17px; }
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 37px;
+      padding: 8px 14px;
+      border: 1px solid #dce2eb;
+      border-radius: 8px;
+      color: #536077;
+      background: #fff;
+      font-size: 11px;
+      font-weight: 600;
+      transition: transform .1s, background .15s, border-color .15s;
+    }
+    .button:hover:not(:disabled) { border-color: #c5cddb; background: #f7f8fb; }
+    .button:active:not(:disabled) { transform: translateY(1px); }
+    .button.primary { margin-left: auto; border-color: #536dde; color: #fff; background: #596fda; box-shadow: 0 4px 10px #596fda25; }
+    .button.primary:hover:not(:disabled) { border-color: #465fca; background: #4e64ce; }
+    .button svg { width: 13px; height: 13px; }
+    .shortcut { margin-left: 4px; color: #a2abc0; font-size: 10px; }
+    .terminal-card { margin-top: 20px; }
+    #events {
+      min-height: 250px;
+      max-height: 43vh;
+      overflow: auto;
+      margin: 0;
+      padding: 18px;
+      color: #b8c5d9;
+      background: #151c29;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10px;
+      line-height: 1.75;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    #events:empty::before { content: "等待运行。工具调用、模型消息和任务状态会显示在这里。"; color: #637189; }
+    .guide { padding: 19px; }
+    .guide-title { margin: 0 0 15px; font-size: 12px; }
+    .guide-list { display: grid; gap: 16px; margin: 0; padding: 0; list-style: none; }
+    .guide-list li { display: grid; grid-template-columns: 25px 1fr; gap: 10px; color: #6c788e; font-size: 11px; line-height: 1.65; }
+    .step { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 7px; color: #536dde; background: #eef1fc; font-size: 10px; font-weight: 700; }
+    .guide strong { display: block; margin-bottom: 2px; color: #334058; font-size: 11px; font-weight: 650; }
+    .note { margin: 18px 0 0; padding-top: 15px; border-top: 1px solid #edf0f5; color: #939cad; font-size: 10px; line-height: 1.7; }
+    @media (max-width: 980px) { .content-grid { grid-template-columns: 1fr; } .guide-card { display: none; } }
+    @media (max-width: 700px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { padding: 16px; }
+      .brand { padding-bottom: 16px; }
+      .sidebar-heading, #sessions, .sidebar-footer { display: none; }
+      .workspace { padding: 22px 16px; }
+      .topbar { margin-bottom: 20px; }
+      .status { display: none; }
+      .shortcut { display: none; }
+    }
   </style>
 </head>
 <body>
-  <h1>MiniDSH 学习台</h1>
-  <p class="muted">同一 Agent、工具、会话与后台任务。此页面仅用于本地学习。</p>
-  <main>
-    <section>
-      <h2>运行 Agent</h2>
-      <label>提示词</label>
-      <textarea id="prompt">请列出当前目录</textarea>
-      <label>Session ID（留空新建）</label>
-      <input id="sessionId" placeholder="已有 session id，可留空">
-      <button id="run">运行 / Resume</button>
-      <button id="compact">手动压缩</button>
-      <button id="fork">Fork 当前会话</button>
-      <h3>事件流</h3>
-      <pre id="events"></pre>
-    </section>
-    <section>
-      <h2>会话</h2>
-      <button id="refresh">刷新会话</button>
-      <div id="sessions"></div>
-    </section>
-  </main>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">DS</div>
+        <div><div class="brand-name">MiniDSH</div><div class="brand-subtitle">AGENT HARNESS LAB</div></div>
+      </div>
+      <div class="sidebar-heading">
+        <h2>本地会话</h2>
+        <button class="icon-button" id="refresh" title="刷新会话" aria-label="刷新会话">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg>
+        </button>
+      </div>
+      <div id="sessions"><div class="empty-sessions">正在读取会话…</div></div>
+      <div class="sidebar-footer">LOCAL WORKSPACE<br>数据仅保存在当前学习环境中</div>
+    </aside>
+    <main class="workspace">
+      <header class="topbar">
+        <div><div class="eyebrow">Harness playground</div><h1>Agent 工作台</h1></div>
+        <div class="status" id="status"><span class="status-dot"></span><span id="statusText">本地服务已连接</span></div>
+      </header>
+      <div class="content-grid">
+        <div>
+          <section class="card">
+            <div class="card-header"><h2 class="card-title">新建任务</h2><span class="card-kicker">同一 Agent · 工具 · 会话</span></div>
+            <div class="composer">
+              <label for="prompt">给 Agent 一个任务</label>
+              <textarea id="prompt" placeholder="描述你希望 Agent 完成的任务…">请列出当前目录</textarea>
+              <details>
+                <summary>会话与高级操作</summary>
+                <div class="session-field">
+                  <label for="sessionId">Session ID · 留空创建新会话</label>
+                  <input id="sessionId" placeholder="选择左侧会话或输入 session id" spellcheck="false">
+                </div>
+                <div class="actions">
+                  <button class="button" id="compact">压缩上下文</button>
+                  <button class="button" id="fork">创建分支</button>
+                </div>
+              </details>
+              <div class="actions">
+                <span class="shortcut">⌘ / Ctrl + Enter 运行</span>
+                <button class="button primary" id="run">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5z"/></svg>
+                  <span id="runText">运行 Agent</span>
+                </button>
+              </div>
+            </div>
+          </section>
+          <section class="card terminal-card">
+            <div class="card-header"><h2 class="card-title">执行轨迹</h2><span class="card-kicker">EVENT STREAM</span></div>
+            <pre id="events"></pre>
+          </section>
+        </div>
+        <aside class="card guide-card">
+          <div class="card-header"><h2 class="card-title">学习路径</h2></div>
+          <div class="guide">
+            <ol class="guide-list">
+              <li><span class="step">01</span><div><strong>发起一次运行</strong>输入任务，观察 turn、工具调用和模型响应。</div></li>
+              <li><span class="step">02</span><div><strong>回到已有会话</strong>选择左侧会话，继续运行以复用历史上下文。</div></li>
+              <li><span class="step">03</span><div><strong>拆解上下文管理</strong>尝试压缩或创建分支，比较原始事件与模型投影。</div></li>
+            </ol>
+            <p class="note">这是用于理解 DSH 架构的本地最小实现，不是官方桌面客户端。</p>
+          </div>
+        </aside>
+      </div>
+    </main>
+  </div>
   <script>
     const events = document.querySelector('#events')
     const sessionInput = document.querySelector('#sessionId')
-    const write = (text) => { events.textContent += `${text}\n`; events.scrollTop = events.scrollHeight }
+    const runButton = document.querySelector('#run')
+    const status = document.querySelector('#status')
+    const statusText = document.querySelector('#statusText')
+    let running = false
+
+    const write = (text) => {
+      events.textContent += `${text}\n`
+      events.scrollTop = events.scrollHeight
+    }
+    const setRunning = (value) => {
+      running = value
+      runButton.disabled = value
+      status.classList.toggle('busy', value)
+      statusText.textContent = value ? 'Agent 正在运行' : '本地服务已连接'
+      document.querySelector('#runText').textContent = value ? '正在运行…' : '运行 Agent'
+    }
 
     async function api(path, options = {}) {
       const response = await fetch(path, {
@@ -60,50 +277,78 @@
       const sessions = await api('/v1/sessions')
       const root = document.querySelector('#sessions')
       root.replaceChildren()
+      if (!sessions.length) {
+        const empty = document.createElement('div')
+        empty.className = 'empty-sessions'
+        empty.textContent = '还没有会话\n运行一次 Agent 后会显示在这里'
+        root.append(empty)
+        return
+      }
       for (const item of sessions) {
-        const link = document.createElement('a')
-        link.className = 'session'
-        link.textContent = `${item.session_id} · ${item.events} events`
-        link.href = '#'
-        link.onclick = (event) => { event.preventDefault(); sessionInput.value = item.session_id }
-        root.append(link)
+        const button = document.createElement('button')
+        button.className = `session${sessionInput.value === item.session_id ? ' active' : ''}`
+        const id = document.createElement('span')
+        id.className = 'session-id'
+        id.textContent = item.session_id
+        const meta = document.createElement('span')
+        meta.className = 'session-meta'
+        meta.textContent = `${item.events} 个事件`
+        button.append(id, meta)
+        button.onclick = () => {
+          sessionInput.value = item.session_id
+          document.querySelector('details').open = true
+          refreshSessions()
+        }
+        root.append(button)
       }
     }
 
-    document.querySelector('#run').onclick = () => {
-      events.textContent = ''
-      const prompt = document.querySelector('#prompt').value
+    function run() {
+      if (running) return
+      const prompt = document.querySelector('#prompt').value.trim()
+      if (!prompt) return write('请输入任务后再运行')
       const sessionId = sessionInput.value.trim()
       const query = new URLSearchParams({ prompt })
       if (sessionId) query.set('session_id', sessionId)
+      events.textContent = ''
+      setRunning(true)
       const source = new EventSource(`/v1/runs/stream?${query}`)
-      source.onmessage = (event) => write(`${event.type}: ${event.data}`)
+      for (const name of ['turn/start', 'assistant/message', 'tools/pre-execute', 'tools/post-execute', 'job/settled', 'turn/end']) {
+        source.addEventListener(name, (event) => write(`${name}: ${event.data}`))
+      }
       source.addEventListener('run/result', (event) => {
+        const data = JSON.parse(event.data)
+        if (!sessionInput.value && data.session_id) sessionInput.value = data.session_id
         write(`run/result: ${event.data}`)
         source.close()
+        setRunning(false)
         refreshSessions()
       })
       source.addEventListener('run/error', (event) => {
         write(`run/error: ${event.data}`)
         source.close()
+        setRunning(false)
       })
-      source.addEventListener('run/done', () => source.close())
-      source.onerror = () => source.close()
+      source.addEventListener('run/done', () => { source.close(); setRunning(false) })
+      source.onerror = () => { source.close(); setRunning(false) }
     }
 
+    runButton.onclick = run
+    document.querySelector('#prompt').addEventListener('keydown', (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') run()
+    })
     document.querySelector('#compact').onclick = async () => {
       const id = sessionInput.value.trim()
-      if (!id) return write('请先填写 Session ID')
+      if (!id) return write('请先选择或填写 Session ID')
       try {
         const data = await api(`/v1/sessions/${id}/compact`, { method: 'POST', body: '{}' })
         write(data.result)
         refreshSessions()
       } catch (error) { write(`错误: ${error.message}`) }
     }
-
     document.querySelector('#fork').onclick = async () => {
       const id = sessionInput.value.trim()
-      if (!id) return write('请先填写 Session ID')
+      if (!id) return write('请先选择或填写 Session ID')
       try {
         const data = await api(`/v1/sessions/${id}/fork`, { method: 'POST', body: '{}' })
         sessionInput.value = data.session_id
@@ -111,7 +356,6 @@
         refreshSessions()
       } catch (error) { write(`错误: ${error.message}`) }
     }
-
     document.querySelector('#refresh').onclick = refreshSessions
     refreshSessions().catch((error) => write(`错误: ${error.message}`))
   </script>

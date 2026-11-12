@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minidsh-desktop"
+version = "0.1.0"
+description = "Optional pywebview desktop assembly for MiniDSH"
+requires-python = ">=3.9"
+dependencies = ["minidsh[desktop]==0.1.0"]
+
+[project.scripts]
+minidsh-desktop = "minidsh_desktop:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

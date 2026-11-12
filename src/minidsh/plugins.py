@@ -47,6 +47,14 @@ class Plugin(ABC):
         pass
 
 
+class DisabledExternalPlugin(Plugin):
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def activate(self, ctx: ServiceContext) -> None:
+        raise RuntimeError(f"外部插件未启用: {self.name}")
+
+
 class PluginManager:
     def __init__(self, ctx: ServiceContext, features: Dict[str, bool]) -> None:
         self.ctx = ctx
@@ -54,12 +62,28 @@ class PluginManager:
         self._plugins: Dict[str, Plugin] = {}
         self._states: Dict[str, str] = {}
         self._errors: Dict[str, str] = {}
+        self._origins: Dict[str, Dict[str, str]] = {}
 
-    def register(self, plugin: Plugin) -> None:
+    def register(
+        self,
+        plugin: Plugin,
+        origin: str = "built-in",
+        distribution: Optional[str] = None,
+        version: Optional[str] = None,
+        value: Optional[str] = None,
+    ) -> None:
         if plugin.name in self._plugins:
             raise ValueError(f"插件已注册: {plugin.name}")
         self._plugins[plugin.name] = plugin
         self._states[plugin.name] = "pending" if self.features[plugin.name] else "disabled"
+        metadata = {"origin": origin}
+        if distribution is not None:
+            metadata["distribution"] = distribution
+        if version is not None:
+            metadata["version"] = version
+        if value is not None:
+            metadata["entry_point"] = value
+        self._origins[plugin.name] = metadata
 
     def activate_all(self) -> None:
         while True:
@@ -97,6 +121,7 @@ class PluginManager:
                 "provides": list(plugin.provides),
                 "requires": list(plugin.requires),
                 "missing": self.ctx.missing(plugin.requires),
+                **self._origins[name],
             }
             if name in self._errors:
                 row["error"] = self._errors[name]

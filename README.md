@@ -1,8 +1,8 @@
 # MiniDSH：从 0 学 Agent Harness
 
-这是一个用于拆解 DeepSeek Harness（DSH）核心思想的 Python 学习项目。它不是官方 DSH 的完整移植，而是通过可运行的小切片逐层理解插件、工具、模型、审批、Shell、后台任务、会话恢复、压缩、HTTP/SSE 和 Agent Loop。
+这是一个用于拆解 DeepSeek Harness（DSH）核心思想的 Python 学习项目。它不是官方 DSH 的完整移植，而是通过可运行的小切片逐层理解插件、工具、模型、审批、Shell、后台任务、会话恢复、压缩、HTTP/SSE、外部插件、产品发行和 Agent Loop。
 
-当前只使用 Python 标准库，支持 Python 3.9+。MockModel 不需要 API Key；真实 DeepSeek 模型插件可独立开关。
+核心、Headless 和 Web 只使用 Python 标准库，支持 Python 3.9+；Desktop 的 `pywebview` 是独立可选依赖。MockModel 不需要 API Key；真实 DeepSeek 模型插件可独立开关。
 
 ## Git 与上游基线
 
@@ -189,6 +189,68 @@ Authorization: Bearer <token>
 
 SSE 包含 turn、assistant、工具执行、run result/error/done 和 job 完成通知。并发运行通过唯一 `run_id` 关联结果，相同 prompt 也不会串会话。
 
+## 外部 Python 插件
+
+插件通过标准 `importlib.metadata` entry points 发现，group 固定为 `minidsh.plugins`。项目附带一个独立的时钟工具发行包，它不在核心源码的 `PYTHONPATH` 中：
+
+```bash
+python3 -m pip install -e . -e ./examples/minidsh-clock
+minidsh plugins
+minidsh --enable example.clock plugins
+minidsh --enable example.clock tools
+```
+
+对应声明位于 `examples/minidsh-clock/pyproject.toml`：
+
+```toml
+[project.entry-points."minidsh.plugins"]
+"example.clock" = "minidsh_clock:ClockPlugin"
+```
+
+entry point 可以导出 `Plugin` 实例、`Plugin` 子类或返回 `Plugin` 的工厂。entry point 名称必须和 `plugin.name` 相同，且不能覆盖内置功能。外部插件沿用同一服务依赖、功能开关、工具注册表和提示词段，不需要修改 `Application` 的核心组装代码。
+
+所有外部插件**默认禁用**。禁用状态只读取发行包元数据，不导入或执行插件模块；只有配置文件或 `--enable` 显式启用后才加载。安装第三方插件即表示信任其代码，启用后插件拥有当前 Python 进程的权限。插件已安装但未启用时，`plugins` 会显示 `disabled`、发行包、版本和 entry point 来源。
+
+也可以在配置文件中启用，但卸载插件后必须同时删除对应开关，否则配置会按未知功能拒绝启动：
+
+```json
+{
+  "features": {
+    "example.clock": true
+  }
+}
+```
+
+## Headless、Web 与 Desktop 发行包
+
+产品入口和核心组装分离，三个入口最终都复用同一个 `Application`：
+
+| 发行包 | 命令 | 额外运行时依赖 |
+|---|---|---|
+| `minidsh` / `minidsh-headless` | `minidsh` / `minidsh-headless` | 无，仅 Python 标准库 |
+| `minidsh-web` | `minidsh-web`，默认执行 `serve` | 无，复用核心 HTTP/SSE |
+| `minidsh-desktop` | `minidsh-desktop`，默认执行 `desktop` | `pywebview` |
+
+本地安装示例：
+
+```bash
+# 最小 Headless；核心本身也可直接作为 Headless 使用
+python3 -m pip install -e . -e ./packages/minidsh-headless
+minidsh-headless plugins
+
+# Web：不需要安装 Desktop/GUI 依赖
+python3 -m pip install -e . -e ./packages/minidsh-web
+minidsh-web --port 3080
+
+# Desktop：只有这个 profile 安装 pywebview
+python3 -m pip install -e '.[desktop]' -e ./packages/minidsh-desktop
+minidsh-desktop
+```
+
+也可以只安装核心后按需添加 GUI 依赖：`python3 -m pip install -e '.[desktop]'`，然后运行 `minidsh desktop`。核心不会在导入 CLI、列出插件或运行 Headless/Web 时导入 `pywebview`；缺少该依赖时只有 Desktop 命令返回明确安装提示。Linux 的 GUI 后端可能还需要操作系统提供的 GTK/Qt 运行库。
+
+这里借鉴的是上游 `apps/cli`、`apps/web` 和 `apps/desktop` 的产品分层思想；Python entry points、`pywebview` 和这些发行包名称都是学习版设计，不是官方插件格式或官方桌面包的兼容实现。
+
 ## 接入真实 DeepSeek
 
 先禁用 Mock，再启用 DeepSeek，避免两个插件同时提供 `llm` 服务：
@@ -216,12 +278,15 @@ PYTHONPATH=src python3 -m minidsh \
 ## 当前架构
 
 ```text
-CLI / Web UI / HTTP API
-  └─ Application：唯一的插件组装入口
-      └─ PluginManager：功能开关、依赖检查、激活与逆序卸载
-          └─ ServiceContext：服务注册与解析
-          └─ EventBus：工具、回合和任务事件
-          ├─ SystemPrompt：身份段、工具段、runtime context
+minidsh-headless / minidsh-web / minidsh-desktop
+  └─ CLI / Web UI / HTTP API / pywebview
+      └─ Application：唯一的插件组装入口
+          └─ PluginManager：功能开关、依赖检查、激活与逆序卸载
+              ├─ 内置插件：直接注册
+              ├─ EntryPoint 发现：默认禁用，显式启用后加载
+              ├─ ServiceContext：服务注册与解析
+              ├─ EventBus：工具、回合和任务事件
+              ├─ SystemPrompt：身份段、工具段、runtime context
           ├─ SandboxPolicy：read-only / workspace-write / danger-full-access
           ├─ ApprovalService：ask / never / allowed-once / unavailable
           ├─ ObservationStore：文件版本观察与恢复
@@ -241,22 +306,26 @@ CLI / Web UI / HTTP API
 
 1. `src/minidsh/config.py`：配置、策略、上下文容量和功能开关。
 2. `src/minidsh/plugins.py`：服务、插件、依赖与生命周期。
-3. `src/minidsh/app.py`：唯一的组装入口。
-4. `src/minidsh/system_prompt.py`：官方提示词和 runtime context。
-5. `src/minidsh/sandbox.py`：文件策略和对应文案。
-6. `src/minidsh/approval.py`：审批结果与审计事件。
-7. `src/minidsh/observations.py`：文件观察及恢复。
-8. `src/minidsh/tools.py`：工具 schema、执行链、原子写入和路径边界。
-9. `src/minidsh/jobs.py`：进程、输出环、任务隔离、等待、kill 和回收。
-10. `src/minidsh/shell.py`：Bash 与 jobs 工具及输出渲染。
-11. `src/minidsh/llm.py`：模型接口、内容块和 MockModel。
-12. `src/minidsh/deepseek.py`：Messages 请求、SSE 和原生 replay。
-13. `src/minidsh/session.py`：事件、消息投影、resume、fork、transcript。
-14. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
-15. `src/minidsh/agent.py`：完整的最小 Agent Loop。
-16. `src/minidsh/server.py`：HTTP API、SSE 和 run_id 关联。
-17. `src/minidsh/web/index.html`：最小 Web 页面。
-18. `src/minidsh/cli.py`：命令行与常驻宿主入口。
+3. `src/minidsh/discovery.py`：entry points 元数据、延迟导入和插件契约。
+4. `src/minidsh/app.py`：唯一的组装入口。
+5. `src/minidsh/system_prompt.py`：官方提示词和 runtime context。
+6. `src/minidsh/sandbox.py`：文件策略和对应文案。
+7. `src/minidsh/approval.py`：审批结果与审计事件。
+8. `src/minidsh/observations.py`：文件观察及恢复。
+9. `src/minidsh/tools.py`：工具 schema、执行链、原子写入和路径边界。
+10. `src/minidsh/jobs.py`：进程、输出环、任务隔离、等待、kill 和回收。
+11. `src/minidsh/shell.py`：Bash 与 jobs 工具及输出渲染。
+12. `src/minidsh/llm.py`：模型接口、内容块和 MockModel。
+13. `src/minidsh/deepseek.py`：Messages 请求、SSE 和原生 replay。
+14. `src/minidsh/session.py`：事件、消息投影、resume、fork、transcript。
+15. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
+16. `src/minidsh/agent.py`：完整的最小 Agent Loop。
+17. `src/minidsh/server.py`：HTTP API、SSE 和 run_id 关联。
+18. `src/minidsh/web/index.html`：最小 Web 页面。
+19. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
+20. `examples/minidsh-clock`：可独立安装的外部工具插件。
+21. `packages`：Headless、Web、Desktop 三个产品发行入口。
+22. `src/minidsh/cli.py`：命令行与常驻宿主入口。
 
 ## 观察会话
 
@@ -301,13 +370,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 理解历史投影、resume、fork、文件观察恢复、token meter，以及“压缩视图但不删除事实”。
 
-### 第 5 层：HTTP 与常驻宿主（当前）
+### 第 5 层：HTTP 与常驻宿主
 
-理解 HTTP API、SSE、任务通知、run_id 关联、并发会话和最小 Web 页面。对照 `docs/upstream-parity.md` 阅读。
+理解 HTTP API、SSE、任务通知、run_id 关联、并发会话和最小 Web 页面。
 
-### 第 6 层：外部插件与发行包
+### 第 6 层：外部插件与发行包（当前）
 
-通过 entry points 发现独立 Python 插件；提供 headless、web、desktop 等 profile，重依赖按需安装。
+通过 entry points 发现独立 Python 插件；提供 Headless、Web、Desktop 发行入口，重依赖按需安装。对照 `docs/upstream-parity.md` 阅读。
 
 ## 当前边界
 

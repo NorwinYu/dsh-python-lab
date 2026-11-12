@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minidsh-web"
+version = "0.1.0"
+description = "HTTP/SSE and Web assembly for MiniDSH"
+requires-python = ">=3.9"
+dependencies = ["minidsh==0.1.0"]
+
+[project.scripts]
+minidsh-web = "minidsh_web:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

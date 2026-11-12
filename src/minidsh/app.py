@@ -9,7 +9,7 @@ from .events import EventBus
 from .jobs import JobPlugin
 from .llm import MockModelPlugin, Model
 from .observations import ObservationPlugin, ObservationStore
-from .plugins import Plugin, PluginManager, ServiceContext
+from .plugins import DisabledExternalPlugin, Plugin, PluginManager, ServiceContext
 from .sandbox import SandboxPolicy, SandboxPolicyPlugin
 from .session import JsonlSessionPlugin, SessionStore
 from .shell import BashToolPlugin, JobToolsPlugin, make_bash_tool
@@ -96,6 +96,23 @@ class Application:
         self.manager.register(DeepSeekModelPlugin())
         self.manager.register(CompactionPlugin(config.context_window))
         self.manager.register(AgentPlugin(config))
+        for spec in config.plugin_specs:
+            if config.features[spec.name]:
+                self.manager.register(
+                    spec.load(),
+                    origin="entry-point",
+                    distribution=spec.distribution,
+                    version=spec.version,
+                    value=spec.value,
+                )
+            else:
+                self.manager.register(
+                    DisabledExternalPlugin(spec.name),
+                    origin="entry-point",
+                    distribution=spec.distribution,
+                    version=spec.version,
+                    value=spec.value,
+                )
         self.manager.activate_all()
 
     @property

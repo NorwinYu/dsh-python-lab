@@ -11,6 +11,7 @@
 - 文件工具：`packages/fs/tool-fs`、`packages/fs/tool-fs-search`
 - Shell 与任务：`packages/shell/tool-bash`、`packages/jobs/{jobs-local,tool-jobs}`
 - 会话与压缩：`packages/core/session`、`packages/session/session-persistence-jsonl`、`packages/compaction/compaction-basic`
+- 产品组装：`apps/cli`、`apps/web`、`apps/desktop`；只借鉴分层边界，不声称协议或包格式兼容
 
 一致性声明只覆盖下文列出的切片，不代表完整 DSH 已移植完成。
 
@@ -89,6 +90,14 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 相同 prompt 的并发运行也能获得独立 session id；JSONL 追加和读取使用锁避免序号冲突与半行读取。
 - 提供一个使用 EventSource 的最小 Web 页面，复用同一 Application，不复制 Agent 逻辑。
 
+### 外部插件与产品组装（学习版等价分层）
+
+- 使用 Python 标准 `minidsh.plugins` entry points 发现独立发行包；外部功能默认禁用，只有显式启用才导入插件代码。
+- 外部插件复用 `Plugin`、服务依赖、工具注册表和功能开关，不能覆盖内置插件名称。
+- Headless、Web、Desktop 是独立 Python 发行入口，复用同一 Application；核心和 Web 不依赖 GUI 包。
+- Desktop 的 `pywebview` 通过可选依赖安装，仅在 Desktop 启动路径延迟导入。
+- 这些是学习版设计，不对齐官方 Cordis profile/bundle、npm 插件加载器、Electron 壳、安装器或自动更新协议。
+
 ## 尚未对齐
 
 - 官方完整工具集、profile/bundle 格式、运行时热重载和外部 npm 插件。
@@ -120,5 +129,10 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - HTTP 健康、HTML、工具、run/resume/fork/compact 和会话 API。
 - SSE turn、assistant、run result 和 job 完成通知。
 - Bearer token 接受/拒绝；相同 prompt 的 10 个并发请求生成独立 session 且 JSONL 完整。
+- Python 3.9 editable 安装中同一发行包元数据重复时去重，不同发行包或导出发生同名冲突时拒绝。
+- 外部时钟插件默认 disabled 且不导入模块；配置文件和 CLI 启用后 active，工具真实执行并进入提示词。
+- Headless 实际运行 Mock 读取；Web 实际启动后健康、工具和外部插件元数据 API 正常，并完成浏览器端 SSE 运行。
+- 核心、Headless、Web、Desktop、外部插件均完成 wheel 构建；离线 wheel 安装的轻量包不含 pywebview，Web 静态资源完整。
+- Desktop wheel 安装 pywebview 后真实创建 macOS 窗口、加载新版页面、请求健康 API 并正常关闭；未验证官方 Electron 打包、签名或安装器。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

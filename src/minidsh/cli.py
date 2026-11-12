@@ -54,6 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser = subparsers.add_parser("serve", help="启动本地 HTTP/SSE 宿主")
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=3080)
+
+    desktop_parser = subparsers.add_parser("desktop", help="启动可选的 pywebview Desktop 宿主")
+    desktop_parser.add_argument("--width", type=int, default=1100)
+    desktop_parser.add_argument("--height", type=int, default=760)
     return parser
 
 
@@ -64,9 +68,29 @@ def interactive_answerer(reason: str) -> str:
     return "allowed-once" if answer in {"y", "yes"} else "rejected"
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def _with_default_command(argv: List[str], command: str) -> List[str]:
+    commands = {"config", "plugins", "tools", "prompt", "sessions", "run", "resume", "session", "transcript", "fork", "compact", "serve", "desktop"}
+    options_with_values = {"--workspace", "--config", "--enable", "--disable", "--sandbox-mode", "--approval-policy", "--context-window"}
+    index = 0
+    while index < len(argv):
+        argument = argv[index]
+        if argument in commands:
+            return argv
+        if argument in options_with_values:
+            index += 2
+        elif any(argument.startswith(option + "=") for option in options_with_values) or argument in {"--yes", "--help", "-h"}:
+            index += 1
+        else:
+            break
+    return argv[:index] + [command] + argv[index:]
+
+
+def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None) -> int:
+    actual_argv = list(sys.argv[1:] if argv is None else argv)
+    if default_command is not None:
+        actual_argv = _with_default_command(actual_argv, default_command)
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(actual_argv)
     if args.command is None:
         parser.print_help()
         return 0
@@ -88,6 +112,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         app = Application(config, interactive_answerer if args.command in {"run", "resume"} else None)
+        if args.command == "desktop":
+            from .desktop import run_desktop
+
+            run_desktop(app, args.width, args.height)
+            return 0
         if args.command == "serve":
             if args.host not in {"127.0.0.1", "localhost", "::1"} and not os.environ.get("MINIDSH_TOKEN"):
                 raise RuntimeError("绑定非回环地址必须设置 MINIDSH_TOKEN")
