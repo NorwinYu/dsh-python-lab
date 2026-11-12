@@ -50,6 +50,8 @@ minidsh run "请列出当前目录"
 - `core.cancellation`：HTTP/Web 运行取消及模型、工具、前台 Shell 取消传播。
 - `core.pty`：Unix PTY 服务与持久终端生命周期。
 - `core.tool-result-pruner`：手动 surface 工具结果裁剪，默认关闭。
+- `core.user-questions`：用户提问、待答和取消服务。
+- `core.web`：Web 获取与搜索 provider 服务。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
@@ -58,6 +60,10 @@ minidsh run "请列出当前目录"
 - `tools.bash`：官方一次性 `bash -c` 进程工具，默认启用。
 - `tools.bash-persistent`：官方持久 `bash` 工具切片，默认禁用；启用后替代一次性 Bash。
 - `tools.jobs`：官方 `job_output/job_list/job_kill` 工具组。
+- `tools.ask-user`：官方 `ask_user_question` 工具切片，默认关闭。
+- `tools.todo`：官方 `todo_write` 工具切片，默认关闭。
+- `tools.web-fetch`：官方 `web_fetch` 工具切片，默认关闭。
+- `tools.web-search`：官方 `web_search` 工具切片，默认关闭。
 - `session.jsonl`：带版本头的 JSONL、v0 迁移、崩溃恢复和 POSIX 写锁。
 - `llm.mock`：确定性模拟模型，默认启用。
 - `llm.deepseek`：真实 DeepSeek Messages 模型，默认禁用。
@@ -284,6 +290,55 @@ curl -X POST http://127.0.0.1:3080/v1/runs/<run-id>/cancel -d '{}'
 
 取消会产生 `run/cancelled`，会话记录 `turn/end` 的 `aborted` 原因。模型流、重试等待、工具边界和前台 Shell 使用同一取消令牌；前台 Shell 被终止，而取消 `job_output` 等待不会杀掉被观察的后台任务。Web 的“停止运行”按钮调用同一 API。`--disable core.cancellation` 禁用外部取消入口。
 
+## 提问、待办与 Web 工具
+
+四个工具分别由 `tools.ask-user`、`tools.todo`、`tools.web-fetch`、`tools.web-search` 控制，默认全部关闭。可以分别启用，也可一起用于本地学习：
+
+```bash
+PYTHONPATH=src python3 -m minidsh \
+  --enable tools.ask-user --enable tools.todo \
+  --enable tools.web-fetch --enable tools.web-search \
+  run "待办 完成交互测试"
+```
+
+Mock 使用以下显式前缀触发工具，不做通用自然语言理解：
+
+| 输入前缀 | 工具 |
+|---|---|
+| `提问 是否继续？` | `ask_user_question` |
+| `待办 完成测试` | `todo_write` |
+| `获取 http://…` | `web_fetch` |
+| `搜索 关键词` | `web_search` |
+
+### 用户提问
+
+`ask_user_question` 支持稳定问题 id、选项、多选、自定义文本和跳过。CLI 交互可输入选项编号、自由文本或回车跳过；空 `selected` 且没有 `custom` 表示跳过，不代表授权。问题与答案写入 `question/asked`、`question/answered`。
+
+没有交互回答器的常驻宿主使用待答队列：
+
+```text
+GET  /v1/questions
+POST /v1/questions/<question-id>/answer
+```
+
+答案 body 为 `{"answers": [{"id": "question-1", "selected": [], "custom": "回答"}]}`。运行取消或服务关闭会唤醒等待者并清理队列。当前 Web 页面只在事件流显示问题，尚无图形答题表单；可通过上述 API 回答。
+
+### 会话待办
+
+`todo_write` 每次写入完整列表，追加 `todo/write`，校验非空唯一内容、状态和活跃任务数量。默认最多一个 `in_progress`；设置 `MINIDSH_TODO_ALLOW_PARALLEL=1` 后允许多个。
+
+查询使用 `minidsh todos <session-id>` 或 `GET /v1/sessions/<id>/todos`。最近一次整表写入生效，新的 `turn/start` 清空当前清单，`turn/end` 保留完成后的列表。
+
+### Web 获取与搜索
+
+`web_fetch` 支持 HTTP(S)、最多 5 次重定向、30 秒默认操作超时、1MiB 原始读取上限和 200000 字符默认输出上限。HTML 会移除脚本、样式、隐藏内容，超过 512 层或转换失败时不把原始 active markup 返回模型。文本和页面都带“外部内容不可信”提示与 URL。
+
+默认拒绝 loopback、私网、链路本地和其他非公网地址；每次重定向都重新检查。本地测试显式使用 `MINIDSH_WEB_ALLOW_PRIVATE=1`。`MINIDSH_WEB_TIMEOUT_MS` 和 `MINIDSH_WEB_FETCH_MAX_OUTPUT_CHARS` 可调整预算。当前 DNS 检查未做连接级地址固定，不是完整 SSRF 防线。
+
+`web_search` 通过可替换 provider 端点工作，设置 `MINIDSH_WEB_SEARCH_URL` 后向其 POST `{"query": "...", "maxResults": 10}`。响应提供 `sources`、`truncated` 和可选 `content`。支持去重、最多 10 个查询、10 条来源、每条摘要 800 字符和 Markdown 引用。未配置 provider 时工具仍可见，执行返回明确错误。
+
+Web 内容不是指令；系统提示词会随工具开关加入上游对应英文提醒。两个工具都支持运行取消。当前 HTML 转换不是完整 Turndown/GFM，搜索 provider 协议是学习版 JSON 接口，不是官方 DeepSeek 搜索凭据或路由实现。
+
 ## HTTP 宿主与 Web 页面
 
 启动本地 HTTP/SSE 宿主：
@@ -303,16 +358,19 @@ GET  /v1/tools
 GET  /v1/models
 GET  /v1/files
 GET  /v1/prompt
+GET  /v1/questions
 GET  /v1/sessions
 GET  /v1/sessions/<id>
 GET  /v1/sessions/<id>/transcript
 GET  /v1/sessions/<id>/surface
+GET  /v1/sessions/<id>/todos
 GET  /v1/jobs
 GET  /v1/jobs/<id>/output
 GET  /v1/terminals
 POST /v1/runs
 POST /v1/runs/stream
 POST /v1/runs/<run-id>/cancel
+POST /v1/questions/<question-id>/answer
 POST /v1/sessions/<id>/resume
 POST /v1/sessions/<id>/fork
 POST /v1/sessions/<id>/compact
@@ -468,24 +526,27 @@ minidsh-headless / minidsh-web / minidsh-desktop
 10. `src/minidsh/jobs.py`：进程、输出环、任务隔离、等待、kill 和回收。
 11. `src/minidsh/shell.py`：Bash 与 jobs 工具及输出渲染。
 12. `src/minidsh/pty_shell.py`：PTY、命令标记、持久状态和终端回收。
-13. `src/minidsh/llm.py`：模型接口、模型列表和内容块。
-14. `src/minidsh/retry.py`：重试模式、瞬时错误和指数退避。
-15. `src/minidsh/cancellation.py`：协作式取消令牌与资源关闭回调。
-16. `src/minidsh/images.py`：图片路径、格式、哈希和请求预算。
-17. `src/minidsh/files.py`：multipart 上传、文件对象校验和 Files CRUD。
-18. `src/minidsh/deepseek.py`：Messages 图片、SSE、重试、列表缓存和原生 replay。
-19. `src/minidsh/session.py`：版本头、原子迁移、POSIX 写锁、消息投影和 fork。
-20. `src/minidsh/session_recovery.py`：工具结果补偿与开放 step/turn 闭环。
-21. `src/minidsh/surface.py`：surface 折叠、来源引用和 replacement 校验。
-22. `src/minidsh/pruner.py`：Unicode 工具结果裁剪与 replacement 写入。
-23. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
-24. `src/minidsh/agent.py`：Agent Loop、恢复入口、图片输入与取消终态。
-25. `src/minidsh/server.py`：HTTP API、SSE、会话互斥和终端生命周期。
-26. `src/minidsh/web/index.html`：Web 工作台、图片路径与裁剪操作。
-27. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
-28. `examples/minidsh-clock`：可独立安装的外部工具插件。
-29. `packages`：Headless、Web、Desktop 三个产品发行入口。
-30. `src/minidsh/cli.py`：命令行、迁移恢复与常驻宿主入口。
+13. `src/minidsh/questions.py`：问题校验、CLI 回答器、HTTP 待答和取消。
+14. `src/minidsh/todo.py`：整表待办写入与并行策略。
+15. `src/minidsh/web_tools.py`：Web 获取、搜索 provider 和安全边界。
+16. `src/minidsh/llm.py`：模型接口、模型列表和 Mock 工具触发器。
+17. `src/minidsh/retry.py`：重试模式、瞬时错误和指数退避。
+18. `src/minidsh/cancellation.py`：协作式取消令牌与资源关闭回调。
+19. `src/minidsh/images.py`：图片路径、格式、哈希和请求预算。
+20. `src/minidsh/files.py`：multipart 上传、文件对象校验和 Files CRUD。
+21. `src/minidsh/deepseek.py`：Messages 图片、SSE、重试、列表缓存和原生 replay。
+22. `src/minidsh/session.py`：版本头、原子迁移、POSIX 写锁、待办和消息投影。
+23. `src/minidsh/session_recovery.py`：工具结果补偿与开放 step/turn 闭环。
+24. `src/minidsh/surface.py`：surface 折叠、来源引用和 replacement 校验。
+25. `src/minidsh/pruner.py`：Unicode 工具结果裁剪与 replacement 写入。
+26. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
+27. `src/minidsh/agent.py`：Agent Loop、恢复入口、图片输入与取消终态。
+28. `src/minidsh/server.py`：HTTP API、SSE、待答队列、会话互斥和终端生命周期。
+29. `src/minidsh/web/index.html`：Web 工作台、图片路径与裁剪操作。
+30. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
+31. `examples/minidsh-clock`：可独立安装的外部工具插件。
+32. `packages`：Headless、Web、Desktop 三个产品发行入口。
+33. `src/minidsh/cli.py`：命令行、交互提问、迁移恢复与常驻宿主入口。
 
 ## 观察会话
 
@@ -500,7 +561,11 @@ approval/asked / approval/decided
 fs/observed
 job/registered / job/settled
 tool/call / tool/result
-compaction/start / compaction/end
+compaction/start / compaction/end / compaction/prune
+session/migrated / session/repaired
+pty/created / pty/reset
+question/asked / question/answered
+todo/write
 turn/end
 ```
 
@@ -554,13 +619,18 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 理解版本头、连续事件校验、备份与原子发布、工具结果补偿、开放回合闭环和 POSIX 写锁。
 
-### 第 11 层：Surface replacement 与裁剪（当前）
+### 第 11 层：Surface replacement 与裁剪
 
-理解追加事实与模型视图的分离、区间替换、来源引用、工具结果裁剪和人类 transcript。对照 `docs/upstream-parity.md` 阅读。
+理解追加事实与模型视图的分离、区间替换、来源引用、工具结果裁剪和人类 transcript。
+
+### 第 12 层：提问、待办与 Web 工具（当前）
+
+理解用户能力服务、待答队列、会话整表投影、外部不可信内容和 Web 安全边界。对照 `docs/upstream-parity.md` 阅读。
 
 ## 当前边界
 
-- 有 `read/glob/write/edit/bash` 和三个 job 工具，仍不是完整官方工具集。
+- 有文件、Bash、提问、待办和 Web 工具切片，仍不是完整官方工具集；尚无定时 pending 提问和图形答题表单。
+- Web 搜索使用学习版 JSON provider，HTML 不是完整 Turndown/GFM；DNS 检查未做连接级地址固定。
 - HTTP/SSE 是学习 API，不兼容官方 Web Host 的认证、RPC 和多路复用协议。
 - 插件依赖在启动时收敛，尚不支持运行中热重载。
 - surface 只支持学习版消息事件和工具结果裁剪，尚无官方完整事件类型、插件消息投影、多代际不可变文件、Zstandard、Windows 写锁和格式目录。

@@ -125,6 +125,32 @@ class MockModel(Model):
                 text = str(content)
             return ModelResponse(blocks=[text_block(f"工具已经执行完成：\n{text}")])
 
+        if prompt.startswith("提问") and "ask_user_question" in available:
+            question = prompt[2:].strip()
+            call = ToolCall(
+                name="ask_user_question",
+                arguments={"questions": [{"id": "question-1", "question": question}]},
+                call_id="mock-1",
+            )
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("待办") and "todo_write" in available:
+            task = prompt[2:].strip()
+            call = ToolCall(
+                name="todo_write",
+                arguments={"todos": [{"content": task, "status": "in_progress"}]},
+                call_id="mock-1",
+            )
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("获取") and "web_fetch" in available:
+            call = ToolCall(name="web_fetch", arguments={"url": prompt[2:].strip()}, call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("搜索") and "web_search" in available:
+            call = ToolCall(name="web_search", arguments={"queries": [prompt[2:].strip()]}, call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
         if (prompt.startswith("执行") or prompt.startswith("执行后台")) and "bash" in available:
             background = prompt.startswith("执行后台")
             command = prompt[4:].strip() if background else prompt[2:].strip()

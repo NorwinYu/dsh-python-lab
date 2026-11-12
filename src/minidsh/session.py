@@ -75,6 +75,15 @@ class SessionStore(ABC):
     def transcript(self, session_id: str) -> str:
         pass
 
+    def todos(self, session_id: str) -> Optional[List[Dict[str, str]]]:
+        todos: Optional[List[Dict[str, str]]] = None
+        for event in self.load(session_id):
+            if event["type"] == "turn/start":
+                todos = None
+            elif event["type"] == "todo/write":
+                todos = event["payload"]["todos"]
+        return todos
+
     def surface(self, session_id: str) -> Dict[str, object]:
         return fold_surface(self.load(session_id))
 

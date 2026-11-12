@@ -12,6 +12,7 @@ from .app import Application
 from .cancellation import CancellationToken, RunCancelled
 from .jobs import JobRecord, JobService
 from .pty_shell import PtyService
+from .questions import UserQuestionService
 
 
 EVENT_NAMES = (
@@ -26,6 +27,7 @@ EVENT_NAMES = (
     "job/settled",
     "pty/created",
     "pty/reset",
+    "question/asked",
 )
 
 
@@ -188,6 +190,10 @@ class ApiServer:
                         self._send_json(app.model.list_files())
                     elif path == "/v1/prompt":
                         self._send_json({"system": app.system_prompt.render(), "runtime_context": app.runtime_context})
+                    elif path == "/v1/questions":
+                        questions = app.ctx.require("userQuestions")
+                        assert isinstance(questions, UserQuestionService)
+                        self._send_json(questions.list())
                     elif path == "/v1/sessions":
                         self._send_json(app.session.list_sessions() if app.session is not None else [])
                     elif path.startswith("/v1/sessions/"):
@@ -234,6 +240,14 @@ class ApiServer:
                         parts = path.split("/")
                         if len(parts) == 5 and parts[4] == "cancel":
                             self._send_json({"run_id": parts[3], "cancelled": broker.cancel(parts[3])})
+                        else:
+                            self._send_json({"error": "not found"}, 404)
+                    elif path.startswith("/v1/questions/"):
+                        parts = path.split("/")
+                        if len(parts) == 5 and parts[4] == "answer":
+                            questions = app.ctx.require("userQuestions")
+                            assert isinstance(questions, UserQuestionService)
+                            self._send_json(questions.answer(parts[3], body))
                         else:
                             self._send_json({"error": "not found"}, 404)
                     elif path.startswith("/v1/sessions/"):
@@ -333,6 +347,8 @@ class ApiServer:
                     self._send_json({"text": app.session.transcript(session_id)})
                 elif len(parts) == 5 and parts[4] == "surface":
                     self._send_json(app.session.surface(session_id))
+                elif len(parts) == 5 and parts[4] == "todos":
+                    self._send_json({"todos": app.session.todos(session_id)})
                 elif len(parts) == 4:
                     self._send_json(app.session.load(session_id))
                 else:

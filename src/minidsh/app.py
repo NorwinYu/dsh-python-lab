@@ -1,4 +1,4 @@
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 
 from .agent import Agent
 from .approval import ApprovalPlugin, ApprovalService
@@ -12,6 +12,9 @@ from .observations import ObservationPlugin, ObservationStore
 from .plugins import DisabledExternalPlugin, Plugin, PluginManager, ServiceContext
 from .pty_shell import PersistentBashPlugin, PtyPlugin
 from .pruner import ToolResultPrunerPlugin
+from .questions import AskUserPlugin, UserQuestionsPlugin
+from .todo import TodoPlugin
+from .web_tools import WebPlugin, WebToolPlugin
 from .sandbox import SandboxPolicy, SandboxPolicyPlugin
 from .session import JsonlSessionPlugin, SessionStore
 from .shell import BashToolPlugin, JobToolsPlugin, make_bash_tool
@@ -70,7 +73,12 @@ class AgentPlugin(Plugin):
 
 
 class Application:
-    def __init__(self, config: AppConfig, approval_answerer: Optional[Callable[[str], str]] = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        approval_answerer: Optional[Callable[[str], str]] = None,
+        question_answerer: Optional[Callable[[Dict[str, object]], Dict[str, object]]] = None,
+    ) -> None:
         self.config = config
         self.events = EventBus()
         self.ctx = ServiceContext(self.events)
@@ -82,9 +90,11 @@ class Application:
         self.manager.register(SystemPromptPlugin())
         self.manager.register(SandboxPolicyPlugin(config.sandbox_mode, config.workspace))
         self.manager.register(ApprovalPlugin(config.resolved_approval_policy(), answerer))
+        self.manager.register(UserQuestionsPlugin(question_answerer))
         self.manager.register(ObservationPlugin())
         self.manager.register(JobPlugin(config.session_dir.parent / "jobs"))
         self.manager.register(PtyPlugin(config.workspace))
+        self.manager.register(WebPlugin())
         self.manager.register(CoreToolsPlugin())
         self.manager.register(SingleToolPlugin("tools.read", make_read_tool(config.workspace), ("tool:read", 1100, READ_GUIDANCE)))
         write_guidance = WRITE_GUIDANCE
@@ -97,6 +107,10 @@ class Application:
         self.manager.register(BashToolPlugin("tools.bash", make_bash_tool(config.workspace), ("tool:bash", 1000, BASH_GUIDANCE)))
         self.manager.register(PersistentBashPlugin())
         self.manager.register(JobToolsPlugin(("tool:jobs", 1600, JOBS_GUIDANCE)))
+        self.manager.register(AskUserPlugin())
+        self.manager.register(TodoPlugin())
+        self.manager.register(WebToolPlugin("tools.web-fetch", "web_fetch"))
+        self.manager.register(WebToolPlugin("tools.web-search", "web_search", config.features["tools.web-fetch"]))
         self.manager.register(JsonlSessionPlugin(config.session_dir))
         self.manager.register(MockModelPlugin())
         self.manager.register(

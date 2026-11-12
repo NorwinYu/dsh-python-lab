@@ -154,6 +154,17 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 提供 `pty/created`、`pty/reset`、终端列表和 kill API；CLI 短进程退出后不能恢复 PTY 内存状态。
 - 仅支持 Unix PTY；尚未实现官方终端行缓冲、OSC 就绪检测、ConPTY、跨进程恢复和 sandbox mode fence。
 
+### 提问、待办与 Web 工具（学习版纵向切片）
+
+- `tools.ask-user` 注册官方名称 ask_user_question 和 questions/id/question/options/multi_select schema；提示语包含上游跳过语义。
+- 支持 CLI 逐题回答、HTTP 待答列表/回答、自定义文本、选项校验、取消和服务关闭；question/asked/answered 持久化。
+- `tools.todo` 注册 todo_write，整表替换，校验唯一非空内容、pending/in_progress/completed 和活跃数量。
+- 待办事件为 todo/write；最近写入生效，turn/start 清空，turn/end 保留；MINIDSH_TODO_ALLOW_PARALLEL 控制并行活跃任务。
+- `tools.web-fetch`/`tools.web-search` 注册官方名称，使用上游外部不可信提示词段；默认关闭。
+- Web fetch 支持有界读取、30 秒默认超时、200000 字符输出、重定向复核、私网拒绝、HTML 安全降级和取消。
+- Web search 使用 MINIDSH_WEB_SEARCH_URL 的学习版 provider；支持查询去重、10 查询/10 来源、800 字符摘要和 Markdown 引用。
+- 当前没有官方 timed/pending 提问、图形答题表单、完整 Turndown/GFM、DeepSeek 搜索路由或 DNS 连接固定。
+
 ### 外部插件与产品组装（学习版等价分层）
 
 - 使用 Python 标准 `minidsh.plugins` entry points 发现独立发行包；外部功能默认禁用，只有显式启用才导入插件代码。
@@ -225,5 +236,11 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - transcript 保留原始工具全文；HTTP prune/surface 和 CLI surface/prune 均通过。
 - 修改工具调用身份和非消息事件的 replacement 在写入前被拒绝；Unicode 与图片块顺序测试通过。
 - 最终 wheel 包含 surface/pruner 和 Web 裁剪资源；离线安装后真实 Shell 长输出经 CLI prune 成功，surface 可读取 replacement。
+- 提问回答器、HTTP 待答列表/回答、运行取消和队列清理通过；question/answered 持久化。
+- todo_write 整表投影、turn/start 清空、单活跃拒绝、并行策略和 CLI todos 查询通过。
+- 本地 Web 重定向、HTML 脚本/隐藏内容移除、外链提示、搜索摘要 800 字上限和提示词段通过。
+- Web 深度 512 防护、输出上限、运行取消、私网/file scheme 拒绝和未配置 provider 错误均通过；未访问公网。
+- 四个新工具默认 disabled，不改变默认系统提示词。
+- 最终 wheel 包含 questions/todo/web_tools；离线安装后提问、待办、Web fetch/search 四条本地真实流程全部通过。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

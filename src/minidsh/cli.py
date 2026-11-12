@@ -3,7 +3,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .app import Application
 from .config import AppConfig, ConfigError
@@ -48,6 +48,9 @@ def build_parser() -> argparse.ArgumentParser:
     transcript_parser = subparsers.add_parser("transcript", help="输出会话的可读消息投影")
     transcript_parser.add_argument("session_id")
 
+    todos_parser = subparsers.add_parser("todos", help="查看会话当前的待办清单")
+    todos_parser.add_argument("session_id")
+
     fork_parser = subparsers.add_parser("fork", help="复制会话到新分支")
     fork_parser.add_argument("session_id")
     fork_parser.add_argument("--at-seq", type=int, help="只保留到指定事件序号")
@@ -84,8 +87,38 @@ def interactive_answerer(reason: str) -> str:
     return "allowed-once" if answer in {"y", "yes"} else "rejected"
 
 
+def interactive_questions(request: Dict[str, object]) -> Dict[str, object]:
+    if not sys.stdin.isatty():
+        raise RuntimeError("无交互式提问者")
+    answers = []
+    for question in request["questions"]:
+        if question.get("header"):
+            print(f"\n[{question['header']}]")
+        print(question["question"])
+        options = question.get("options", [])
+        for index, option in enumerate(options, 1):
+            description = f" — {option['description']}" if option.get("description") else ""
+            print(f"  {index}. {option['label']}{description}")
+        prompt = "选择编号（多选用逗号），其他文本作为自定义回答；回车跳过: " if options else "回答（回车跳过）: "
+        raw = input(prompt).strip()
+        selected = []
+        custom = None
+        if raw and options:
+            try:
+                selected = [options[int(item.strip()) - 1]["label"] for item in raw.split(",")]
+            except (ValueError, IndexError):
+                custom = raw
+        elif raw:
+            custom = raw
+        answer = {"id": question["id"], "selected": selected}
+        if custom is not None:
+            answer["custom"] = custom
+        answers.append(answer)
+    return {"answers": answers}
+
+
 def _with_default_command(argv: List[str], command: str) -> List[str]:
-    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "run", "resume", "session", "transcript", "fork", "compact", "repair", "migrate", "surface", "prune", "serve", "desktop"}
+    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "run", "resume", "session", "transcript", "todos", "fork", "compact", "repair", "migrate", "surface", "prune", "serve", "desktop"}
     options_with_values = {"--workspace", "--config", "--enable", "--disable", "--sandbox-mode", "--approval-policy", "--context-window"}
     index = 0
     while index < len(argv):
@@ -127,7 +160,11 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
             print(json.dumps(config.public_dict(), ensure_ascii=False, indent=2))
             return 0
 
-        app = Application(config, interactive_answerer if args.command in {"run", "resume"} else None)
+        app = Application(
+            config,
+            interactive_answerer if args.command in {"run", "resume"} else None,
+            interactive_questions if args.command in {"run", "resume"} else None,
+        )
         if args.command == "desktop":
             from .desktop import run_desktop
 
@@ -188,6 +225,12 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
             if app.session is None:
                 raise RuntimeError("session.jsonl 当前被禁用")
             print(app.session.transcript(args.session_id))
+            return 0
+
+        if args.command == "todos":
+            if app.session is None:
+                raise RuntimeError("session.jsonl 当前被禁用")
+            print(json.dumps(app.session.todos(args.session_id), ensure_ascii=False, indent=2))
             return 0
 
         if args.command == "fork":
