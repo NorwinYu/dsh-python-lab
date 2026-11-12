@@ -48,12 +48,14 @@ minidsh run "请列出当前目录"
 - `core.jobs`：进程、输出、任务隔离和生命周期。
 - `core.compaction`：自动/手动压缩检查点。
 - `core.cancellation`：HTTP/Web 运行取消及模型、工具、前台 Shell 取消传播。
+- `core.pty`：Unix PTY 服务与持久终端生命周期。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
 - `tools.write`：官方 `write` 创建/覆盖工具。
 - `tools.edit`：官方 `edit` 字面替换工具。
-- `tools.bash`：官方 `bash` 进程工具。
+- `tools.bash`：官方一次性 `bash -c` 进程工具，默认启用。
+- `tools.bash-persistent`：官方持久 `bash` 工具切片，默认禁用；启用后替代一次性 Bash。
 - `tools.jobs`：官方 `job_output/job_list/job_kill` 工具组。
 - `session.jsonl`：JSONL 会话持久化。
 - `llm.mock`：确定性模拟模型，默认启用。
@@ -133,6 +135,28 @@ PYTHONPATH=src python3 -m minidsh \
 每次调用使用新的 `bash -c`；cwd、变量和函数不会跨调用保留。前台命令超时后转为后台任务，而不是直接杀死。后台任务支持独立 stdout/stderr 游标、输出上限、完整输出落盘、任务列表、进程组终止和会话事件。
 
 当前 CLI 是短进程，退出时会回收后台任务；长期运行和跨进程任务恢复使用下面的常驻宿主。
+
+## 持久 Bash 与 PTY
+
+启用持久 profile 后，模型仍看到名为 `bash` 的工具，但 schema 只要求 `command`，描述使用上游持久模式原文：
+
+```bash
+PYTHONPATH=src python3 -m minidsh \
+  --enable tools.bash-persistent \
+  --sandbox-mode workspace-write --yes \
+  run "执行 export DEMO=hello; cd /tmp"
+```
+
+`tools.bash-persistent` 会自动关闭 `tools.bash`，避免同名注册冲突；`core.pty` 提供独立生命周期服务。持久 Shell 使用 Unix PTY 和交互式 `/bin/bash`，同一 session 的命令串行执行，cwd、export 的环境变量、函数和 Shell 状态会保留。每次命令通过随机标记捕获输出，结果以 `[Command finished with exit code N]` 收尾。
+
+命令超时、运行取消、`exit` 或 HTTP 主动 kill 都会重置 Shell；下一次调用从工作区和全新环境开始。默认命令超时 300000ms，模型返回最多保留尾部 16000 字符，可用 `MINIDSH_PERSISTENT_TIMEOUT_MS` 和 `MINIDSH_PERSISTENT_MAX_OUTPUT_CHARS` 调整。PTY 会话事件为 `pty/created` 和 `pty/reset`。
+
+```text
+GET  /v1/terminals
+POST /v1/terminals/<pty-id>/kill
+```
+
+持久模式不提供 `run_in_background`，后台任务仍使用一次性 Bash 的 jobs 管线。状态只在同一常驻 Application 内有效；CLI 每次命令退出都会回收 PTY，resume 只能恢复事件记录，不能恢复已退出进程的实际内存状态。当前仅支持 Unix PTY，不支持 Windows ConPTY 或内核沙箱。
 
 ## 会话恢复与压缩
 
@@ -237,6 +261,7 @@ GET  /v1/sessions/<id>
 GET  /v1/sessions/<id>/transcript
 GET  /v1/jobs
 GET  /v1/jobs/<id>/output
+GET  /v1/terminals
 POST /v1/runs
 POST /v1/runs/stream
 POST /v1/runs/<run-id>/cancel
@@ -244,6 +269,7 @@ POST /v1/sessions/<id>/resume
 POST /v1/sessions/<id>/fork
 POST /v1/sessions/<id>/compact
 POST /v1/jobs/<id>/kill
+POST /v1/terminals/<pty-id>/kill
 ```
 
 默认只绑定 `127.0.0.1`。绑定非回环地址时必须设置 `MINIDSH_TOKEN`，客户端同时携带：
@@ -390,21 +416,22 @@ minidsh-headless / minidsh-web / minidsh-desktop
 9. `src/minidsh/tools.py`：工具 schema、执行链、原子写入和路径边界。
 10. `src/minidsh/jobs.py`：进程、输出环、任务隔离、等待、kill 和回收。
 11. `src/minidsh/shell.py`：Bash 与 jobs 工具及输出渲染。
-12. `src/minidsh/llm.py`：模型接口、模型列表和内容块。
-13. `src/minidsh/retry.py`：重试模式、瞬时错误和指数退避。
-14. `src/minidsh/cancellation.py`：协作式取消令牌与资源关闭回调。
-15. `src/minidsh/images.py`：图片路径、格式、哈希和请求预算。
-16. `src/minidsh/files.py`：multipart 上传、文件对象校验和 Files CRUD。
-17. `src/minidsh/deepseek.py`：Messages 图片、SSE、重试、列表缓存和原生 replay。
-18. `src/minidsh/session.py`：附件元数据、消息投影、resume、fork、transcript。
-19. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
-20. `src/minidsh/agent.py`：Agent Loop、图片输入与取消终态。
-21. `src/minidsh/server.py`：HTTP API、SSE、run_id 关联和取消入口。
-22. `src/minidsh/web/index.html`：Web 工作台、图片路径与停止运行。
-23. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
-24. `examples/minidsh-clock`：可独立安装的外部工具插件。
-25. `packages`：Headless、Web、Desktop 三个产品发行入口。
-26. `src/minidsh/cli.py`：命令行与常驻宿主入口。
+12. `src/minidsh/pty_shell.py`：PTY、命令标记、持久状态和终端回收。
+13. `src/minidsh/llm.py`：模型接口、模型列表和内容块。
+14. `src/minidsh/retry.py`：重试模式、瞬时错误和指数退避。
+15. `src/minidsh/cancellation.py`：协作式取消令牌与资源关闭回调。
+16. `src/minidsh/images.py`：图片路径、格式、哈希和请求预算。
+17. `src/minidsh/files.py`：multipart 上传、文件对象校验和 Files CRUD。
+18. `src/minidsh/deepseek.py`：Messages 图片、SSE、重试、列表缓存和原生 replay。
+19. `src/minidsh/session.py`：附件元数据、消息投影、resume、fork、transcript。
+20. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
+21. `src/minidsh/agent.py`：Agent Loop、图片输入与取消终态。
+22. `src/minidsh/server.py`：HTTP API、SSE、run_id 关联和终端生命周期。
+23. `src/minidsh/web/index.html`：Web 工作台、图片路径与停止运行。
+24. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
+25. `examples/minidsh-clock`：可独立安装的外部工具插件。
+26. `packages`：Headless、Web、Desktop 三个产品发行入口。
+27. `src/minidsh/cli.py`：命令行与常驻宿主入口。
 
 ## 观察会话
 
@@ -461,9 +488,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 理解同源模型发现、成功缓存、瞬时错误分类、指数退避、取消令牌和资源回收。
 
-### 第 8 层：图片附件与 Files API（当前）
+### 第 8 层：图片附件与 Files API
 
-理解内容寻址附件、内联与文件引用、multipart 上传、缓存复用、失败降级和无效引用失效。对照 `docs/upstream-parity.md` 阅读。
+理解内容寻址附件、内联与文件引用、multipart 上传、缓存复用、失败降级和无效引用失效。
+
+### 第 9 层：持久 Shell 与 PTY（当前）
+
+理解控制终端、owner 隔离、命令串行化、随机完成标记、退出码、超时/取消重置和资源回收。对照 `docs/upstream-parity.md` 阅读。
 
 ## 当前边界
 
@@ -472,10 +503,10 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 - 插件依赖在启动时收敛，尚不支持运行中热重载。
 - 已支持 resume/fork/压缩，但尚无官方 surface replacement、格式迁移、跨进程锁和崩溃修复。
 - token meter 是启发式估算，尚无精确 tokenizer、图片 token 定价、tool-result pruner 和模型切换压缩。
-- 尚无内核沙箱、PTY、持久 Shell 和审批升级。
+- 尚无内核沙箱和审批升级；PTY 仅支持 Unix `/bin/bash`，不支持 Windows ConPTY。
+- PTY 是进程内学习实现，尚无官方终端行缓冲/OSC 就绪协议、跨进程恢复和文件策略切换围栏。
 - 图片上传只有进程内缓存和锁，尚无持久索引、独立等待者取消、配额回收、图片变换和浏览器文件选择器。
 - 模型列表尚未实现官方 badge、客户端版本要求、后台刷新和完整能力目录；列表请求不支持外部取消。
 - 网络连接建立前只能检查取消状态，已建立的响应流可以主动关闭；`always` 重试不会自行设置次数上限。
-- 当前 Shell 固定使用 `/bin/bash`，尚未支持 Windows 原生进程后端。
 - 当前 Web 页面不支持自定义 Authorization 请求头；token 主要用于 API 客户端。
 - 尚未进行真实 DeepSeek 在线验收；这是教学代码，不应直接暴露为公网服务。

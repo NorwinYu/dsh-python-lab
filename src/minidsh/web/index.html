@@ -333,7 +333,7 @@
         setRunning(true)
         write(`turn/start: ${event.data}`)
       })
-      for (const name of ['assistant/message', 'llm/retry', 'llm/image-upload', 'llm/image-fallback', 'tools/pre-execute', 'tools/post-execute', 'job/settled', 'turn/end']) {
+      for (const name of ['assistant/message', 'llm/retry', 'llm/image-upload', 'llm/image-fallback', 'tools/pre-execute', 'tools/post-execute', 'job/settled', 'pty/created', 'pty/reset', 'turn/end']) {
         source.addEventListener(name, (event) => write(`${name}: ${event.data}`))
       }
       source.addEventListener('run/result', (event) => {

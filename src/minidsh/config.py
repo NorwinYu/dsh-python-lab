@@ -16,11 +16,13 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "core.jobs": True,
     "core.compaction": True,
     "core.cancellation": True,
+    "core.pty": True,
     "tools.glob": True,
     "tools.read": True,
     "tools.write": True,
     "tools.edit": True,
     "tools.bash": True,
+    "tools.bash-persistent": False,
     "tools.jobs": True,
     "session.jsonl": True,
     "llm.mock": True,
@@ -100,6 +102,8 @@ class AppConfig:
 
         cls._apply_overrides(features, enable, True)
         cls._apply_overrides(features, disable, False)
+        if features["tools.bash-persistent"]:
+            features["tools.bash"] = False
         resolved_sandbox = sandbox_mode or resolved_sandbox
         resolved_approval = approval_policy or resolved_approval
         resolved_approve_all = approve_all or resolved_approve_all

@@ -115,6 +115,18 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 被拒绝的文件引用会失效并在下次重新上传；提供 `llm/image-upload`、`llm/image-fallback` 和 `llm.files` 开关。
 - 尚未实现官方图片变换、token 定价、持久上传索引、独立共享等待者、配额清理与附件存储协议。
 
+### 持久 Bash 与 PTY（学习版纵向切片）
+
+- `tools.bash-persistent` 默认关闭，启用时自动关闭一次性 `tools.bash`，模型工具名仍为 `bash`。
+- 使用上游持久工具描述和仅含 `command` 的 schema；不保留一次性 Bash 的提示词段或后台参数。
+- 每个 session 一个交互式 `/bin/bash` PTY，同 owner 串行执行；cwd、export、函数和 Shell 状态在进程内保留。
+- 使用随机 start/end 标记和 eval 包装捕获退出码，结果以 `[Command finished with exit code N]` 收尾。
+- 默认命令超时 300000ms，模型输出尾部最多 16000 字符；内部 scrollback 为 1MiB。
+- 初始化关闭输入 echo 和历史扩展；环境沿用凭据清理，并注入受管 DSH/PTY 变量。
+- 超时、取消、Shell 退出、HTTP kill 和应用关闭都会终止并重置终端，下一次从工作区新环境开始。
+- 提供 `pty/created`、`pty/reset`、终端列表和 kill API；CLI 短进程退出后不能恢复 PTY 内存状态。
+- 仅支持 Unix PTY；尚未实现官方终端行缓冲、OSC 就绪检测、ConPTY、跨进程恢复和 sandbox mode fence。
+
 ### 外部插件与产品组装（学习版等价分层）
 
 - 使用 Python 标准 `minidsh.plugins` entry points 发现独立发行包；外部功能默认禁用，只有显式启用才导入插件代码。
@@ -129,7 +141,7 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 官方 Web Host 的认证、鉴权、页面、RPC 与多路复用协议；当前 HTTP/SSE 是学习 API，不是官方兼容实现。
 - Landlock/bwrap 等内核沙箱；当前 `read-only` 保守拒绝全部 Shell。
 - `sandbox_permissions` 升级、会话中切换审批/文件策略和审批取消。
-- PTY、持久 Shell、Windows 原生 Shell；当前进程后端固定使用 `/bin/bash`。
+- 官方完整终端行缓冲、OSC 就绪协议、PTY 跨进程恢复和 Windows ConPTY；当前持久后端仅支持 Unix `/bin/bash`。
 - 任务完成后的 Agent 自动唤醒、跨进程任务恢复和长期常驻宿主。
 - 完整附件存储、图片变换/定价、持久上传索引和配额恢复、扩展请求头及遥测；完整模型目录元数据、后台 listing 刷新及官方通用 LLM 重试插件仍未移植。
 - 官方 surface generation/replacement、会话格式迁移、崩溃修复、跨进程锁和原子多进程发布。
@@ -171,5 +183,8 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - Files 列表、读取、删除及模型列表命令在本地服务上通过；CLI/HTTP 图片会话不含 base64，支持 transcript 和 resume。
 - 非图片内容、路径越界和附件哈希变化均被拒绝。
 - 本阶段最终 wheel 包含图片、Files 和更新后的 Web 资源，离线安装及 Mock `models` 命令通过。
+- 真实 Unix PTY 验证 cwd/export 跨调用保持、非零退出码、超时重置、exit 重置和应用回收。
+- Agent/Mock 持久工具验证插件替换、schema、HTTP 终端列表/kill、运行取消和 JSONL 重置事件。
+- 默认一次性 Bash 的 active 状态、工具描述和系统提示词保持不变。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

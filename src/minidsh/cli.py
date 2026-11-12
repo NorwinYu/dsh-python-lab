@@ -189,7 +189,7 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
             return 0
 
         if hasattr(args, "trace") and args.trace:
-            for event_name in ("tools/pre-execute", "tools/post-execute", "turn/start", "turn/end", "llm/retry"):
+            for event_name in ("tools/pre-execute", "tools/post-execute", "turn/start", "turn/end", "llm/retry", "pty/created", "pty/reset"):
                 app.events.on(
                     event_name,
                     lambda payload, name=event_name: print(

@@ -11,6 +11,7 @@ from .agent import Agent
 from .app import Application
 from .cancellation import CancellationToken, RunCancelled
 from .jobs import JobRecord, JobService
+from .pty_shell import PtyService
 
 
 EVENT_NAMES = (
@@ -23,6 +24,8 @@ EVENT_NAMES = (
     "tools/pre-execute",
     "tools/post-execute",
     "job/settled",
+    "pty/created",
+    "pty/reset",
 )
 
 
@@ -179,6 +182,10 @@ class ApiServer:
                         self._send_json(app.session.list_sessions() if app.session is not None else [])
                     elif path.startswith("/v1/sessions/"):
                         self._session_get(path)
+                    elif path == "/v1/terminals":
+                        terminals = app.ctx.optional("terminals")
+                        assert terminals is None or isinstance(terminals, PtyService)
+                        self._send_json(terminals.list() if terminals is not None else [])
                     elif path == "/v1/jobs":
                         jobs = app.ctx.require("jobs")
                         assert isinstance(jobs, JobService)
@@ -229,6 +236,17 @@ class ApiServer:
                             self._send_json({"session_id": app.session.fork(session_id, body.get("at_seq"))})
                         elif action == "compact":
                             self._send_json({"result": app.agent.compact(session_id)})
+                        else:
+                            self._send_json({"error": "not found"}, 404)
+                    elif path.startswith("/v1/terminals/"):
+                        parts = path.split("/")
+                        if len(parts) == 5 and parts[4] == "kill":
+                            terminals = app.ctx.require("terminals")
+                            assert isinstance(terminals, PtyService)
+                            reason = body.get("reason")
+                            if reason is not None and not isinstance(reason, str):
+                                raise ValueError("reason 必须是字符串")
+                            self._send_json({"killed": terminals.kill(parts[3], reason)})
                         else:
                             self._send_json({"error": "not found"}, 404)
                     elif path.startswith("/v1/jobs/"):
