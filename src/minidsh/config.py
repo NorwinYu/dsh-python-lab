@@ -16,6 +16,7 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "core.jobs": True,
     "core.compaction": True,
     "core.cancellation": True,
+    "core.streaming": True,
     "core.pty": True,
     "core.tool-result-pruner": False,
     "core.user-questions": True,

@@ -19,6 +19,8 @@ EVENT_NAMES = (
     "turn/start",
     "turn/end",
     "assistant/message",
+    "assistant/delta",
+    "assistant/usage",
     "llm/retry",
     "llm/image-upload",
     "llm/image-fallback",
@@ -31,28 +33,46 @@ EVENT_NAMES = (
 )
 
 
+class EventListener(queue.Queue):
+    def __init__(self) -> None:
+        super().__init__(maxsize=256)
+        self.operation_id: Optional[str] = None
+        self.closed = False
+        self.close_reason: Optional[str] = None
+
+
 class SseBroker:
     def __init__(self, agent: Agent, cancellation_enabled: bool = True) -> None:
         self.agent = agent
         self.cancellation_enabled = cancellation_enabled
-        self._listeners: List[queue.Queue] = []
+        self._listeners: List[EventListener] = []
         self._cancellations: Dict[str, CancellationToken] = {}
         self._session_runs: Dict[str, str] = {}
         self._cancellation_lock = threading.Lock()
+        self.dropped_streams = 0
         for name in EVENT_NAMES:
             agent.events.on(name, lambda payload, event=name: self.publish(event, payload))
 
     def publish(self, event: str, payload: Dict[str, object]) -> None:
         message = {"event": event, "payload": payload}
         for listener in list(self._listeners):
-            listener.put(message)
+            if listener.closed:
+                continue
+            try:
+                listener.put_nowait(message)
+            except queue.Full:
+                listener.closed = True
+                listener.close_reason = "backpressure"
+                with self._cancellation_lock:
+                    self.dropped_streams += 1
+                self.unsubscribe(listener)
 
-    def subscribe(self) -> queue.Queue:
-        listener: queue.Queue = queue.Queue()
+    def subscribe(self) -> EventListener:
+        listener = EventListener()
         self._listeners.append(listener)
         return listener
 
-    def unsubscribe(self, listener: queue.Queue) -> None:
+    def unsubscribe(self, listener: EventListener) -> None:
         if listener in self._listeners:
             self._listeners.remove(listener)
 
@@ -367,9 +387,13 @@ class ApiServer:
                 sequence = 0
                 try:
                     while True:
+                        if listener.closed:
+                            break
                         try:
                             message = listener.get(timeout=15)
                         except queue.Empty:
+                            if listener.closed:
+                                break
                             self.wfile.write(b": heartbeat\n\n")
                             self.wfile.flush()
                             continue

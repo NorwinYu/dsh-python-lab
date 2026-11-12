@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -335,7 +335,11 @@ def update_usage(usage: Dict[str, int], raw: object) -> None:
         usage[local] = value
 
 
-def translate_events(events: Iterator[Dict[str, object]], model: str) -> ModelResponse:
+def translate_events(
+    events: Iterator[Dict[str, object]],
+    model: str,
+    on_event: Optional[Callable[[Dict[str, object]], None]] = None,
+) -> ModelResponse:
     blocks: List[Dict[str, object]] = []
     replay_blocks: List[Dict[str, object]] = []
     open_blocks: Dict[int, Dict[str, object]] = {}
@@ -350,6 +354,8 @@ def translate_events(events: Iterator[Dict[str, object]], model: str) -> ModelRe
                 raise LlmError("DeepSeek Messages 重复 message_start", "MALFORMED_RESPONSE")
             message = require_object(event.get("message"))
             update_usage(usage, message.get("usage", {}))
+            if on_event is not None and message.get("usage") is not None:
+                on_event({"type": "usage", "usage": dict(usage)})
             started = True
             continue
         if event_type not in {"content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}:
@@ -385,6 +391,8 @@ def translate_events(events: Iterator[Dict[str, object]], model: str) -> ModelRe
             block["_json"] = ""
             block["_order"] = len(blocks) + len(open_blocks)
             open_blocks[wire_index] = {"block": block, "replay": replay}
+            if on_event is not None and block_type == "tool_use":
+                on_event({"type": "block-start", "index": wire_index, "blockType": "tool-call", "id": block["id"], "name": block["name"]})
             continue
 
         if event_type in {"content_block_delta", "content_block_stop"}:
@@ -407,6 +415,13 @@ def translate_events(events: Iterator[Dict[str, object]], model: str) -> ModelRe
                     block["_json"] = str(block.get("_json", "")) + str(delta.get("partial_json", ""))
                 else:
                     raise LlmError(f"DeepSeek Messages 不支持 delta: {delta_type}", "MALFORMED_RESPONSE")
+                if on_event is not None:
+                    if delta_type == "text_delta":
+                        on_event({"type": "text-delta", "index": wire_index, "text": str(delta.get("text", ""))})
+                    elif delta_type == "thinking_delta":
+                        on_event({"type": "reasoning-delta", "index": wire_index, "text": str(delta.get("thinking", ""))})
+                    elif delta_type == "input_json_delta":
+                        on_event({"type": "tool-call-delta", "index": wire_index, "argumentsDelta": str(delta.get("partial_json", ""))})
             else:
                 if block.get("type") == "tool-call" and block.get("_json"):
                     try:
@@ -434,12 +449,18 @@ def translate_events(events: Iterator[Dict[str, object]], model: str) -> ModelRe
                 finish_reason = reasons[reason]
             if "usage" in event:
                 update_usage(usage, event["usage"])
+                if on_event is not None:
+                    on_event({"type": "usage", "usage": dict(usage)})
             continue
 
         if finish_reason is None or open_blocks:
             raise LlmError("DeepSeek Messages message_stop 时内容尚未收敛", "MALFORMED_RESPONSE")
         if not blocks and finish_reason["kind"] == "stop":
             raise LlmError("DeepSeek Messages 返回空内容", "EMPTY_RESPONSE")
+        if finish_reason["kind"] == "max-tokens":
+            retained = [(block, replay) for block, replay in zip(blocks, replay_blocks) if block.get("type") != "tool-call"]
+            blocks = [block for block, _ in retained]
+            replay_blocks = [replay for _, replay in retained]
         usage["totalTokens"] = sum(usage.values())
         ordered = sorted(zip(blocks, replay_blocks), key=lambda pair: pair[0]["_order"])
         ordered_blocks = []
@@ -587,16 +608,22 @@ class DeepSeekModel(Model):
         tool_definitions: List[Dict[str, object]],
         session_id: Optional[str] = None,
         cancel_token: Optional[CancellationToken] = None,
+        on_event: Optional[Callable[[Dict[str, object]], None]] = None,
     ) -> ModelResponse:
         config = DeepSeekConfig.from_env(self.retry_enabled)
         token = cancel_token or CancellationToken()
         images, file_ids = self._prepare_images(messages, config, token)
         request = self._messages_request(config, system, messages, tool_definitions, images, file_ids, session_id)
         retries = 0
+
+        def emit(event: Dict[str, object]) -> None:
+            if on_event is not None:
+                on_event({**event, "attempt": retries + 1})
+
         while True:
             token.throw_if_cancelled()
             try:
-                return self._request_once(request, config, token)
+                return self._request_once(request, config, token, emit if on_event is not None else None)
             except RunCancelled:
                 raise
             except LlmError as exc:
@@ -726,7 +753,13 @@ class DeepSeekModel(Model):
             raise LlmError("llm.files 当前被禁用", "DISABLED")
         return self._files_client(DeepSeekConfig.from_env(self.retry_enabled)).list()
 
-    def _request_once(self, request: Request, config: DeepSeekConfig, token: CancellationToken) -> ModelResponse:
+    def _request_once(
+        self,
+        request: Request,
+        config: DeepSeekConfig,
+        token: CancellationToken,
+        on_event: Optional[Callable[[Dict[str, object]], None]] = None,
+    ) -> ModelResponse:
         token.throw_if_cancelled()
         try:
             response = self._opener.open(request, timeout=config.stream_idle_timeout_ms / 1000)
@@ -739,7 +772,7 @@ class DeepSeekModel(Model):
         unregister = token.on_cancel(response.close)
         try:
             with response:
-                return translate_events(iter_sse(response, token), config.model)
+                return translate_events(iter_sse(response, token), config.model, on_event)
         except RunCancelled:
             raise
         except ValueError as exc:

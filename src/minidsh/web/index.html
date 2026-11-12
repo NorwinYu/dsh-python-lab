@@ -144,6 +144,8 @@
     .button svg { width: 13px; height: 13px; }
     .shortcut { margin-left: 4px; color: #a2abc0; font-size: 10px; }
     .terminal-card { margin-top: 20px; }
+    .live-draft { padding: 16px 18px; border-bottom: 1px solid #283448; color: #e4eaf5; background: #1a2332; font-size: 12px; line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
+    .live-draft[hidden] { display: none; }
     #events {
       min-height: 250px;
       max-height: 43vh;
@@ -235,6 +237,7 @@
           </section>
           <section class="card terminal-card">
             <div class="card-header"><h2 class="card-title">执行轨迹</h2><span class="card-kicker">EVENT STREAM</span></div>
+            <div class="live-draft" id="liveDraft" aria-live="polite" hidden></div>
             <pre id="events"></pre>
           </section>
         </div>
@@ -254,6 +257,7 @@
   </div>
   <script>
     const events = document.querySelector('#events')
+    const liveDraft = document.querySelector('#liveDraft')
     const sessionInput = document.querySelector('#sessionId')
     const runButton = document.querySelector('#run')
     const cancelButton = document.querySelector('#cancel')
@@ -325,6 +329,8 @@
       const imagePaths = document.querySelector('#images').value.split('\n').map(path => path.trim()).filter(Boolean)
       for (const path of imagePaths) query.append('image', path)
       events.textContent = ''
+      liveDraft.textContent = ''
+      liveDraft.hidden = true
       currentRunId = null
       setRunning(true)
       const source = new EventSource(`/v1/runs/stream?${query}`)
@@ -334,9 +340,20 @@
         setRunning(true)
         write(`turn/start: ${event.data}`)
       })
-      for (const name of ['assistant/message', 'llm/retry', 'llm/image-upload', 'llm/image-fallback', 'tools/pre-execute', 'tools/post-execute', 'job/settled', 'pty/created', 'pty/reset', 'turn/end']) {
+      for (const name of ['assistant/message', 'assistant/usage', 'llm/retry', 'llm/image-upload', 'llm/image-fallback', 'tools/pre-execute', 'tools/post-execute', 'job/settled', 'pty/created', 'pty/reset', 'turn/end']) {
         source.addEventListener(name, (event) => write(`${name}: ${event.data}`))
       }
+      source.addEventListener('assistant/delta', (event) => {
+        const data = JSON.parse(event.data)
+        if (data.type === 'text-delta') {
+          liveDraft.hidden = false
+          liveDraft.textContent += data.text
+        }
+      })
+      source.addEventListener('llm/retry', () => {
+        liveDraft.textContent = ''
+        liveDraft.hidden = true
+      })
       source.addEventListener('run/result', (event) => {
         const data = JSON.parse(event.data)
         if (!sessionInput.value && data.session_id) sessionInput.value = data.session_id

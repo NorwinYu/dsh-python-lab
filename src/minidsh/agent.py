@@ -27,6 +27,7 @@ class Agent:
         max_steps: int = 4,
         workspace: Optional[Path] = None,
         allow_outside: bool = False,
+        streaming: bool = True,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -39,6 +40,7 @@ class Agent:
         self.max_steps = max_steps
         self.workspace = (workspace or Path.cwd()).resolve()
         self.allow_outside = allow_outside
+        self.streaming = streaming
 
     def run(
         self,
@@ -127,7 +129,43 @@ class Agent:
                     session_id,
                     cancel_token=token,
                 )
-            response = self.model.complete(system, messages, self.tools.definitions(), session_id, token)
+            saw_delta = False
+
+            def forward_model_event(event: Dict[str, object]) -> None:
+                nonlocal saw_delta
+                event_type = event.get("type")
+                if event_type == "usage":
+                    self.events.emit("assistant/usage", {"session_id": session_id, "run_id": run_id, "turn": turn, "step": step, **event})
+                    return
+                if event_type not in {"text-delta", "reasoning-delta", "tool-call-delta", "block-start"}:
+                    return
+                saw_delta = True
+                self.events.emit(
+                    "assistant/delta",
+                    {"session_id": session_id, "run_id": run_id, "turn": turn, "step": step, **event},
+                )
+
+            response = self.model.complete(
+                system,
+                messages,
+                self.tools.definitions(),
+                session_id,
+                token,
+                forward_model_event if self.streaming else None,
+            )
+            if self.streaming and not saw_delta and response.content:
+                self.events.emit(
+                    "assistant/delta",
+                    {
+                        "session_id": session_id,
+                        "run_id": run_id,
+                        "turn": turn,
+                        "step": step,
+                        "type": "text-delta",
+                        "text": response.content,
+                        "fallback": True,
+                    },
+                )
             model_name = getattr(self.model, "model_id", "mock")
             if response.replay_state is not None:
                 response_info = response.replay_state.get("response", {})

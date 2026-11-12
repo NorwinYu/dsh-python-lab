@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from .cancellation import CancellationToken
 from .plugins import Plugin, ServiceContext
@@ -46,6 +46,7 @@ class Model(ABC):
         tool_definitions: List[Dict[str, object]],
         session_id: Optional[str] = None,
         cancel_token: Optional[CancellationToken] = None,
+        on_event: Optional[Callable[[Dict[str, object]], None]] = None,
     ) -> ModelResponse:
         pass
 
@@ -82,6 +83,7 @@ class MockModel(Model):
         tool_definitions: List[Dict[str, object]],
         session_id: Optional[str] = None,
         cancel_token: Optional[CancellationToken] = None,
+        on_event: Optional[Callable[[Dict[str, object]], None]] = None,
     ) -> ModelResponse:
         if cancel_token is not None:
             cancel_token.throw_if_cancelled()

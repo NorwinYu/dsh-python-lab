@@ -68,6 +68,7 @@ class AgentPlugin(Plugin):
             compaction=compaction,
             workspace=self.config.workspace,
             allow_outside=sandbox.mode == "danger-full-access",
+            streaming=self.config.features["core.streaming"],
         )
         ctx.provide("agent", agent, self.name)
 

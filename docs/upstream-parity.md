@@ -154,6 +154,17 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 提供 `pty/created`、`pty/reset`、终端列表和 kill API；CLI 短进程退出后不能恢复 PTY 内存状态。
 - 仅支持 Unix PTY；尚未实现官方终端行缓冲、OSC 就绪检测、ConPTY、跨进程恢复和 sandbox mode fence。
 
+### 增量模型流与 SSE 背压
+
+- `core.streaming` 默认启用；DeepSeek 在原解析器中同步发出 text/reasoning/tool-call delta、工具 block-start 和 usage。
+- Agent 添加 session/run/turn/step；每次请求带 attempt，重试后消费者可区分失败草稿与新流。
+- 最终 ModelResponse、assistant/message 和 reasoning replay 与增量来自同一解析器，不改变已有持久消息结构。
+- 无增量能力的模型由 Agent 将最终文本补发一次，标记 fallback=true；关闭 core.streaming 后完全不发送 delta。
+- max-token 响应丢弃工具调用及对应 replay 块，避免执行不完整工具操作。
+- Web 只拼接 text-delta，llm/retry 清空失败 attempt 草稿，原始事件区保留完整事件。
+- 每个 SSE listener 队列上限 256，put_nowait 溢出时关闭并移除慢流，Agent 继续运行并持久化最终结果。
+- 当前不包含官方原始 chunk 压缩持久化、增量组装器独立 API 或 SSE 断线续传。
+
 ### 提问、待办与 Web 工具（学习版纵向切片）
 
 - `tools.ask-user` 注册官方名称 ask_user_question 和 questions/id/question/options/multi_select schema；提示语包含上游跳过语义。
@@ -242,5 +253,10 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - Web 深度 512 防护、输出上限、运行取消、私网/file scheme 拒绝和未配置 provider 错误均通过；未访问公网。
 - 四个新工具默认 disabled，不改变默认系统提示词。
 - 最终 wheel 包含 questions/todo/web_tools；离线安装后提问、待办、Web fetch/search 四条本地真实流程全部通过。
+- 本地 DeepSeek SSE 验证 text/reasoning 分片、usage、工具参数和最终响应一致；500 后重试事件的 attempt=2。
+- max-token 响应的工具调用和 replay 块被丢弃；真实 Agent 工具调用的 delta 带正确 run_id。
+- Mock fallback 和 core.streaming 禁用通过；300 条事件写入 256 队列后慢 listener 被移除，dropped_streams=1。
+- 浏览器实际运行后实时文本区显示 Mock 正文，原始事件区仍保留完整事件。
+- 最终 wheel 离线安装后，本地 DeepSeek 的真实 text delta 与 run_id 正确，慢 listener 溢出断开通过。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

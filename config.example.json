@@ -13,6 +13,7 @@
     "core.jobs": true,
     "core.compaction": true,
     "core.cancellation": true,
+    "core.streaming": true,
     "core.pty": true,
     "core.tool-result-pruner": false,
     "core.user-questions": true,
