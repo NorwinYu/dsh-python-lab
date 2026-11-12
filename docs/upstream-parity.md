@@ -71,8 +71,8 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 
 ### 会话与压缩
 
-- `resume` 从 JSONL 重建用户、助手和工具消息，递增 turn，写入 `session/resume`，并按当前配置刷新系统提示词与 runtime context。
-- `fs/observed` 随会话持久化，resume 时恢复文件版本观察，而不是绕过写前读取。
+- `resume` 从 JSONL 重建用户、助手和工具消息，递增 turn，写入 `session/resume`，并刷新当前提示词和 runtime context。
+- `fs/observed` 随会话持久化，resume 时恢复文件版本观察。
 - `fork` 可复制完整会话或指定事件序号前缀，生成独立 session id。
 - 支持会话列表和 transcript 可读投影。
 - 自动压力阈值为上下文容量的 80%，默认保留 16% 尾部消息。
@@ -80,19 +80,29 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 压缩只影响发给模型的投影，不删除原始事件；压缩后的会话可以继续 resume。
 - token meter 当前是学习版 UTF-8/JSON 启发式估算，不是官方精确 tokenizer。
 
+### HTTP、SSE 与并发
+
+- 默认仅绑定 `127.0.0.1`；绑定非回环地址必须配置 `MINIDSH_TOKEN`，否则拒绝启动。
+- 提供健康、插件、工具、提示词、会话列表/事件/transcript、run/resume/fork/compact、jobs/output/kill API。
+- SSE 包含 turn、assistant、工具执行、run result/error/done 和 `job/settled`。
+- 每次运行都有唯一 `run_id`，捕获新 session id 和等待结果都按 `run_id` 匹配，避免并发运行串结果。
+- 相同 prompt 的并发运行也能获得独立 session id；JSONL 追加和读取使用锁避免序号冲突与半行读取。
+- 提供一个使用 EventSource 的最小 Web 页面，复用同一 Application，不复制 Agent 逻辑。
+
 ## 尚未对齐
 
 - 官方完整工具集、profile/bundle 格式、运行时热重载和外部 npm 插件。
+- 官方 Web Host 的认证、鉴权、页面、RPC 与多路复用协议；当前 HTTP/SSE 是学习 API，不是官方兼容实现。
 - Landlock/bwrap 等内核沙箱；当前 `read-only` 保守拒绝全部 Shell。
 - `sandbox_permissions` 升级、会话中切换审批/文件策略和审批取消。
 - PTY、持久 Shell、Windows 原生 Shell；当前进程后端固定使用 `/bin/bash`。
-- 任务完成通知、Agent 自动唤醒、跨进程任务恢复和长期常驻宿主。
+- 任务完成后的 Agent 自动唤醒、跨进程任务恢复和长期常驻宿主。
 - 图片与 Files API、模型 listing、请求重试、扩展请求头和遥测。
 - 官方 surface generation/replacement、会话格式迁移、崩溃修复、跨进程锁和原子多进程发布。
 - 官方压缩区间选择、token 校准、tool-result pruner、模型切换压缩、重试和取消。
 - `read` 尚未实现大文件流式扫描；`glob` 尚未完全复刻 ripgrep 语义和 spill 行为。
 - 匿名用户 ID 只在进程内稳定，尚未持久化。
-- 尚未对真实 DeepSeek 服务做带凭据的在线验收。
+- 尚未对真实 DeepSeek 服务做带凭据的在线验收；当前 Web 页面不支持自定义 Authorization 请求头，token 主要用于 API 客户端。
 
 ## 已执行验证
 
@@ -102,10 +112,13 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 文件策略的允许、拒绝、无应答者失败关闭和审批审计。
 - 未读覆盖、读取后外部修改、多次匹配、`replace_all`、路径穿越和符号链接检查。
 - Mock CLI 的写入及先读后编辑流程。
-- Shell 前台/后台、fresh shell、workdir、超时转后台、增量读取、kill 和回收。
-- 大输出裁剪和落盘、环境凭据清理、任务会话事件、并发上限。
+- Shell 前台/后台、超时转后台、增量读取、kill、并发上限和应用退出回收。
+- 大输出裁剪和落盘、环境凭据清理、任务会话事件。
 - 跨进程 resume、turn 递增、观察恢复、transcript、fork 及分支独立性。
 - 手动压缩保留原始事件并支持 resume；自动压力压缩、token meter 和功能开关。
 - 无效 context window 被拒绝；Shell 接入后的 write/edit 回归。
+- HTTP 健康、HTML、工具、run/resume/fork/compact 和会话 API。
+- SSE turn、assistant、run result 和 job 完成通知。
+- Bearer token 接受/拒绝；相同 prompt 的 10 个并发请求生成独立 session 且 JSONL 完整。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

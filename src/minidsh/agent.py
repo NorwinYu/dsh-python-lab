@@ -34,7 +34,7 @@ class Agent:
         self.compaction = compaction
         self.max_steps = max_steps
 
-    def run(self, prompt: str, session_id: Optional[str] = None) -> str:
+    def run(self, prompt: str, session_id: Optional[str] = None, run_id: Optional[str] = None) -> str:
         system = self.system_prompt.render()
         messages: List[Dict[str, object]] = []
         turn = 1
@@ -68,7 +68,7 @@ class Agent:
         self._record(session_id, "user/message", user_message)
         self._record(session_id, "user/message", runtime_message)
         self._record(session_id, "turn/start", {"turn": turn})
-        self.events.emit("turn/start", {"session_id": session_id, "prompt": prompt})
+        self.events.emit("turn/start", {"session_id": session_id, "prompt": prompt, "run_id": run_id})
 
         for step in range(1, self.max_steps + 1):
             self._record(session_id, "step/start", {"turn": turn, "step": step})
@@ -100,6 +100,7 @@ class Agent:
                 "assistant/message",
                 {"turn": turn, "step": step, "message": assistant_message, "usage": response.usage},
             )
+            self.events.emit("assistant/message", {"session_id": session_id, "message": assistant_message})
 
             if not response.tool_calls:
                 reason = response.finish_reason

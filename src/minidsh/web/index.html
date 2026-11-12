@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MiniDSH 学习台</title>
+  <style>
+    :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+    body { max-width: 1080px; margin: 0 auto; padding: 24px; line-height: 1.5; }
+    main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 20px; }
+    section { border: 1px solid #8884; border-radius: 12px; padding: 18px; }
+    textarea, input, button { width: 100%; box-sizing: border-box; font: inherit; }
+    textarea { min-height: 120px; padding: 10px; }
+    input { margin: 8px 0 14px; padding: 8px; }
+    button { margin: 4px 0; padding: 9px; cursor: pointer; }
+    #events { min-height: 300px; max-height: 60vh; overflow: auto; padding: 12px; background: #1112; white-space: pre-wrap; word-break: break-word; }
+    .session { display: block; padding: 6px 0; cursor: pointer; text-decoration: underline; }
+    .muted { opacity: .7; font-size: .9em; }
+    @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>MiniDSH 学习台</h1>
+  <p class="muted">同一 Agent、工具、会话与后台任务。此页面仅用于本地学习。</p>
+  <main>
+    <section>
+      <h2>运行 Agent</h2>
+      <label>提示词</label>
+      <textarea id="prompt">请列出当前目录</textarea>
+      <label>Session ID（留空新建）</label>
+      <input id="sessionId" placeholder="已有 session id，可留空">
+      <button id="run">运行 / Resume</button>
+      <button id="compact">手动压缩</button>
+      <button id="fork">Fork 当前会话</button>
+      <h3>事件流</h3>
+      <pre id="events"></pre>
+    </section>
+    <section>
+      <h2>会话</h2>
+      <button id="refresh">刷新会话</button>
+      <div id="sessions"></div>
+    </section>
+  </main>
+  <script>
+    const events = document.querySelector('#events')
+    const sessionInput = document.querySelector('#sessionId')
+    const write = (text) => { events.textContent += `${text}\n`; events.scrollTop = events.scrollHeight }
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || response.statusText)
+      return data
+    }
+
+    async function refreshSessions() {
+      const sessions = await api('/v1/sessions')
+      const root = document.querySelector('#sessions')
+      root.replaceChildren()
+      for (const item of sessions) {
+        const link = document.createElement('a')
+        link.className = 'session'
+        link.textContent = `${item.session_id} · ${item.events} events`
+        link.href = '#'
+        link.onclick = (event) => { event.preventDefault(); sessionInput.value = item.session_id }
+        root.append(link)
+      }
+    }
+
+    document.querySelector('#run').onclick = () => {
+      events.textContent = ''
+      const prompt = document.querySelector('#prompt').value
+      const sessionId = sessionInput.value.trim()
+      const query = new URLSearchParams({ prompt })
+      if (sessionId) query.set('session_id', sessionId)
+      const source = new EventSource(`/v1/runs/stream?${query}`)
+      source.onmessage = (event) => write(`${event.type}: ${event.data}`)
+      source.addEventListener('run/result', (event) => {
+        write(`run/result: ${event.data}`)
+        source.close()
+        refreshSessions()
+      })
+      source.addEventListener('run/error', (event) => {
+        write(`run/error: ${event.data}`)
+        source.close()
+      })
+      source.addEventListener('run/done', () => source.close())
+      source.onerror = () => source.close()
+    }
+
+    document.querySelector('#compact').onclick = async () => {
+      const id = sessionInput.value.trim()
+      if (!id) return write('请先填写 Session ID')
+      try {
+        const data = await api(`/v1/sessions/${id}/compact`, { method: 'POST', body: '{}' })
+        write(data.result)
+        refreshSessions()
+      } catch (error) { write(`错误: ${error.message}`) }
+    }
+
+    document.querySelector('#fork').onclick = async () => {
+      const id = sessionInput.value.trim()
+      if (!id) return write('请先填写 Session ID')
+      try {
+        const data = await api(`/v1/sessions/${id}/fork`, { method: 'POST', body: '{}' })
+        sessionInput.value = data.session_id
+        write(`新分支: ${data.session_id}`)
+        refreshSessions()
+      } catch (error) { write(`错误: ${error.message}`) }
+    }
+
+    document.querySelector('#refresh').onclick = refreshSessions
+    refreshSessions().catch((error) => write(`错误: ${error.message}`))
+  </script>
+</body>
+</html>

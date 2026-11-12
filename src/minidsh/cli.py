@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -7,6 +8,7 @@ from typing import List, Optional
 from .app import Application
 from .config import AppConfig, ConfigError
 from .sandbox import SANDBOX_MODES
+from .server import ApiServer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,6 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     compact_parser = subparsers.add_parser("compact", help="手动创建压缩检查点")
     compact_parser.add_argument("session_id")
+
+    serve_parser = subparsers.add_parser("serve", help="启动本地 HTTP/SSE 宿主")
+    serve_parser.add_argument("--host", default="127.0.0.1")
+    serve_parser.add_argument("--port", type=int, default=3080)
     return parser
 
 
@@ -82,6 +88,19 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         app = Application(config, interactive_answerer if args.command in {"run", "resume"} else None)
+        if args.command == "serve":
+            if args.host not in {"127.0.0.1", "localhost", "::1"} and not os.environ.get("MINIDSH_TOKEN"):
+                raise RuntimeError("绑定非回环地址必须设置 MINIDSH_TOKEN")
+            server = ApiServer(app, args.host, args.port, os.environ.get("MINIDSH_TOKEN"))
+            print(f"MiniDSH: {server.url}", flush=True)
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                server.close()
+            return 0
+
         if args.command == "plugins":
             for row in app.manager.status():
                 missing = f" missing={','.join(row['missing'])}" if row["missing"] else ""

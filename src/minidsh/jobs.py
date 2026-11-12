@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from .events import EventBus
 from .plugins import Plugin, ServiceContext
 from .session import SessionStore
 
@@ -88,9 +89,10 @@ class JobRecord:
 
 
 class JobService:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, events: Optional[EventBus] = None) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
+        self.events = events
         self._jobs: Dict[str, JobRecord] = {}
 
     def start(
@@ -172,6 +174,11 @@ class JobService:
                 job.detail = f"exit code: {return_code}"
             job.finished_at = int(time.time() * 1000)
             self._record(job, "job/settled")
+            if self.events is not None:
+                self.events.emit(
+                    "job/settled",
+                    {"jobId": job.id, "owner": job.owner, "status": job.status, "detail": job.detail},
+                )
             job.condition.notify_all()
 
     @staticmethod
@@ -327,7 +334,7 @@ class JobPlugin(Plugin):
         self.root = root
 
     def activate(self, ctx: ServiceContext) -> None:
-        ctx.provide("jobs", JobService(self.root), self.name)
+        ctx.provide("jobs", JobService(self.root, ctx.events), self.name)
 
     def deactivate(self, ctx: ServiceContext) -> None:
         jobs = ctx.require("jobs")

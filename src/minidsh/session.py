@@ -1,4 +1,5 @@
 import json
+import threading
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -46,28 +47,31 @@ class JsonlSessionStore(SessionStore):
     def __init__(self, root: Path) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
 
     def _path(self, session_id: str) -> Path:
         return self.root / f"{session_id}.jsonl"
 
     def append(self, session_id: str, event_type: str, payload: Dict[str, object]) -> None:
-        path = self._path(session_id)
-        sequence = sum(1 for _ in path.open("r", encoding="utf-8")) if path.exists() else 0
-        event = {
-            "session_id": session_id,
-            "seq": sequence,
-            "type": event_type,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "payload": payload,
-        }
-        with path.open("a", encoding="utf-8") as file:
-            file.write(json.dumps(event, ensure_ascii=False) + "\n")
+        with self._lock:
+            path = self._path(session_id)
+            sequence = sum(1 for _ in path.open("r", encoding="utf-8")) if path.exists() else 0
+            event = {
+                "session_id": session_id,
+                "seq": sequence,
+                "type": event_type,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "payload": payload,
+            }
+            with path.open("a", encoding="utf-8") as file:
+                file.write(json.dumps(event, ensure_ascii=False) + "\n")
 
     def load(self, session_id: str) -> List[Dict[str, object]]:
-        path = self._path(session_id)
-        if not path.exists():
-            return []
-        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        with self._lock:
+            path = self._path(session_id)
+            if not path.exists():
+                return []
+            return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
     def fork(self, session_id: str, at_seq: Optional[int] = None) -> str:
         events = self.load(session_id)

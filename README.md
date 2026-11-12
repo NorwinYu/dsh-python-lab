@@ -1,6 +1,6 @@
 # MiniDSH：从 0 学 Agent Harness
 
-这是一个用于拆解 DeepSeek Harness（DSH）核心思想的 Python 学习项目。它不是官方 DSH 的完整移植，而是通过可运行的小切片逐层理解插件、工具、模型、审批、Shell、后台任务、会话恢复、压缩和 Agent Loop。
+这是一个用于拆解 DeepSeek Harness（DSH）核心思想的 Python 学习项目。它不是官方 DSH 的完整移植，而是通过可运行的小切片逐层理解插件、工具、模型、审批、Shell、后台任务、会话恢复、压缩、HTTP/SSE 和 Agent Loop。
 
 当前只使用 Python 标准库，支持 Python 3.9+。MockModel 不需要 API Key；真实 DeepSeek 模型插件可独立开关。
 
@@ -128,20 +128,14 @@ PYTHONPATH=src python3 -m minidsh \
 
 每次调用使用新的 `bash -c`；cwd、变量和函数不会跨调用保留。前台命令超时后转为后台任务，而不是直接杀死。后台任务支持独立 stdout/stderr 游标、输出上限、完整输出落盘、任务列表、进程组终止和会话事件。
 
-当前 CLI 是短进程，退出时会回收后台任务；长期运行、任务通知和跨进程任务恢复需要后续常驻宿主阶段。
+当前 CLI 是短进程，退出时会回收后台任务；长期运行和跨进程任务恢复使用下面的常驻宿主。
 
 ## 会话恢复与压缩
-
-查看会话并恢复：
 
 ```bash
 PYTHONPATH=src python3 -m minidsh sessions
 PYTHONPATH=src python3 -m minidsh resume <session-id> "继续刚才的任务"
-```
 
-其他操作：
-
-```bash
 # 可读消息投影
 PYTHONPATH=src python3 -m minidsh transcript <session-id>
 
@@ -156,6 +150,44 @@ PYTHONPATH=src python3 -m minidsh --context-window 100 run "测试自动压缩"
 ```
 
 resume 会恢复消息、turn 编号和文件观察；runtime context 使用当前配置重新生成。fork 不会改写原会话。压缩只改变发给模型的投影，不删除原始 JSONL 事件。
+
+## HTTP 宿主与 Web 页面
+
+启动本地 HTTP/SSE 宿主：
+
+```bash
+PYTHONPATH=src python3 -m minidsh serve --port 3080
+```
+
+然后打开 `http://127.0.0.1:3080`。页面支持运行/resume、fork、compact、会话列表和事件流。
+
+API 摘要：
+
+```text
+GET  /health
+GET  /v1/plugins
+GET  /v1/tools
+GET  /v1/prompt
+GET  /v1/sessions
+GET  /v1/sessions/<id>
+GET  /v1/sessions/<id>/transcript
+GET  /v1/jobs
+GET  /v1/jobs/<id>/output
+POST /v1/runs
+POST /v1/runs/stream
+POST /v1/sessions/<id>/resume
+POST /v1/sessions/<id>/fork
+POST /v1/sessions/<id>/compact
+POST /v1/jobs/<id>/kill
+```
+
+默认只绑定 `127.0.0.1`。绑定非回环地址时必须设置 `MINIDSH_TOKEN`，客户端同时携带：
+
+```text
+Authorization: Bearer <token>
+```
+
+SSE 包含 turn、assistant、工具执行、run result/error/done 和 job 完成通知。并发运行通过唯一 `run_id` 关联结果，相同 prompt 也不会串会话。
 
 ## 接入真实 DeepSeek
 
@@ -184,11 +216,11 @@ PYTHONPATH=src python3 -m minidsh \
 ## 当前架构
 
 ```text
-CLI
+CLI / Web UI / HTTP API
   └─ Application：唯一的插件组装入口
       └─ PluginManager：功能开关、依赖检查、激活与逆序卸载
           └─ ServiceContext：服务注册与解析
-          └─ EventBus：工具与回合事件
+          └─ EventBus：工具、回合和任务事件
           ├─ SystemPrompt：身份段、工具段、runtime context
           ├─ SandboxPolicy：read-only / workspace-write / danger-full-access
           ├─ ApprovalService：ask / never / allowed-once / unavailable
@@ -202,6 +234,7 @@ CLI
           ├─ MockModel：离线模型适配器
           ├─ DeepSeekModel：Messages/SSE 模型适配器
           └─ Agent：turn / step / tool call 循环
+              └─ ApiServer / SseBroker：HTTP、SSE、run_id 关联
 ```
 
 ## 源码阅读顺序
@@ -221,7 +254,9 @@ CLI
 13. `src/minidsh/session.py`：事件、消息投影、resume、fork、transcript。
 14. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
 15. `src/minidsh/agent.py`：完整的最小 Agent Loop。
-16. `src/minidsh/cli.py`：命令行与交互审批。
+16. `src/minidsh/server.py`：HTTP API、SSE 和 run_id 关联。
+17. `src/minidsh/web/index.html`：最小 Web 页面。
+18. `src/minidsh/cli.py`：命令行与常驻宿主入口。
 
 ## 观察会话
 
@@ -262,13 +297,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 理解进程组、前后台任务、超时转后台、输出上限、取消和资源回收。
 
-### 第 4 层：会话恢复与压缩（当前）
+### 第 4 层：会话恢复与压缩
 
-理解历史投影、resume、fork、文件观察恢复、token meter，以及“压缩视图但不删除事实”。对照 `docs/upstream-parity.md` 阅读。
+理解历史投影、resume、fork、文件观察恢复、token meter，以及“压缩视图但不删除事实”。
 
-### 第 5 层：HTTP 与常驻宿主/Web UI
+### 第 5 层：HTTP 与常驻宿主（当前）
 
-增加 HTTP、SSE/WebSocket、任务通知和 Agent 唤醒；不要在 UI 中复制 Agent 逻辑。
+理解 HTTP API、SSE、任务通知、run_id 关联、并发会话和最小 Web 页面。对照 `docs/upstream-parity.md` 阅读。
 
 ### 第 6 层：外部插件与发行包
 
@@ -277,9 +312,11 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 ## 当前边界
 
 - 有 `read/glob/write/edit/bash` 和三个 job 工具，仍不是完整官方工具集。
+- HTTP/SSE 是学习 API，不兼容官方 Web Host 的认证、RPC 和多路复用协议。
 - 插件依赖在启动时收敛，尚不支持运行中热重载。
 - 已支持 resume/fork/压缩，但尚无官方 surface replacement、格式迁移、跨进程锁和崩溃修复。
 - token meter 是启发式估算，尚无精确 tokenizer、tool-result pruner 和模型切换压缩。
-- 尚无内核沙箱、PTY、持久 Shell、任务通知、审批升级、图片、重试和模型 listing。
+- 尚无内核沙箱、PTY、持久 Shell、审批升级、图片、重试和模型 listing。
 - 当前 Shell 固定使用 `/bin/bash`，尚未支持 Windows 原生进程后端。
+- 当前 Web 页面不支持自定义 Authorization 请求头；token 主要用于 API 客户端。
 - 尚未进行真实 DeepSeek 在线验收；这是教学代码，不应直接暴露为公网服务。
