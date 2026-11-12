@@ -186,5 +186,6 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 真实 Unix PTY 验证 cwd/export 跨调用保持、非零退出码、超时重置、exit 重置和应用回收。
 - Agent/Mock 持久工具验证插件替换、schema、HTTP 终端列表/kill、运行取消和 JSONL 重置事件。
 - 默认一次性 Bash 的 active 状态、工具描述和系统提示词保持不变。
+- 最终 wheel 包含 PTY 和终端事件资源；离线安装后实际执行持久 Bash，输出及退出码 0 均正确。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。
