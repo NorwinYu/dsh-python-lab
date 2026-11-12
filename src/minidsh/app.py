@@ -11,6 +11,7 @@ from .llm import MockModelPlugin, Model
 from .observations import ObservationPlugin, ObservationStore
 from .plugins import DisabledExternalPlugin, Plugin, PluginManager, ServiceContext
 from .pty_shell import PersistentBashPlugin, PtyPlugin
+from .pruner import ToolResultPrunerPlugin
 from .sandbox import SandboxPolicy, SandboxPolicyPlugin
 from .session import JsonlSessionPlugin, SessionStore
 from .shell import BashToolPlugin, JobToolsPlugin, make_bash_tool
@@ -108,6 +109,7 @@ class Application:
             )
         )
         self.manager.register(CompactionPlugin(config.context_window))
+        self.manager.register(ToolResultPrunerPlugin())
         self.manager.register(AgentPlugin(config))
         for spec in config.plugin_specs:
             if config.features[spec.name]:

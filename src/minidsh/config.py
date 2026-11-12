@@ -17,6 +17,7 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "core.compaction": True,
     "core.cancellation": True,
     "core.pty": True,
+    "core.tool-result-pruner": False,
     "tools.glob": True,
     "tools.read": True,
     "tools.write": True,

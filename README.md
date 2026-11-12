@@ -49,6 +49,7 @@ minidsh run "请列出当前目录"
 - `core.compaction`：自动/手动压缩检查点。
 - `core.cancellation`：HTTP/Web 运行取消及模型、工具、前台 Shell 取消传播。
 - `core.pty`：Unix PTY 服务与持久终端生命周期。
+- `core.tool-result-pruner`：手动 surface 工具结果裁剪，默认关闭。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
@@ -202,6 +203,29 @@ PYTHONPATH=src python3 -m minidsh migrate
 
 对应 HTTP 操作为 `POST /v1/sessions/<id>/repair` 和 `/migrate`。这是学习版 v0/v1 协议，不兼容官方多代际/Zstandard 格式。
 
+## Surface replacement 与工具结果裁剪
+
+`surface` 是当前发给模型的事件视图，原始 JSONL 仍是事实来源。普通消息视为追加；replacement 使用 `surfaceOp={op: replace, startSeq, endSeq}` 替换当前视图中的区间，并通过 `sourceEventSeqs` 引用被遮蔽事件。事件本身的 seq 和内容不会被修改。
+
+```bash
+# 查看当前模型视图及替换历史
+PYTHONPATH=src python3 -m minidsh surface <session-id>
+
+# 手动裁剪当前视图里过长的工具结果
+PYTHONPATH=src python3 -m minidsh \
+  --enable core.tool-result-pruner prune <session-id>
+```
+
+`core.tool-result-pruner` 默认关闭，不会自动裁剪。启用后，CLI、HTTP `POST /v1/sessions/<id>/prune` 和 Web“裁剪工具结果”按钮复用同一服务。每个被裁剪节点先追加 `compaction/prune` 计量事件，再追加只修改 `content` 的 `tool/result` replacement。
+
+默认文本超过 8192 个 Unicode 码点时保留头部 4096、尾部 1024，中间换成 `[... tool result middle pruned ...]`。可用 `MINIDSH_PRUNE_THRESHOLD_CHARS`、`MINIDSH_PRUNE_HEAD_CHARS`、`MINIDSH_PRUNE_TAIL_CHARS` 调整，头部+标记+尾部不能超过阈值。非文本块保持原顺序，Python 字符串切片不会拆散 Unicode 码点。
+
+折叠会拒绝不存在的起止节点、逆序区间、非当前节点、重复/未来来源引用，以及修改工具调用身份等非 content 字段。首个系统提示词只能由单个 system replacement 改写。旧事件没有 surfaceOp 时按 append 兼容。
+
+`derive_messages`、resume、fork 和 compact 使用折叠后的模型视图；`transcript` 使用原始追加事件，因此裁剪副本不会抹掉用户已经看到的工具原文。重复 prune 不会重复裁剪已小于阈值的当前节点。
+
+对应只读 API 为 `GET /v1/sessions/<id>/surface`。这是官方 surface 规则的纵向切片，不包含任意插件消息投影或完整官方事件类型系统。
+
 ## 图片附件与 Files API
 
 CLI 和 resume 可重复传入 `--image`；HTTP 使用字符串数组，Web 在高级操作中每行填写一个工作区图片路径：
@@ -282,6 +306,7 @@ GET  /v1/prompt
 GET  /v1/sessions
 GET  /v1/sessions/<id>
 GET  /v1/sessions/<id>/transcript
+GET  /v1/sessions/<id>/surface
 GET  /v1/jobs
 GET  /v1/jobs/<id>/output
 GET  /v1/terminals
@@ -293,6 +318,7 @@ POST /v1/sessions/<id>/fork
 POST /v1/sessions/<id>/compact
 POST /v1/sessions/<id>/repair
 POST /v1/sessions/<id>/migrate
+POST /v1/sessions/<id>/prune
 POST /v1/jobs/<id>/kill
 POST /v1/terminals/<pty-id>/kill
 ```
@@ -450,14 +476,16 @@ minidsh-headless / minidsh-web / minidsh-desktop
 18. `src/minidsh/deepseek.py`：Messages 图片、SSE、重试、列表缓存和原生 replay。
 19. `src/minidsh/session.py`：版本头、原子迁移、POSIX 写锁、消息投影和 fork。
 20. `src/minidsh/session_recovery.py`：工具结果补偿与开放 step/turn 闭环。
-21. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
-22. `src/minidsh/agent.py`：Agent Loop、恢复入口、图片输入与取消终态。
-23. `src/minidsh/server.py`：HTTP API、SSE、会话互斥和终端生命周期。
-24. `src/minidsh/web/index.html`：Web 工作台、图片路径与停止运行。
-25. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
-26. `examples/minidsh-clock`：可独立安装的外部工具插件。
-27. `packages`：Headless、Web、Desktop 三个产品发行入口。
-28. `src/minidsh/cli.py`：命令行、迁移恢复与常驻宿主入口。
+21. `src/minidsh/surface.py`：surface 折叠、来源引用和 replacement 校验。
+22. `src/minidsh/pruner.py`：Unicode 工具结果裁剪与 replacement 写入。
+23. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
+24. `src/minidsh/agent.py`：Agent Loop、恢复入口、图片输入与取消终态。
+25. `src/minidsh/server.py`：HTTP API、SSE、会话互斥和终端生命周期。
+26. `src/minidsh/web/index.html`：Web 工作台、图片路径与裁剪操作。
+27. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
+28. `examples/minidsh-clock`：可独立安装的外部工具插件。
+29. `packages`：Headless、Web、Desktop 三个产品发行入口。
+30. `src/minidsh/cli.py`：命令行、迁移恢复与常驻宿主入口。
 
 ## 观察会话
 
@@ -522,17 +550,21 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 理解控制终端、owner 隔离、命令串行化、随机完成标记、退出码、超时/取消重置和资源回收。
 
-### 第 10 层：会话迁移与崩溃恢复（当前）
+### 第 10 层：会话迁移与崩溃恢复
 
-理解版本头、连续事件校验、备份与原子发布、工具结果补偿、开放回合闭环和 POSIX 写锁。对照 `docs/upstream-parity.md` 阅读。
+理解版本头、连续事件校验、备份与原子发布、工具结果补偿、开放回合闭环和 POSIX 写锁。
+
+### 第 11 层：Surface replacement 与裁剪（当前）
+
+理解追加事实与模型视图的分离、区间替换、来源引用、工具结果裁剪和人类 transcript。对照 `docs/upstream-parity.md` 阅读。
 
 ## 当前边界
 
 - 有 `read/glob/write/edit/bash` 和三个 job 工具，仍不是完整官方工具集。
 - HTTP/SSE 是学习 API，不兼容官方 Web Host 的认证、RPC 和多路复用协议。
 - 插件依赖在启动时收敛，尚不支持运行中热重载。
-- 会话恢复是学习版 v0/v1 协议，尚无官方 surface replacement、多代际不可变文件、Zstandard、Windows 写锁和格式目录。
-- token meter 是启发式估算，尚无精确 tokenizer、图片 token 定价、tool-result pruner 和模型切换压缩。
+- surface 只支持学习版消息事件和工具结果裁剪，尚无官方完整事件类型、插件消息投影、多代际不可变文件、Zstandard、Windows 写锁和格式目录。
+- token meter 是启发式估算，尚无精确 tokenizer、图片 token 定价和模型切换压缩。
 - 尚无内核沙箱和审批升级；PTY 仅支持 Unix `/bin/bash`，不支持 Windows ConPTY。
 - PTY 是进程内学习实现，尚无官方终端行缓冲/OSC 就绪协议、跨进程恢复和文件策略切换围栏。
 - 图片上传只有进程内缓存和锁，尚无持久索引、独立等待者取消、配额回收、图片变换和浏览器文件选择器。

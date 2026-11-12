@@ -219,6 +219,7 @@
                 </div>
                 <div class="actions">
                   <button class="button" id="compact">压缩上下文</button>
+                  <button class="button" id="prune">裁剪工具结果</button>
                   <button class="button" id="fork">创建分支</button>
                 </div>
               </details>
@@ -379,6 +380,15 @@
       try {
         const data = await api(`/v1/sessions/${id}/compact`, { method: 'POST', body: '{}' })
         write(data.result)
+        refreshSessions()
+      } catch (error) { write(`错误: ${error.message}`) }
+    }
+    document.querySelector('#prune').onclick = async () => {
+      const id = sessionInput.value.trim()
+      if (!id) return write('请先选择或填写 Session ID')
+      try {
+        const data = await api(`/v1/sessions/${id}/prune`, { method: 'POST', body: '{}' })
+        write(`裁剪完成: ${JSON.stringify(data)}`)
         refreshSessions()
       } catch (error) { write(`错误: ${error.message}`) }
     }

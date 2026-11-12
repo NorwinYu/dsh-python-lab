@@ -61,6 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
     migrate_parser = subparsers.add_parser("migrate", help="备份并迁移旧会话；省略 id 时迁移全部")
     migrate_parser.add_argument("session_id", nargs="?")
 
+    surface_parser = subparsers.add_parser("surface", help="查看当前模型消息 surface 和 replacement 记录")
+    surface_parser.add_argument("session_id")
+
+    prune_parser = subparsers.add_parser("prune", help="裁剪当前 surface 中过长的工具结果")
+    prune_parser.add_argument("session_id")
+
     serve_parser = subparsers.add_parser("serve", help="启动本地 HTTP/SSE 宿主")
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=3080)
@@ -79,7 +85,7 @@ def interactive_answerer(reason: str) -> str:
 
 
 def _with_default_command(argv: List[str], command: str) -> List[str]:
-    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "run", "resume", "session", "transcript", "fork", "compact", "repair", "migrate", "serve", "desktop"}
+    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "run", "resume", "session", "transcript", "fork", "compact", "repair", "migrate", "surface", "prune", "serve", "desktop"}
     options_with_values = {"--workspace", "--config", "--enable", "--disable", "--sandbox-mode", "--approval-policy", "--context-window"}
     index = 0
     while index < len(argv):
@@ -205,6 +211,19 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
                 raise RuntimeError("session.jsonl 当前被禁用")
             result = app.session.migrate(args.session_id) if args.session_id else app.session.migrate_all()
             print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "surface":
+            if app.session is None:
+                raise RuntimeError("session.jsonl 当前被禁用")
+            print(json.dumps(app.session.surface(args.session_id), ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "prune":
+            if not config.features["core.tool-result-pruner"]:
+                raise RuntimeError("请使用 --enable core.tool-result-pruner")
+            pruner = app.ctx.require("toolResultPruner")
+            print(json.dumps(pruner.prune(args.session_id), ensure_ascii=False, indent=2))
             return 0
 
         if hasattr(args, "trace") and args.trace:

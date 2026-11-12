@@ -15,6 +15,7 @@ from typing import ContextManager, Dict, List, Optional
 
 from .plugins import Plugin, ServiceContext
 from .session_recovery import open_turn_closers
+from .surface import fold_surface
 
 
 SESSION_FORMAT_VERSION = 1
@@ -36,7 +37,14 @@ class SessionAlreadyOwnedError(RuntimeError):
 
 class SessionStore(ABC):
     @abstractmethod
-    def append(self, session_id: str, event_type: str, payload: Dict[str, object]) -> None:
+    def append(
+        self,
+        session_id: str,
+        event_type: str,
+        payload: Dict[str, object],
+        surface_op: Optional[Dict[str, object]] = None,
+        source_event_seqs: Optional[List[int]] = None,
+    ) -> None:
         pass
 
     @abstractmethod
@@ -66,6 +74,9 @@ class SessionStore(ABC):
     @abstractmethod
     def transcript(self, session_id: str) -> str:
         pass
+
+    def surface(self, session_id: str) -> Dict[str, object]:
+        return fold_surface(self.load(session_id))
 
     def write_lease(self, session_id: str) -> ContextManager[object]:
         return nullcontext()
@@ -213,6 +224,7 @@ class JsonlSessionStore(SessionStore):
                 raise SessionCorruptionError(f"会话第 {index + 1} 个事件 JSON 无效") from exc
             self._validate_event(event, session_id, index)
             events.append(event)
+        fold_surface(events)
         return ReadResult(events, version, torn, raw)
 
     @staticmethod
@@ -240,6 +252,8 @@ class JsonlSessionStore(SessionStore):
         event_type: str,
         payload: Dict[str, object],
         created_at: Optional[str] = None,
+        surface_op: Optional[object] = None,
+        source_event_seqs: Optional[List[int]] = None,
     ) -> None:
         path = self._path(session_id)
         events = self._read(session_id).events if path.exists() else []
@@ -252,20 +266,39 @@ class JsonlSessionStore(SessionStore):
             "created_at": created_at or datetime.now(timezone.utc).isoformat(),
             "payload": payload,
         }
+        if surface_op is not None:
+            event["surfaceOp"] = surface_op
+        if source_event_seqs is not None:
+            event["sourceEventSeqs"] = source_event_seqs
+        fold_surface(events + [event])
         with path.open("a", encoding="utf-8") as file:
             file.write(json.dumps(event, ensure_ascii=False) + "\n")
             file.flush()
             os.fsync(file.fileno())
 
-    def append(self, session_id: str, event_type: str, payload: Dict[str, object]) -> None:
+    def append(
+        self,
+        session_id: str,
+        event_type: str,
+        payload: Dict[str, object],
+        surface_op: Optional[Dict[str, object]] = None,
+        source_event_seqs: Optional[List[int]] = None,
+    ) -> None:
         with self._lock:
             if session_id in self._leases:
-                self._append_ready(session_id, event_type, payload)
+                self._append_ready(session_id, event_type, payload, surface_op, source_event_seqs)
                 return
             with self.write_lease(session_id):
-                self._append_ready(session_id, event_type, payload)
+                self._append_ready(session_id, event_type, payload, surface_op, source_event_seqs)
 
-    def _append_ready(self, session_id: str, event_type: str, payload: Dict[str, object]) -> None:
+    def _append_ready(
+        self,
+        session_id: str,
+        event_type: str,
+        payload: Dict[str, object],
+        surface_op: Optional[Dict[str, object]] = None,
+        source_event_seqs: Optional[List[int]] = None,
+    ) -> None:
         path = self._path(session_id)
         if path.exists():
             stored = self._read(session_id)
@@ -274,7 +307,7 @@ class JsonlSessionStore(SessionStore):
             if stored.version == 0:
                 backup = self._write_atomic(session_id, stored.events, stored.raw)
                 self._append_current(session_id, "session/migrated", {"from": 0, "to": 1, "backup": backup})
-        self._append_current(session_id, event_type, payload)
+        self._append_current(session_id, event_type, payload, surface_op=surface_op, source_event_seqs=source_event_seqs)
 
     def _write_atomic(
         self,
@@ -406,38 +439,48 @@ class JsonlSessionStore(SessionStore):
             self.append(fork_id, "session/fork", {"source_session_id": session_id, "at_seq": at_seq})
             return fork_id
 
+    @staticmethod
+    def _event_message(event: Dict[str, object]) -> Optional[Dict[str, object]]:
+        event_type = event["type"]
+        payload = event["payload"]
+        if event_type in {"user/message", "tool/result"}:
+            return payload
+        if event_type in {"system/message", "assistant/message"}:
+            message = payload.get("message")
+            return message if isinstance(message, dict) else None
+        return None
+
     def derive_system(self, session_id: str) -> str:
+        events = self.load(session_id)
+        nodes = fold_surface(events)["nodes"]
         system = ""
-        for event in self.load(session_id):
+        for seq in nodes:
+            event = events[seq]
             if event["type"] != "system/message":
                 continue
-            message = event["payload"].get("message", {})
-            content = message.get("content", [])
+            message = self._event_message(event)
+            content = message.get("content", []) if message is not None else []
             system = "".join(str(block.get("text", "")) for block in content if isinstance(block, dict))
         return system
 
     def derive_messages(self, session_id: str) -> List[Dict[str, object]]:
         events = self.load(session_id)
+        nodes = fold_surface(events)["nodes"]
         messages: List[Dict[str, object]] = []
-        start = 0
-        compaction_index: Optional[int] = None
-        for index, event in enumerate(events):
+        compaction_seq: Optional[int] = None
+        for event in events:
             if event["type"] == "compaction/end":
-                compaction_index = index
-        if compaction_index is not None:
-            start = compaction_index
-            message = events[start]["payload"].get("message")
+                compaction_seq = int(event["seq"])
+        if compaction_seq is not None:
+            message = events[compaction_seq]["payload"].get("message")
             if isinstance(message, dict):
                 messages.append(message)
-        for event in events[start + 1 :]:
-            event_type = event["type"]
-            payload = event["payload"]
-            if event_type == "user/message" and isinstance(payload, dict):
-                messages.append(payload)
-            elif event_type == "assistant/message" and isinstance(payload.get("message"), dict):
-                messages.append(payload["message"])
-            elif event_type == "tool/result" and isinstance(payload, dict):
-                messages.append(payload)
+        for seq in nodes:
+            if compaction_seq is not None and seq <= compaction_seq:
+                continue
+            message = self._event_message(events[seq])
+            if message is not None and events[seq]["type"] != "system/message":
+                messages.append(message)
         return messages
 
     def latest_turn(self, session_id: str) -> int:
@@ -467,7 +510,13 @@ class JsonlSessionStore(SessionStore):
 
     def transcript(self, session_id: str) -> str:
         lines: List[str] = []
-        for message in self.derive_messages(session_id):
+        for event in self.load(session_id):
+            operation = event.get("surfaceOp")
+            if isinstance(operation, dict) and operation.get("op") == "replace":
+                continue
+            message = self._event_message(event)
+            if message is None or event["type"] == "system/message":
+                continue
             role = str(message.get("role", "unknown"))
             content = message.get("content", [])
             if isinstance(content, str):

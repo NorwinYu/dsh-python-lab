@@ -14,6 +14,7 @@
     "core.compaction": true,
     "core.cancellation": true,
     "core.pty": true,
+    "core.tool-result-pruner": false,
     "tools.glob": true,
     "tools.read": true,
     "tools.write": true,

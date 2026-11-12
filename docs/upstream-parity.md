@@ -93,7 +93,20 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 审计事件为 `session/migrated` 和 `session/repaired`；CLI 支持 repair、单个/全部 migrate，HTTP 支持单会话 repair/migrate。
 - resume/compact 使用 POSIX flock 覆盖整个写回合，锁文件保留稳定 inode，进程死亡由内核释放；读取不加写锁。
 - HTTP 拒绝同 session 并发回合；watcher 可在同一 Application 的回合内通过存储串行锁追加 job 审计，条件唤醒位于 finally。
-- 该格式不是官方多代际、surface replacement 或 Zstandard 文件格式；Windows 写锁尚未实现。
+- 该格式不是官方多代际或 Zstandard 文件格式；surface 仅为下述学习版切片，Windows 写锁尚未实现。
+
+### Surface replacement 与工具结果裁剪
+
+- 旧消息事件无 surfaceOp 时按 append 兼容；当前消息事件支持 append 和 `{op: replace, startSeq, endSeq}`。
+- replacement 起止必须更早且仍在当前 surface，区间顺序有效；sourceEventSeqs 必须无重复并覆盖全部被遮蔽节点。
+- 替换节点占据原区间位置而非追加到模型视图尾部；原始 JSONL 事件不改写。
+- tool/result replacement 只能遮蔽一个当前工具结果且只能修改 content；首个系统提示词只能由单个 system replacement 改写。
+- `derive_messages`、resume、fork 和 compact 使用当前 surface；transcript 排除 replacement 副本，保留原始追加内容。
+- pruner 默认关闭，手动执行；阈值 8192、头 4096、尾 1024，使用上游固定 PRUNE_MARKER。
+- 按 Unicode 码点裁剪文本并保留非文本块顺序；结果必须更小且不超过阈值。
+- 每个裁剪先追加 `compaction/prune` 计量事件，再追加带来源引用的工具结果 replacement；重复执行不重复裁剪。
+- 提供 CLI surface/prune、HTTP surface/prune 和 Web 裁剪按钮；配置使用 MINIDSH_PRUNE_* 环境变量。
+- 尚未实现官方任意插件消息投影、完整事件类型系统和精确 token meter。
 
 ### HTTP、SSE 与并发
 
@@ -158,8 +171,8 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 官方完整终端行缓冲、OSC 就绪协议、PTY 跨进程恢复和 Windows ConPTY；当前持久后端仅支持 Unix `/bin/bash`。
 - 任务完成后的 Agent 自动唤醒、跨进程任务恢复和长期常驻宿主。
 - 完整附件存储、图片变换/定价、持久上传索引和配额恢复、扩展请求头及遥测；完整模型目录元数据、后台 listing 刷新及官方通用 LLM 重试插件仍未移植。
-- 官方 surface generation/replacement、格式目录、多代际不可变发布、Zstandard 和 Windows 写锁；学习版仅自定义 v0/v1 JSONL。
-- 官方压缩区间选择、token 校准、tool-result pruner、模型切换压缩、重试和取消。
+- 官方完整事件类型、任意插件消息投影、格式目录、多代际不可变发布、Zstandard 和 Windows 写锁；学习版仅自定义 v0/v1 JSONL 和 surface 切片。
+- 官方压缩区间选择、token 校准、模型切换压缩、重试和取消；pruner 使用学习版计量事件。
 - `read` 尚未实现大文件流式扫描；`glob` 尚未完全复刻 ripgrep 语义和 spill 行为。
 - 匿名用户 ID 只在进程内稳定，尚未持久化。
 - 尚未对真实 DeepSeek 服务做带凭据的在线验收；当前 Web 页面不支持自定义 Authorization 请求头，token 主要用于 API 客户端。
@@ -207,5 +220,10 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 两个真实进程验证 flock 互斥及释放后的后继追加；HTTP repair 和 CLI migrate 通过。
 - resume 持锁时 job watcher 审计正常且条件等待及时唤醒；同 session HTTP 并发回合被拒绝，取消后释放。
 - 最终 wheel 包含版本迁移和恢复模块；离线安装后实际 run、resume、repair 成功，正常会话 repair 返回 changed=false。
+- 真实超长 Shell 工具结果从 9011 码点裁剪到 5159；原事件不变，模型投影含 PRUNE_MARKER 且保留头尾。
+- surface replacement 遮蔽原节点并保留替换位置；resume/fork 继承裁剪视图，重复 prune 为空。
+- transcript 保留原始工具全文；HTTP prune/surface 和 CLI surface/prune 均通过。
+- 修改工具调用身份和非消息事件的 replacement 在写入前被拒绝；Unicode 与图片块顺序测试通过。
+- 最终 wheel 包含 surface/pruner 和 Web 裁剪资源；离线安装后真实 Shell 长输出经 CLI prune 成功，surface 可读取 replacement。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

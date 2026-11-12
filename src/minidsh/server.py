@@ -246,6 +246,11 @@ class ApiServer:
                             self._send_json({"session_id": app.session.fork(session_id, body.get("at_seq"))})
                         elif action == "compact":
                             self._send_json({"result": app.agent.compact(session_id)})
+                        elif action == "prune":
+                            if not app.config.features["core.tool-result-pruner"]:
+                                raise RuntimeError("core.tool-result-pruner 当前被禁用")
+                            pruner = app.ctx.require("toolResultPruner")
+                            self._send_json(pruner.prune(session_id))
                         elif action in {"repair", "migrate"}:
                             if app.session is None:
                                 raise RuntimeError("session.jsonl 当前被禁用")
@@ -326,6 +331,8 @@ class ApiServer:
                 session_id = parts[3]
                 if len(parts) == 5 and parts[4] == "transcript":
                     self._send_json({"text": app.session.transcript(session_id)})
+                elif len(parts) == 5 and parts[4] == "surface":
+                    self._send_json(app.session.surface(session_id))
                 elif len(parts) == 4:
                     self._send_json(app.session.load(session_id))
                 else:
