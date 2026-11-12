@@ -48,6 +48,19 @@ class Agent:
         cancel_token: Optional[CancellationToken] = None,
         image_paths: Optional[List[str]] = None,
     ) -> str:
+        if session_id is not None and self.session is not None:
+            with self.session.write_lease(session_id):
+                return self._run(prompt, session_id, run_id, cancel_token, image_paths)
+        return self._run(prompt, session_id, run_id, cancel_token, image_paths)
+
+    def _run(
+        self,
+        prompt: str,
+        session_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        cancel_token: Optional[CancellationToken] = None,
+        image_paths: Optional[List[str]] = None,
+    ) -> str:
         token = cancel_token or CancellationToken(run_id)
         token.throw_if_cancelled()
         image_blocks = load_image_blocks(self.workspace, image_paths or [], self.allow_outside)
@@ -58,6 +71,7 @@ class Agent:
         if resumed:
             if self.session is None:
                 raise RuntimeError("resume 需要启用 session.jsonl")
+            self.session.repair(session_id)
             events = self.session.load(session_id)
             if not events:
                 raise RuntimeError(f"unknown session {session_id}")
@@ -183,6 +197,12 @@ class Agent:
         raise RuntimeError(f"Agent 超过最大步数: {self.max_steps}")
 
     def compact(self, session_id: str) -> str:
+        if self.session is None:
+            raise RuntimeError("压缩需要启用 session.jsonl 和 core.compaction")
+        with self.session.write_lease(session_id):
+            return self._compact(session_id)
+
+    def _compact(self, session_id: str) -> str:
         if self.session is None or self.compaction is None:
             raise RuntimeError("压缩需要启用 session.jsonl 和 core.compaction")
         messages = self.session.derive_messages(session_id)

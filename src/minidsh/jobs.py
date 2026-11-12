@@ -167,20 +167,22 @@ class JobService:
         with job.condition:
             if job.status in {"killed", "completed", "failed"}:
                 return
-            if job.status == "stopping":
-                job.status = "killed"
-                job.detail = job.kill_reason or f"signal: SIGTERM"
-            else:
-                job.status = "completed"
-                job.detail = f"exit code: {return_code}"
-            job.finished_at = int(time.time() * 1000)
-            self._record(job, "job/settled")
-            if self.events is not None:
-                self.events.emit(
-                    "job/settled",
-                    {"jobId": job.id, "owner": job.owner, "status": job.status, "detail": job.detail},
-                )
-            job.condition.notify_all()
+            try:
+                if job.status == "stopping":
+                    job.status = "killed"
+                    job.detail = job.kill_reason or f"signal: SIGTERM"
+                else:
+                    job.status = "completed"
+                    job.detail = f"exit code: {return_code}"
+                job.finished_at = int(time.time() * 1000)
+                self._record(job, "job/settled")
+                if self.events is not None:
+                    self.events.emit(
+                        "job/settled",
+                        {"jobId": job.id, "owner": job.owner, "status": job.status, "detail": job.detail},
+                    )
+            finally:
+                job.condition.notify_all()
 
     @staticmethod
     def _record(job: JobRecord, event_type: str) -> None:

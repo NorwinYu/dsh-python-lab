@@ -55,6 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
     compact_parser = subparsers.add_parser("compact", help="手动创建压缩检查点")
     compact_parser.add_argument("session_id")
 
+    repair_parser = subparsers.add_parser("repair", help="备份并修复会话的不完整末尾或开放回合")
+    repair_parser.add_argument("session_id")
+
+    migrate_parser = subparsers.add_parser("migrate", help="备份并迁移旧会话；省略 id 时迁移全部")
+    migrate_parser.add_argument("session_id", nargs="?")
+
     serve_parser = subparsers.add_parser("serve", help="启动本地 HTTP/SSE 宿主")
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=3080)
@@ -73,7 +79,7 @@ def interactive_answerer(reason: str) -> str:
 
 
 def _with_default_command(argv: List[str], command: str) -> List[str]:
-    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "run", "resume", "session", "transcript", "fork", "compact", "serve", "desktop"}
+    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "run", "resume", "session", "transcript", "fork", "compact", "repair", "migrate", "serve", "desktop"}
     options_with_values = {"--workspace", "--config", "--enable", "--disable", "--sandbox-mode", "--approval-policy", "--context-window"}
     index = 0
     while index < len(argv):
@@ -186,6 +192,19 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
 
         if args.command == "compact":
             print(app.agent.compact(args.session_id))
+            return 0
+
+        if args.command == "repair":
+            if app.session is None:
+                raise RuntimeError("session.jsonl 当前被禁用")
+            print(json.dumps(app.session.repair(args.session_id), ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "migrate":
+            if app.session is None:
+                raise RuntimeError("session.jsonl 当前被禁用")
+            result = app.session.migrate(args.session_id) if args.session_id else app.session.migrate_all()
+            print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
 
         if hasattr(args, "trace") and args.trace:

@@ -81,6 +81,20 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 压缩只影响发给模型的投影，不删除原始事件；压缩后的会话可以继续 resume。
 - token meter 当前是学习版 UTF-8/JSON 启发式估算，不是官方精确 tokenizer。
 
+### 会话版本、迁移与崩溃恢复（学习版 v0/v1）
+
+- 新会话包含 `minidsh-session-header` v1；版本头不占事件 seq，既有无头文件按 v0 只读兼容。
+- 普通读取不迁移；首次追加、显式 migrate 或 resume 修复时才写当前格式，未来版本直接拒绝。
+- 每个事件校验 session 身份、连续 seq、类型、payload 和 created_at；无效 JSON/UTF-8 失败关闭。
+- 普通 load 拒绝不完整末尾；repair/resume 保留最后换行前的完整前缀，无法恢复任何记录时拒绝。
+- 重写前把原始字节保存为内容哈希命名的备份，再通过临时文件、文件/目录 fsync 和 os.replace 发布。
+- 未开始工具调用使用上游 TOOL_NOT_STARTED 文案；已开始无结果调用使用 TOOL_OUTCOME_UNKNOWN 和保守重试警告。
+- 恢复先补 error tool result，再关闭开放 step/turn，原因是 interrupted；fork 使用 forked 文案且不改父会话。
+- 审计事件为 `session/migrated` 和 `session/repaired`；CLI 支持 repair、单个/全部 migrate，HTTP 支持单会话 repair/migrate。
+- resume/compact 使用 POSIX flock 覆盖整个写回合，锁文件保留稳定 inode，进程死亡由内核释放；读取不加写锁。
+- HTTP 拒绝同 session 并发回合；watcher 可在同一 Application 的回合内通过存储串行锁追加 job 审计，条件唤醒位于 finally。
+- 该格式不是官方多代际、surface replacement 或 Zstandard 文件格式；Windows 写锁尚未实现。
+
 ### HTTP、SSE 与并发
 
 - 默认仅绑定 `127.0.0.1`；绑定非回环地址必须配置 `MINIDSH_TOKEN`，否则拒绝启动。
@@ -144,7 +158,7 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 官方完整终端行缓冲、OSC 就绪协议、PTY 跨进程恢复和 Windows ConPTY；当前持久后端仅支持 Unix `/bin/bash`。
 - 任务完成后的 Agent 自动唤醒、跨进程任务恢复和长期常驻宿主。
 - 完整附件存储、图片变换/定价、持久上传索引和配额恢复、扩展请求头及遥测；完整模型目录元数据、后台 listing 刷新及官方通用 LLM 重试插件仍未移植。
-- 官方 surface generation/replacement、会话格式迁移、崩溃修复、跨进程锁和原子多进程发布。
+- 官方 surface generation/replacement、格式目录、多代际不可变发布、Zstandard 和 Windows 写锁；学习版仅自定义 v0/v1 JSONL。
 - 官方压缩区间选择、token 校准、tool-result pruner、模型切换压缩、重试和取消。
 - `read` 尚未实现大文件流式扫描；`glob` 尚未完全复刻 ripgrep 语义和 spill 行为。
 - 匿名用户 ID 只在进程内稳定，尚未持久化。
@@ -187,5 +201,11 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - Agent/Mock 持久工具验证插件替换、schema、HTTP 终端列表/kill、运行取消和 JSONL 重置事件。
 - 默认一次性 Bash 的 active 状态、工具描述和系统提示词保持不变。
 - 最终 wheel 包含 PTY 和终端事件资源；离线安装后实际执行持久 Bash，输出及退出码 0 均正确。
+- v0+截断尾部经 CLI repair 后保留原始字节备份、迁移 v1、补 TOOL_OUTCOME_UNKNOWN、关闭 step/turn 并可 resume。
+- 未开始工具调用补 TOOL_NOT_STARTED；fork 开放回合补 forked 且父会话原始字节不变。
+- 未来版本、seq 缺口和普通 load 截断均失败关闭；只有版本头加半行事件的恢复也通过。
+- 两个真实进程验证 flock 互斥及释放后的后继追加；HTTP repair 和 CLI migrate 通过。
+- resume 持锁时 job watcher 审计正常且条件等待及时唤醒；同 session HTTP 并发回合被拒绝，取消后释放。
+- 最终 wheel 包含版本迁移和恢复模块；离线安装后实际 run、resume、repair 成功，正常会话 repair 返回 changed=false。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

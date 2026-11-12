@@ -35,6 +35,7 @@ class SseBroker:
         self.cancellation_enabled = cancellation_enabled
         self._listeners: List[queue.Queue] = []
         self._cancellations: Dict[str, CancellationToken] = {}
+        self._session_runs: Dict[str, str] = {}
         self._cancellation_lock = threading.Lock()
         for name in EVENT_NAMES:
             agent.events.on(name, lambda payload, event=name: self.publish(event, payload))
@@ -61,10 +62,15 @@ class SseBroker:
         return token.cancel() if token is not None else False
 
     def start(self, prompt: str, session_id: Optional[str], image_paths: Optional[List[str]] = None) -> queue.Queue:
-        listener = self.subscribe()
         actual_session_id = session_id
         operation_id = uuid.uuid4().hex
         token = CancellationToken(operation_id)
+        if session_id is not None:
+            with self._cancellation_lock:
+                if session_id in self._session_runs:
+                    raise RuntimeError(f"会话已有正在运行的回合: {session_id}")
+                self._session_runs[session_id] = operation_id
+        listener = self.subscribe()
         with self._cancellation_lock:
             self._cancellations[operation_id] = token
 
@@ -77,6 +83,8 @@ class SseBroker:
                         nonlocal actual_session_id
                         if payload.get("run_id") == operation_id:
                             actual_session_id = str(payload["session_id"])
+                            with self._cancellation_lock:
+                                self._session_runs[actual_session_id] = operation_id
                     stop_capture = self.agent.events.on("turn/start", capture)
                 result = self.agent.run(prompt, session_id, operation_id, token, image_paths)
                 self.publish("run/result", {"session_id": actual_session_id, "result": result, "run_id": operation_id})
@@ -89,6 +97,8 @@ class SseBroker:
                     stop_capture()
                 with self._cancellation_lock:
                     self._cancellations.pop(operation_id, None)
+                    if actual_session_id is not None and self._session_runs.get(actual_session_id) == operation_id:
+                        del self._session_runs[actual_session_id]
                 self.publish("run/done", {"session_id": actual_session_id, "run_id": operation_id})
 
         listener.operation_id = operation_id
@@ -236,6 +246,11 @@ class ApiServer:
                             self._send_json({"session_id": app.session.fork(session_id, body.get("at_seq"))})
                         elif action == "compact":
                             self._send_json({"result": app.agent.compact(session_id)})
+                        elif action in {"repair", "migrate"}:
+                            if app.session is None:
+                                raise RuntimeError("session.jsonl 当前被禁用")
+                            operation = app.session.repair if action == "repair" else app.session.migrate
+                            self._send_json(operation(session_id))
                         else:
                             self._send_json({"error": "not found"}, 404)
                     elif path.startswith("/v1/terminals/"):
