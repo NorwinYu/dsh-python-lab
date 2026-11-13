@@ -69,6 +69,7 @@ class AgentPlugin(Plugin):
             workspace=self.config.workspace,
             allow_outside=sandbox.mode == "danger-full-access",
             streaming=self.config.features["core.streaming"],
+            record_stream=self.config.features["core.stream-recording"],
         )
         ctx.provide("agent", agent, self.name)
 

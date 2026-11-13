@@ -39,23 +39,46 @@ class EventListener(queue.Queue):
         self.operation_id: Optional[str] = None
         self.closed = False
         self.close_reason: Optional[str] = None
+        self.replay = False
+        self.session_id: Optional[str] = None
+        self.replay_messages: List[Dict[str, object]] = []
+
+    def next(self, timeout: Optional[float] = None) -> Dict[str, object]:
+        if self.replay_messages:
+            return self.replay_messages.pop(0)
+        return self.get(timeout=timeout)
 
 
 class SseBroker:
-    def __init__(self, agent: Agent, cancellation_enabled: bool = True) -> None:
+    def __init__(self, agent: Agent, cancellation_enabled: bool = True, replay_enabled: bool = True) -> None:
         self.agent = agent
         self.cancellation_enabled = cancellation_enabled
+        self.replay_enabled = replay_enabled
         self._listeners: List[EventListener] = []
         self._cancellations: Dict[str, CancellationToken] = {}
         self._session_runs: Dict[str, str] = {}
         self._cancellation_lock = threading.Lock()
+        self._history_lock = threading.RLock()
+        self._history: List[Dict[str, object]] = []
+        self._event_sequence = 0
         self.dropped_streams = 0
         for name in EVENT_NAMES:
             agent.events.on(name, lambda payload, event=name: self.publish(event, payload))
 
+    @staticmethod
+    def _belongs(message: Dict[str, object], session_id: str) -> bool:
+        payload = message["payload"]
+        return payload.get("session_id") == session_id or payload.get("owner") == session_id
+
     def publish(self, event: str, payload: Dict[str, object]) -> None:
-        message = {"event": event, "payload": payload}
-        for listener in list(self._listeners):
+        with self._history_lock:
+            self._event_sequence += 1
+            message = {"id": self._event_sequence, "event": event, "payload": payload}
+            self._history.append(message)
+            if len(self._history) > 2048:
+                self._history = self._history[-2048:]
+            listeners = list(self._listeners)
+        for listener in listeners:
             if listener.closed:
                 continue
             try:
@@ -68,13 +91,43 @@ class SseBroker:
                 self.unsubscribe(listener)
 
     def subscribe(self) -> EventListener:
-        listener = EventListener()
-        self._listeners.append(listener)
-        return listener
+        with self._history_lock:
+            listener = EventListener()
+            self._listeners.append(listener)
+            return listener
+
+    def replay(self, session_id: str, last_event_id: object) -> EventListener:
+        if not self.replay_enabled:
+            raise RuntimeError("core.sse-replay 当前被禁用")
+        if isinstance(last_event_id, bool):
+            raise ValueError("Last-Event-ID 必须是整数")
+        try:
+            last_id = int(last_event_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Last-Event-ID 必须是整数") from exc
+        if last_id < 0:
+            raise ValueError("Last-Event-ID 不能为负数")
+        if last_id > self._event_sequence:
+            raise ValueError("Last-Event-ID 不能指向未来事件")
+        with self._history_lock:
+            known = [message for message in self._history if self._belongs(message, session_id)]
+            if not known:
+                raise ValueError(f"没有该 session 的可恢复事件: {session_id}")
+            if self._history and last_id < int(self._history[0]["id"]) - 1:
+                raise ValueError("Last-Event-ID 已超出历史环，无法完整恢复")
+            listener = self.subscribe()
+            listener.replay = True
+            listener.session_id = session_id
+            listener.replay_messages = [message for message in known if int(message["id"]) > last_id]
+            if not listener.replay_messages and session_id not in self._session_runs:
+                listener.closed = True
+                listener.close_reason = "replay-complete"
+            return listener
 
     def unsubscribe(self, listener: EventListener) -> None:
-        if listener in self._listeners:
-            self._listeners.remove(listener)
+        with self._history_lock:
+            if listener in self._listeners:
+                self._listeners.remove(listener)
 
     def cancel(self, run_id: str) -> bool:
         if not self.cancellation_enabled:
@@ -162,7 +215,11 @@ def job_view(job: JobRecord) -> Dict[str, object]:
 class ApiServer:
     def __init__(self, app: Application, host: str = "127.0.0.1", port: int = 3080, token: Optional[str] = None) -> None:
         self.app = app
-        self.broker = SseBroker(app.agent, app.config.features["core.cancellation"])
+        self.broker = SseBroker(
+            app.agent,
+            app.config.features["core.cancellation"],
+            app.config.features["core.sse-replay"],
+        )
         self.token = token
         self.http = ThreadingHTTPServer((host, port), self._handler())
         self.host = host
@@ -369,28 +426,36 @@ class ApiServer:
                     self._send_json(app.session.surface(session_id))
                 elif len(parts) == 5 and parts[4] == "todos":
                     self._send_json({"todos": app.session.todos(session_id)})
+                elif len(parts) == 5 and parts[4] == "stream":
+                    self._send_json({"chunks": app.session.stream_chunks(session_id)})
                 elif len(parts) == 4:
                     self._send_json(app.session.load(session_id))
                 else:
                     self._send_json({"error": "not found"}, 404)
 
             def _stream(self, prompt: str, session_id: Optional[str], image_paths: Optional[List[str]] = None) -> None:
-                if not prompt.strip():
-                    raise ValueError("prompt 必须是非空字符串")
-                listener = broker.start(prompt, session_id, image_paths)
+                query = parse_qs(urlsplit(self.path).query)
+                last_event_id = self.headers.get("Last-Event-ID") or query.get("last_event_id", [None])[0]
+                if last_event_id is not None:
+                    if session_id is None:
+                        raise ValueError("SSE 断点恢复需要 session_id")
+                    listener = broker.replay(session_id, last_event_id)
+                else:
+                    if not prompt.strip():
+                        raise ValueError("prompt 必须是非空字符串")
+                    listener = broker.start(prompt, session_id, image_paths)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Accel-Buffering", "no")
                 self.send_header("Connection", "close")
                 self.end_headers()
-                sequence = 0
                 try:
                     while True:
                         if listener.closed:
                             break
                         try:
-                            message = listener.get(timeout=15)
+                            message = listener.next(timeout=15)
                         except queue.Empty:
                             if listener.closed:
                                 break
@@ -399,17 +464,17 @@ class ApiServer:
                             continue
                         event = message["event"]
                         payload = message["payload"]
-                        operation_id = listener.operation_id
-                        if event.startswith("run/") and payload.get("run_id") != operation_id:
-                            continue
-                        if event != "job/settled" and payload.get("run_id") != operation_id:
-                            continue
+                        if not listener.replay:
+                            operation_id = listener.operation_id
+                            if event.startswith("run/") and payload.get("run_id") != operation_id:
+                                continue
+                            if event != "job/settled" and payload.get("run_id") != operation_id:
+                                continue
+                        data = json.dumps(payload, ensure_ascii=False)
+                        self.wfile.write(f"id: {message['id']}\nevent: {event}\ndata: {data}\n\n".encode("utf-8"))
+                        self.wfile.flush()
                         if event == "run/done":
                             break
-                        sequence += 1
-                        data = json.dumps(payload, ensure_ascii=False)
-                        self.wfile.write(f"id: {sequence}\nevent: {event}\ndata: {data}\n\n".encode("utf-8"))
-                        self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
                     pass
                 finally:

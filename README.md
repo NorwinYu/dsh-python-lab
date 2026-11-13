@@ -49,6 +49,8 @@ minidsh run "请列出当前目录"
 - `core.compaction`：自动/手动压缩检查点。
 - `core.cancellation`：HTTP/Web 运行取消及模型、工具、前台 Shell 取消传播。
 - `core.streaming`：模型增量事件与 Web 实时文本，默认启用。
+- `core.stream-recording`：压缩原始 chunk 并随 assistant 事件持久化，默认启用。
+- `core.sse-replay`：进程内 SSE 历史环和 Last-Event-ID 恢复，默认启用。
 - `core.pty`：Unix PTY 服务与持久终端生命周期。
 - `core.tool-result-pruner`：手动 surface 工具结果裁剪，默认关闭。
 - `core.user-questions`：用户提问、待答和取消服务。
@@ -297,13 +299,35 @@ curl -X POST http://127.0.0.1:3080/v1/runs/<run-id>/cancel -d '{}'
 
 - `assistant/delta`：text-delta、reasoning-delta、tool-call-delta 和工具 block-start，携带 session_id、run_id、turn、step 与 attempt。
 - `assistant/usage`：模型 usage 快照。
-- 最终 assistant/message、工具调用和 JSONL 投影保持不变；当前只持久化最终消息，不保存官方原始 chunk 压缩记录。
+- 最终 assistant/message、工具调用和 JSONL 投影保持不变；原始流可按下节压缩记录独立保存。
 
-Web 的实时文本区只拼接 text-delta，工具参数仍留在原始事件区。重试时清空失败 attempt 的草稿；新 attempt 的文本重新开始。Mock 和其他未发增量的模型由 Agent 将最终文本补发一次，事件带 `fallback=true`。禁用 `core.streaming` 后不注册增量回调，也不做该补发。
+Web 的实时文本区只拼接 text-delta，工具参数仍留在原始事件区。重试时清空失败 attempt 的草稿；新 attempt 的文本重新开始。Mock 和其他未发增量的模型由 Agent 将最终文本补发一次，事件带 `fallback=true` 和固定 `index=0`。禁用 `core.streaming` 后不注册增量回调，也不做该补发。
 
-max-token 截断响应会丢弃工具调用及其对应 replay 块，避免执行不完整或不安全的工具操作。
+max-token 截断响应会丢弃工具调用及其对应 replay 块，避免执行不完整或不安全的工具操作；原始流记录仍保留实际收到的内容。
 
-每个 SSE listener 使用固定 256 条事件的非阻塞队列。慢客户端导致队列满时会关闭并移除该流，`dropped_streams` 增加；Agent 不被迫停止，最终会话结果仍正常落盘。该机制不提供断线续传或事件序号恢复，页面断开后可重新运行/读取会话。
+每个 SSE listener 使用固定 256 条事件的非阻塞队列。慢客户端导致队列满时会关闭并移除该流，`dropped_streams` 增加；Agent 不被迫停止，最终会话结果仍正常落盘。断开后的同进程恢复使用下节的历史环。
+
+### 原始流压缩持久化与断线续传
+
+`core.stream-recording` 默认启用。Agent 把原始分片按相邻类型/index 压缩为 `text-chunks`、`reasoning-chunks`、`tool-call-chunks`，保存文本/参数数组、起始毫秒时间和相邻时间差；usage、block-start、finish 保留 raw chunk。压缩 runs 位于 assistant/message payload 的 `stream`，并附 finish/replayState。
+
+```bash
+# 展开所有持久流分片，带原事件 seq、turn、step
+PYTHONPATH=src python3 -m minidsh stream <session-id>
+
+# 也可使用 GET /v1/sessions/<id>/stream
+```
+
+读取时展开并校验数组长、时间间隔、调用 id 和记录形状；损坏记录会使会话读取失败。fork 保留压缩记录，关闭 `core.stream-recording` 后新 assistant 事件不再包含 stream。
+
+`core.sse-replay` 默认启用。Broker 为每个事件分配进程内递增 id，并保留最近 2048 条。EventSource 重连或手动请求可通过 `Last-Event-ID` 恢复：
+
+```bash
+curl -H 'Last-Event-ID: <event-id>' \
+  'http://127.0.0.1:3080/v1/runs/stream?session_id=<session-id>'
+```
+
+回放只选择该 session 且 id 大于断点的事件，然后接入实时队列；不会启动重复 Agent。历史太旧、未来 id 或未知 session 会明确报错，run/done 也可回放。该机制只覆盖同一常驻进程，重启后历史环为空，持久化 chunk 不等同于全局 SSE 序号。
 
 ## 提问、待办与 Web 工具
 
@@ -378,6 +402,7 @@ GET  /v1/sessions
 GET  /v1/sessions/<id>
 GET  /v1/sessions/<id>/transcript
 GET  /v1/sessions/<id>/surface
+GET  /v1/sessions/<id>/stream
 GET  /v1/sessions/<id>/todos
 GET  /v1/jobs
 GET  /v1/jobs/<id>/output
@@ -545,23 +570,24 @@ minidsh-headless / minidsh-web / minidsh-desktop
 14. `src/minidsh/todo.py`：整表待办写入与并行策略。
 15. `src/minidsh/web_tools.py`：Web 获取、搜索 provider 和安全边界。
 16. `src/minidsh/llm.py`：模型接口、模型列表和 Mock 工具触发器。
-17. `src/minidsh/retry.py`：重试模式、瞬时错误和指数退避。
-18. `src/minidsh/cancellation.py`：协作式取消令牌与资源关闭回调。
-19. `src/minidsh/images.py`：图片路径、格式、哈希和请求预算。
-20. `src/minidsh/files.py`：multipart 上传、文件对象校验和 Files CRUD。
-21. `src/minidsh/deepseek.py`：Messages 图片、增量 SSE、重试、列表缓存和原生 replay。
-22. `src/minidsh/session.py`：版本头、原子迁移、POSIX 写锁、待办和消息投影。
-23. `src/minidsh/session_recovery.py`：工具结果补偿与开放 step/turn 闭环。
-24. `src/minidsh/surface.py`：surface 折叠、来源引用和 replacement 校验。
-25. `src/minidsh/pruner.py`：Unicode 工具结果裁剪与 replacement 写入。
-26. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
-27. `src/minidsh/agent.py`：Agent Loop、增量转发、恢复入口、图片输入与取消终态。
-28. `src/minidsh/server.py`：HTTP API、有界 SSE、待答队列、会话互斥和终端生命周期。
-29. `src/minidsh/web/index.html`：Web 工作台、图片路径与裁剪操作。
-30. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
-31. `examples/minidsh-clock`：可独立安装的外部工具插件。
-32. `packages`：Headless、Web、Desktop 三个产品发行入口。
-33. `src/minidsh/cli.py`：命令行、交互提问、迁移恢复与常驻宿主入口。
+17. `src/minidsh/stream_codec.py`：原始分片压缩、展开和边界校验。
+18. `src/minidsh/retry.py`：重试模式、瞬时错误和指数退避。
+19. `src/minidsh/cancellation.py`：协作式取消令牌与资源关闭回调。
+20. `src/minidsh/images.py`：图片路径、格式、哈希和请求预算。
+21. `src/minidsh/files.py`：multipart 上传、文件对象校验和 Files CRUD。
+22. `src/minidsh/deepseek.py`：Messages 图片、增量 SSE、重试、列表缓存和原生 replay。
+23. `src/minidsh/session.py`：版本头、原子迁移、POSIX 写锁、流展开和消息投影。
+24. `src/minidsh/session_recovery.py`：工具结果补偿与开放 step/turn 闭环。
+25. `src/minidsh/surface.py`：surface 折叠、来源引用和 replacement 校验。
+26. `src/minidsh/pruner.py`：Unicode 工具结果裁剪与 replacement 写入。
+27. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
+28. `src/minidsh/agent.py`：Agent Loop、增量转发、压缩记录、恢复入口与取消终态。
+29. `src/minidsh/server.py`：HTTP API、有界 SSE、历史回放、待答队列和会话互斥。
+30. `src/minidsh/web/index.html`：Web 工作台、实时文本与裁剪操作。
+31. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
+32. `examples/minidsh-clock`：可独立安装的外部工具插件。
+33. `packages`：Headless、Web、Desktop 三个产品发行入口。
+34. `src/minidsh/cli.py`：命令行、流展开、交互提问、迁移恢复与常驻宿主入口。
 
 ## 观察会话
 
@@ -642,13 +668,17 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 理解用户能力服务、待答队列、会话整表投影、外部不可信内容和 Web 安全边界。
 
-### 第 13 层：增量模型流与 SSE 背压（当前）
+### 第 13 层：增量模型流与 SSE 背压
 
-理解同步增量回调、最终消息组装、attempt 隔离、实时文本展示和有界事件队列。对照 `docs/upstream-parity.md` 阅读。
+理解同步增量回调、最终消息组装、attempt 隔离、实时文本展示和有界事件队列。
+
+### 第 14 层：原始流持久化与 SSE 续传（当前）
+
+理解压缩 runs、时间差、流展开校验、事件历史环和 Last-Event-ID 恢复。对照 `docs/upstream-parity.md` 阅读。
 
 ## 当前边界
 
-- 当前只保存最终 assistant 消息，不包含官方原始 chunk 压缩持久化；SSE 不支持断线续传。
+- 原始流是学习版 JSON runs，不使用官方完整持久化协议；SSE 历史环只覆盖同进程最近 2048 条，不支持跨重启续传。
 
 - 有文件、Bash、提问、待办和 Web 工具切片，仍不是完整官方工具集；尚无定时 pending 提问和图形答题表单。
 - Web 搜索使用学习版 JSON provider，HTML 不是完整 Turndown/GFM；DNS 检查未做连接级地址固定。

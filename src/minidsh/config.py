@@ -17,6 +17,8 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "core.compaction": True,
     "core.cancellation": True,
     "core.streaming": True,
+    "core.stream-recording": True,
+    "core.sse-replay": True,
     "core.pty": True,
     "core.tool-result-pruner": False,
     "core.user-questions": True,

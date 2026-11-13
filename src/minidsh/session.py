@@ -15,6 +15,7 @@ from typing import ContextManager, Dict, List, Optional
 
 from .plugins import Plugin, ServiceContext
 from .session_recovery import open_turn_closers
+from .stream_codec import expand_stream
 from .surface import fold_surface
 
 
@@ -83,6 +84,15 @@ class SessionStore(ABC):
             elif event["type"] == "todo/write":
                 todos = event["payload"]["todos"]
         return todos
+
+    def stream_chunks(self, session_id: str) -> List[Dict[str, object]]:
+        chunks: List[Dict[str, object]] = []
+        for event in self.load(session_id):
+            if event["type"] != "assistant/message" or "stream" not in event["payload"]:
+                continue
+            for chunk in expand_stream(event["payload"]["stream"]):
+                chunks.append({**chunk, "seq": event["seq"], "turn": event["payload"].get("turn"), "step": event["payload"].get("step")})
+        return chunks
 
     def surface(self, session_id: str) -> Dict[str, object]:
         return fold_surface(self.load(session_id))
@@ -250,6 +260,11 @@ class JsonlSessionStore(SessionStore):
             raise SessionCorruptionError("会话事件 payload 必须是对象")
         if not isinstance(event.get("created_at"), str):
             raise SessionCorruptionError("会话事件时间无效")
+        if event["type"] == "assistant/message" and "stream" in event["payload"]:
+            try:
+                expand_stream(event["payload"]["stream"])
+            except ValueError as exc:
+                raise SessionCorruptionError(f"assistant 压缩流无效: {exc}") from exc
 
     def load(self, session_id: str) -> List[Dict[str, object]]:
         with self._lock:

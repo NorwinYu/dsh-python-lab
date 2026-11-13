@@ -163,7 +163,18 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - max-token 响应丢弃工具调用及对应 replay 块，避免执行不完整工具操作。
 - Web 只拼接 text-delta，llm/retry 清空失败 attempt 草稿，原始事件区保留完整事件。
 - 每个 SSE listener 队列上限 256，put_nowait 溢出时关闭并移除慢流，Agent 继续运行并持久化最终结果。
-- 当前不包含官方原始 chunk 压缩持久化、增量组装器独立 API 或 SSE 断线续传。
+- 原始 chunk 的学习版压缩持久化和同进程续传见下节；不包含官方完整持久化协议、独立组装器 API 或跨重启 SSE 恢复。
+
+### 原始流持久化与 SSE 续传
+
+- `core.stream-recording` 默认启用；assistant/message payload 可携带压缩 stream 和 finish/replayState。
+- 相邻 text/reasoning 按类型/index 打包为文本数组、time0 和 dt；工具参数按 index/id/name 打包为 args，保留原始分片边界。
+- usage、block-start、finish 保留 raw chunk；Mock fallback 使用 index=0，最终消息和原始流来自同一响应。
+- `stream_codec.expand_stream` 校验记录形状、成员数组、dt 长度和时间；会话读取会展开验证 stream。
+- CLI `stream` 和 HTTP GET `/stream` 展开分片并附 seq/turn/step；fork 保留记录，关闭开关后不再写 stream。
+- Broker 分配进程内递增事件 id，保留最近 2048 条；Last-Event-ID 只回放该 session 的更新事件并接入实时队列。
+- 回放在同一锁内衔接历史与订阅，run/done 可回放，不启动重复 Agent；太旧、未来或未知断点明确失败。
+- `core.sse-replay` 可关闭；历史环不跨进程重启，持久 chunk 没有全局 SSE 序号。
 
 ### 提问、待办与 Web 工具（学习版纵向切片）
 
@@ -258,5 +269,10 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - Mock fallback 和 core.streaming 禁用通过；300 条事件写入 256 队列后慢 listener 被移除，dropped_streams=1。
 - 浏览器实际运行后实时文本区显示 Mock 正文，原始事件区仍保留完整事件。
 - 最终 wheel 离线安装后，本地 DeepSeek 的真实 text delta 与 run_id 正确，慢 listener 溢出断开通过。
+- text/reasoning/tool/usage/finish 编解码往返保持顺序、字段和时间，非法 dt 被拒绝。
+- 真实 HTTP 断开后 Last-Event-ID 重连收到后续 assistant/result/done，不创建重复会话；未来 id 和历史截断被拒绝。
+- 压缩流随 assistant 事件保存，CLI/HTTP 展开读取通过；修复 Mock fallback 缺少 index 的问题。
+- core.stream-recording/core.sse-replay 禁用行为及既有背压回归通过。
+- 最终 wheel 离线安装后，本地 DeepSeek 分片可压缩保存、展开恢复文本，broker 历史可回放 assistant/message 和 turn/end。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

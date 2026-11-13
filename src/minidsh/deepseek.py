@@ -421,7 +421,15 @@ def translate_events(
                     elif delta_type == "thinking_delta":
                         on_event({"type": "reasoning-delta", "index": wire_index, "text": str(delta.get("thinking", ""))})
                     elif delta_type == "input_json_delta":
-                        on_event({"type": "tool-call-delta", "index": wire_index, "argumentsDelta": str(delta.get("partial_json", ""))})
+                        on_event(
+                            {
+                                "type": "tool-call-delta",
+                                "index": wire_index,
+                                "id": block["id"],
+                                "name": block["name"],
+                                "argumentsDelta": str(delta.get("partial_json", "")),
+                            }
+                        )
             else:
                 if block.get("type") == "tool-call" and block.get("_json"):
                     try:

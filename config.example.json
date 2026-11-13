@@ -14,6 +14,8 @@
     "core.compaction": true,
     "core.cancellation": true,
     "core.streaming": true,
+    "core.stream-recording": true,
+    "core.sse-replay": true,
     "core.pty": true,
     "core.tool-result-pruner": false,
     "core.user-questions": true,

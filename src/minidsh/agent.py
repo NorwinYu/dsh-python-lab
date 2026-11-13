@@ -1,3 +1,4 @@
+import time
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -9,6 +10,7 @@ from .images import load_image_blocks
 from .llm import Model, text_block
 from .observations import ObservationStore
 from .session import SessionStore
+from .stream_codec import pack_stream
 from .system_prompt import SystemPrompt
 from .tools import ToolError, ToolRegistry
 
@@ -28,6 +30,7 @@ class Agent:
         workspace: Optional[Path] = None,
         allow_outside: bool = False,
         streaming: bool = True,
+        record_stream: bool = True,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -41,6 +44,7 @@ class Agent:
         self.workspace = (workspace or Path.cwd()).resolve()
         self.allow_outside = allow_outside
         self.streaming = streaming
+        self.record_stream = record_stream
 
     def run(
         self,
@@ -130,9 +134,11 @@ class Agent:
                     cancel_token=token,
                 )
             saw_delta = False
+            stream_events: List[Dict[str, object]] = []
 
             def forward_model_event(event: Dict[str, object]) -> None:
                 nonlocal saw_delta
+                stream_events.append({**event, "time": int(time.time() * 1000)})
                 event_type = event.get("type")
                 if event_type == "usage":
                     self.events.emit("assistant/usage", {"session_id": session_id, "run_id": run_id, "turn": turn, "step": step, **event})
@@ -154,18 +160,18 @@ class Agent:
                 forward_model_event if self.streaming else None,
             )
             if self.streaming and not saw_delta and response.content:
-                self.events.emit(
-                    "assistant/delta",
-                    {
-                        "session_id": session_id,
-                        "run_id": run_id,
-                        "turn": turn,
-                        "step": step,
-                        "type": "text-delta",
-                        "text": response.content,
-                        "fallback": True,
-                    },
-                )
+                fallback_chunk = {
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "turn": turn,
+                    "step": step,
+                    "type": "text-delta",
+                    "index": 0,
+                    "text": response.content,
+                    "fallback": True,
+                }
+                stream_events.append({"type": "text-delta", "index": 0, "text": response.content, "time": int(time.time() * 1000)})
+                self.events.emit("assistant/delta", fallback_chunk)
             model_name = getattr(self.model, "model_id", "mock")
             if response.replay_state is not None:
                 response_info = response.replay_state.get("response", {})
@@ -186,11 +192,18 @@ class Agent:
             if response.usage is not None:
                 assistant_message["usage"] = response.usage
             messages.append(assistant_message)
-            self._record(
-                session_id,
-                "assistant/message",
-                {"turn": turn, "step": step, "message": assistant_message, "usage": response.usage},
-            )
+            event_payload: Dict[str, object] = {"turn": turn, "step": step, "message": assistant_message, "usage": response.usage}
+            if self.record_stream:
+                stream_events.append(
+                    {
+                        "type": "finish",
+                        "time": int(time.time() * 1000),
+                        "reason": response.finish_reason,
+                        "replayState": response.replay_state,
+                    }
+                )
+                event_payload["stream"] = pack_stream(stream_events)
+            self._record(session_id, "assistant/message", event_payload)
             self.events.emit("assistant/message", {"session_id": session_id, "message": assistant_message, "run_id": run_id})
 
             if not response.tool_calls:

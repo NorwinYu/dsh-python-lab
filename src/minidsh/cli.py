@@ -67,6 +67,9 @@ def build_parser() -> argparse.ArgumentParser:
     surface_parser = subparsers.add_parser("surface", help="查看当前模型消息 surface 和 replacement 记录")
     surface_parser.add_argument("session_id")
 
+    stream_parser = subparsers.add_parser("stream", help="展开会话中压缩保存的原始模型分片")
+    stream_parser.add_argument("session_id")
+
     prune_parser = subparsers.add_parser("prune", help="裁剪当前 surface 中过长的工具结果")
     prune_parser.add_argument("session_id")
 
@@ -118,7 +121,7 @@ def interactive_questions(request: Dict[str, object]) -> Dict[str, object]:
 
 
 def _with_default_command(argv: List[str], command: str) -> List[str]:
-    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "run", "resume", "session", "transcript", "todos", "fork", "compact", "repair", "migrate", "surface", "prune", "serve", "desktop"}
+    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "run", "resume", "session", "transcript", "todos", "fork", "compact", "repair", "migrate", "surface", "stream", "prune", "serve", "desktop"}
     options_with_values = {"--workspace", "--config", "--enable", "--disable", "--sandbox-mode", "--approval-policy", "--context-window"}
     index = 0
     while index < len(argv):
@@ -260,6 +263,12 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
             if app.session is None:
                 raise RuntimeError("session.jsonl 当前被禁用")
             print(json.dumps(app.session.surface(args.session_id), ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "stream":
+            if app.session is None:
+                raise RuntimeError("session.jsonl 当前被禁用")
+            print(json.dumps(app.session.stream_chunks(args.session_id), ensure_ascii=False, indent=2))
             return 0
 
         if args.command == "prune":
