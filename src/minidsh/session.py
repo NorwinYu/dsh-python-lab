@@ -1,6 +1,5 @@
 import errno
 import fcntl
-import hashlib
 import json
 import os
 import re
@@ -13,13 +12,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import ContextManager, Dict, List, Optional
 
+from .generations import backup_original, publish, read_current
 from .plugins import Plugin, ServiceContext
 from .session_recovery import open_turn_closers
 from .stream_codec import expand_stream
 from .surface import fold_surface
 
 
-SESSION_FORMAT_VERSION = 1
+SESSION_FORMAT_VERSION = 2
 SESSION_ID = re.compile(r"^[a-f0-9]{32}$")
 HEADER_RECORD = "minidsh-session-header"
 
@@ -147,6 +147,11 @@ class JsonlSessionStore(SessionStore):
             raise ValueError("无效 session id")
         return self.root / f"{session_id}.jsonl"
 
+    def _session_ids(self) -> List[str]:
+        ids = {path.stem for path in self.root.glob("*.jsonl")}
+        ids.update(path.parent.name for path in self.root.glob("*/index.json"))
+        return sorted(ids)
+
     def _lock_path(self, session_id: str) -> Path:
         return self.root / ".locks" / f"{session_id}.lock"
 
@@ -197,10 +202,11 @@ class JsonlSessionStore(SessionStore):
             handle.close()
 
     def _read(self, session_id: str, allow_torn: bool = False) -> ReadResult:
+        generated = read_current(self.root, session_id)
         path = self._path(session_id)
-        if not path.exists():
+        if generated is None and not path.exists():
             return ReadResult([], SESSION_FORMAT_VERSION, False, b"")
-        raw = path.read_bytes()
+        raw = generated[0] if generated is not None else path.read_bytes()
         if not raw:
             raise SessionCorruptionError(f"会话文件为空: {session_id}")
         torn = not raw.endswith(b"\n")
@@ -224,13 +230,15 @@ class JsonlSessionStore(SessionStore):
             raise SessionCorruptionError(f"会话首行无效: {session_id}") from exc
         version = 0
         event_lines = lines
+        if generated is not None and first.get("record") != HEADER_RECORD:
+            raise SessionCorruptionError("代际缺少版本头")
         if isinstance(first, dict) and first.get("record") == HEADER_RECORD:
             version = first.get("format")
             if not isinstance(version, int) or isinstance(version, bool):
                 raise SessionCorruptionError("会话版本头格式无效")
             if version > SESSION_FORMAT_VERSION:
                 raise SessionFormatUnsupportedError(f"不支持的未来会话格式: v{version}")
-            if version != SESSION_FORMAT_VERSION:
+            if version not in {1, SESSION_FORMAT_VERSION}:
                 raise SessionFormatUnsupportedError(f"不支持的会话版本头: v{version}")
             if first.get("session_id") != session_id:
                 raise SessionCorruptionError("会话版本头与文件名不一致")
@@ -280,9 +288,7 @@ class JsonlSessionStore(SessionStore):
         source_event_seqs: Optional[List[int]] = None,
     ) -> None:
         path = self._path(session_id)
-        events = self._read(session_id).events if path.exists() else []
-        if not path.exists():
-            self._write_atomic(session_id, [], None)
+        events = self._read(session_id).events
         event = {
             "session_id": session_id,
             "seq": len(events),
@@ -295,6 +301,9 @@ class JsonlSessionStore(SessionStore):
         if source_event_seqs is not None:
             event["sourceEventSeqs"] = source_event_seqs
         fold_surface(events + [event])
+        if not path.exists() or read_current(self.root, session_id) is not None:
+            publish(self.root, session_id, events + [event])
+            return
         with path.open("a", encoding="utf-8") as file:
             file.write(json.dumps(event, ensure_ascii=False) + "\n")
             file.flush()
@@ -328,69 +337,32 @@ class JsonlSessionStore(SessionStore):
             stored = self._read(session_id)
             if stored.torn:
                 raise SessionCorruptionError("写入前必须先修复不完整末尾")
-            if stored.version == 0:
-                backup = self._write_atomic(session_id, stored.events, stored.raw)
-                self._append_current(session_id, "session/migrated", {"from": 0, "to": 1, "backup": backup})
+            if stored.version < 2:
+                backup = backup_original(self.root, session_id, stored.raw)
+                self._publish_migration(session_id, stored, backup)
         self._append_current(session_id, event_type, payload, surface_op=surface_op, source_event_seqs=source_event_seqs)
 
-    def _write_atomic(
-        self,
-        session_id: str,
-        events: List[Dict[str, object]],
-        original: Optional[bytes],
-    ) -> Optional[str]:
-        path = self._path(session_id)
-        backup_name: Optional[str] = None
-        if original is not None:
-            backups = self.root / "backups"
-            backups.mkdir(exist_ok=True)
-            digest = hashlib.sha256(original).hexdigest()
-            backup_name = f"{session_id}.{digest}.jsonl"
-            backup = backups / backup_name
-            if backup.exists():
-                if backup.read_bytes() != original:
-                    raise SessionCorruptionError("备份哈希冲突")
-            else:
-                with backup.open("xb") as file:
-                    file.write(original)
-                    file.flush()
-                    os.fsync(file.fileno())
-        header = {
-            "record": HEADER_RECORD,
-            "format": SESSION_FORMAT_VERSION,
+    def _publish_migration(self, session_id: str, stored: ReadResult, backup: str) -> None:
+        event = {
             "session_id": session_id,
-            "created_at": events[0]["created_at"] if events else datetime.now(timezone.utc).isoformat(),
+            "seq": len(stored.events),
+            "type": "session/migrated",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "payload": {"from": stored.version, "to": 2, "backup": backup},
         }
-        temporary = self.root / f".{session_id}.{uuid.uuid4().hex}.tmp"
-        try:
-            with temporary.open("x", encoding="utf-8") as file:
-                file.write(json.dumps(header, ensure_ascii=False) + "\n")
-                for event in events:
-                    file.write(json.dumps(event, ensure_ascii=False) + "\n")
-                file.flush()
-                os.fsync(file.fileno())
-            os.replace(temporary, path)
-            directory = os.open(self.root, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-        finally:
-            if temporary.exists():
-                temporary.unlink()
-        return f"backups/{backup_name}" if backup_name is not None else None
+        publish(self.root, session_id, stored.events + [event])
 
     def repair(self, session_id: str) -> Dict[str, object]:
         with self.write_lease(session_id):
-            if not self._path(session_id).exists():
+            if not self._path(session_id).exists() and read_current(self.root, session_id) is None:
                 raise ValueError(f"unknown session {session_id}")
             stored = self._read(session_id, allow_torn=True)
             closers = open_turn_closers(stored.events)
-            if stored.version == 1 and not stored.torn and not closers:
+            if stored.version == 2 and not stored.torn and not closers:
                 return {"changed": False, "migrated": False, "torn": False, "tool_results": 0}
-            backup = self._write_atomic(session_id, stored.events, stored.raw)
-            if stored.version == 0:
-                self._append_current(session_id, "session/migrated", {"from": 0, "to": 1, "backup": backup})
+            backup = backup_original(self.root, session_id, stored.raw)
+            if stored.version < 2:
+                self._publish_migration(session_id, stored, backup)
             if stored.torn or closers:
                 last_time = stored.events[-1]["created_at"] if stored.events else datetime.now(timezone.utc).isoformat()
                 for closer in closers:
@@ -406,7 +378,7 @@ class JsonlSessionStore(SessionStore):
                 )
             return {
                 "changed": True,
-                "migrated": stored.version == 0,
+                "migrated": stored.version < 2,
                 "torn": stored.torn,
                 "tool_results": sum(1 for closer in closers if closer["type"] == "tool/result"),
                 "backup": backup,
@@ -415,17 +387,17 @@ class JsonlSessionStore(SessionStore):
     def migrate(self, session_id: str) -> Dict[str, object]:
         with self.write_lease(session_id):
             stored = self._read(session_id)
-            if stored.version == 1:
-                return {"changed": False, "from": 1, "to": 1}
-            backup = self._write_atomic(session_id, stored.events, stored.raw)
-            self._append_current(session_id, "session/migrated", {"from": 0, "to": 1, "backup": backup})
-            return {"changed": True, "from": 0, "to": 1, "backup": backup}
+            if stored.version == 2:
+                return {"changed": False, "from": 2, "to": 2}
+            backup = backup_original(self.root, session_id, stored.raw)
+            self._publish_migration(session_id, stored, backup)
+            return {"changed": True, "from": stored.version, "to": 2, "backup": backup}
 
     def migrate_all(self) -> List[Dict[str, object]]:
         results = []
-        for path in self.root.glob("*.jsonl"):
-            result = self.migrate(path.stem)
-            results.append({"session_id": path.stem, **result})
+        for session_id in self._session_ids():
+            result = self.migrate(session_id)
+            results.append({"session_id": session_id, **result})
         return results
 
     def fork(self, session_id: str, at_seq: Optional[int] = None) -> str:
@@ -457,9 +429,9 @@ class JsonlSessionStore(SessionStore):
                         "payload": closer["payload"],
                     }
                 )
-            if self._path(fork_id).exists():
+            if self._path(fork_id).exists() or read_current(self.root, fork_id) is not None:
                 raise ValueError("fork 会话 ID 冲突")
-            self._write_atomic(fork_id, copied_events, None)
+            publish(self.root, fork_id, copied_events)
             self.append(fork_id, "session/fork", {"source_session_id": session_id, "at_seq": at_seq})
             return fork_id
 
@@ -518,8 +490,9 @@ class JsonlSessionStore(SessionStore):
 
     def list_sessions(self) -> List[Dict[str, object]]:
         sessions: List[Dict[str, object]] = []
-        for path in self.root.glob("*.jsonl"):
-            session_id = path.stem
+        for session_id in self._session_ids():
+            manifest = self.root / session_id / "index.json"
+            path = manifest if manifest.exists() else self._path(session_id)
             row: Dict[str, object] = {
                 "session_id": session_id,
                 "updated_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),

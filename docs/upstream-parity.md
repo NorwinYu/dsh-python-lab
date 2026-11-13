@@ -81,13 +81,15 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 压缩只影响发给模型的投影，不删除原始事件；压缩后的会话可以继续 resume。
 - token meter 当前是学习版 UTF-8/JSON 启发式估算，不是官方精确 tokenizer。
 
-### 会话版本、迁移与崩溃恢复（学习版 v0/v1）
+### 会话版本、迁移与崩溃恢复（学习版 v0/v1/v2）
 
-- 新会话包含 `minidsh-session-header` v1；版本头不占事件 seq，既有无头文件按 v0 只读兼容。
+- 新会话包含 `minidsh-session-header` v2 和完整事件快照；既有无头文件按 v0、单文件头按 v1 只读兼容。
+- 每代位于 `<session-id>/generations/NNNNNNNN.jsonl`，禁止覆盖；`index.json` manifest 记录当前代、路径和 SHA-256。
+- 追加、迁移、恢复和 fork 都发布新代，旧代只读保留；manifest 通过临时文件、fsync 和 os.replace 原子切换。
 - 普通读取不迁移；首次追加、显式 migrate 或 resume 修复时才写当前格式，未来版本直接拒绝。
 - 每个事件校验 session 身份、连续 seq、类型、payload 和 created_at；无效 JSON/UTF-8 失败关闭。
 - 普通 load 拒绝不完整末尾；repair/resume 保留最后换行前的完整前缀，无法恢复任何记录时拒绝。
-- 重写前把原始字节保存为内容哈希命名的备份，再通过临时文件、文件/目录 fsync 和 os.replace 发布。
+- 迁移或恢复前把原始字节保存为内容哈希命名的备份；读取 manifest 时验证代际哈希，外部篡改会失败关闭。
 - 未开始工具调用使用上游 TOOL_NOT_STARTED 文案；已开始无结果调用使用 TOOL_OUTCOME_UNKNOWN 和保守重试警告。
 - 恢复先补 error tool result，再关闭开放 step/turn，原因是 interrupted；fork 使用 forked 文案且不改父会话。
 - 审计事件为 `session/migrated` 和 `session/repaired`；CLI 支持 repair、单个/全部 migrate，HTTP 支持单会话 repair/migrate。
@@ -279,5 +281,9 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 真实 50ms 超时后 pending 保留，HTTP 迟到回答投影为 answer_to_pending_question 并可 resume；取消后队列清空。
 - 浏览器在超时后通过图形表单提交自定义回答，待答面板正常关闭。
 - 最终 wheel 离线安装后，50ms 超时返回 pending，迟到回答写回原会话并可 resume，图形表单资源已打包。
+- 新会话产生不可变代际和 manifest；resume 后首代字节不变，fork 当前代为 2，repair/migrate 正常会话返回 unchanged。
+- v0/v1 迁移原文件不变，migrated 审计进入第 1 代，后续事件进入下一代，原始备份字节一致。
+- 外部修改当前代际后 SHA-256 校验失败；v0 截断尾部迁移、interrupted 恢复和 resume 通过。
+- 最终 wheel 包含 generations 模块；离线安装后新会话、resume 和 v1→v2 迁移通过，首代字节不变。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

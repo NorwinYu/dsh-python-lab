@@ -192,7 +192,7 @@ resume 会恢复消息、turn 编号和文件观察；runtime context 使用当�
 
 ## 会话版本、迁移与崩溃恢复
 
-新会话使用 MiniDSH v1 版本头，事件 seq 仍从 0 开始，版本头不占事件序号。旧的无头 JSONL 作为 v0 只读兼容；普通 `session/transcript` 不改文件，首次追加、显式迁移或 resume 恢复时才写入 v1。
+新会话使用 MiniDSH v2 不可变代际，事件 seq 仍从 0 开始，版本头不占事件序号。每代位于 `.minidsh/sessions/<id>/generations/NNNNNNNN.jsonl`，包含完整事件快照；`index.json` manifest 记录当前代、相对路径和 SHA-256。代际文件禁止覆盖，manifest 通过临时文件、fsync 和 `os.replace` 原子切换。每次追加、迁移或恢复都发布新代，旧代只读保留。旧的无头 JSONL 和 v1 单文件只读兼容；普通 `session/transcript` 不改文件。
 
 ```bash
 # 备份并修复截断末尾、未关闭 step/turn 和缺失工具结果
@@ -206,12 +206,12 @@ PYTHONPATH=src python3 -m minidsh migrate
 - 不完整末尾只有在 `repair` 或 resume 恢复时才截到最后一个完整换行；普通 `load` 失败关闭。
 - 未开始的工具调用补 `TOOL_NOT_STARTED`；已开始但无持久结果的调用补 `TOOL_OUTCOME_UNKNOWN`，并明确警告不要对可能有副作用的操作盲目重试。
 - 随后依次关闭开放的 step 和 turn，原因分别为 `interrupted`；fork 在开放回合截断时为分支补 `forked` 闭环，父会话不变。
-- 每次迁移或恢复先把原始字节保存到 `.minidsh/sessions/backups/<id>.<sha256>.jsonl`，再通过临时文件、fsync 和 `os.replace` 原子发布；备份不会因重复操作被覆盖。
+- 每次迁移或恢复先把原始字节保存到 `.minidsh/sessions/backups/<id>.<sha256>.jsonl`，再发布新代际；备份和旧代不会因重复操作被覆盖。读取 manifest 时重新计算代际 SHA-256，任何篡改都会失败关闭。
 - 高于当前版本的格式、身份不一致、非连续 seq、无效 UTF-8/JSON 都会拒绝读取。
 - resume 和手动 compact 持有整个回合的 POSIX `flock` 写锁，锁文件位于 `.minidsh/sessions/.locks`，进程退出后由内核释放；读取不获取写锁。
 - HTTP 对同一 session 的并发回合直接拒绝；同一 Application 的 job watcher 可在存储串行锁下追加审计事件，不会因回合写锁卡住等待者。
 
-对应 HTTP 操作为 `POST /v1/sessions/<id>/repair` 和 `/migrate`。这是学习版 v0/v1 协议，不兼容官方多代际/Zstandard 格式。
+对应 HTTP 操作为 `POST /v1/sessions/<id>/repair` 和 `/migrate`。这是学习版 v0/v1/v2 协议，尚不包含官方完整格式目录或 Zstandard 编码。
 
 ## Surface replacement 与工具结果裁剪
 
@@ -581,22 +581,23 @@ minidsh-headless / minidsh-web / minidsh-desktop
 20. `src/minidsh/images.py`：图片路径、格式、哈希和请求预算。
 21. `src/minidsh/files.py`：multipart 上传、文件对象校验和 Files CRUD。
 22. `src/minidsh/deepseek.py`：Messages 图片、增量 SSE、重试、列表缓存和原生 replay。
-23. `src/minidsh/session.py`：版本头、原子迁移、POSIX 写锁、流展开和消息投影。
-24. `src/minidsh/session_recovery.py`：工具结果补偿与开放 step/turn 闭环。
-25. `src/minidsh/surface.py`：surface 折叠、来源引用和 replacement 校验。
-26. `src/minidsh/pruner.py`：Unicode 工具结果裁剪与 replacement 写入。
-27. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
-28. `src/minidsh/agent.py`：Agent Loop、增量转发、压缩记录、恢复入口与取消终态。
-29. `src/minidsh/server.py`：HTTP API、有界 SSE、历史回放、待答队列和会话互斥。
-30. `src/minidsh/web/index.html`：Web 工作台、实时文本与裁剪操作。
-31. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
-32. `examples/minidsh-clock`：可独立安装的外部工具插件。
-33. `packages`：Headless、Web、Desktop 三个产品发行入口。
-34. `src/minidsh/cli.py`：命令行、流展开、交互提问、迁移恢复与常驻宿主入口。
+23. `src/minidsh/generations.py`：不可变代际、内容哈希和 manifest 原子发布。
+24. `src/minidsh/session.py`：版本头、原子迁移、POSIX 写锁、流展开和消息投影。
+25. `src/minidsh/session_recovery.py`：工具结果补偿与开放 step/turn 闭环。
+26. `src/minidsh/surface.py`：surface 折叠、来源引用和 replacement 校验。
+27. `src/minidsh/pruner.py`：Unicode 工具结果裁剪与 replacement 写入。
+28. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
+29. `src/minidsh/agent.py`：Agent Loop、增量转发、压缩记录、恢复入口与取消终态。
+30. `src/minidsh/server.py`：HTTP API、有界 SSE、历史回放、待答队列和会话互斥。
+31. `src/minidsh/web/index.html`：Web 工作台、实时文本与裁剪操作。
+32. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
+33. `examples/minidsh-clock`：可独立安装的外部工具插件。
+34. `packages`：Headless、Web、Desktop 三个产品发行入口。
+35. `src/minidsh/cli.py`：命令行、流展开、交互提问、迁移恢复与常驻宿主入口。
 
 ## 观察会话
 
-启用 `session.jsonl` 后，每次运行都会生成 `.minidsh/sessions/<session-id>.jsonl`。事件包括：
+启用 `session.jsonl` 后，每次运行都会在 `.minidsh/sessions/<session-id>/generations/` 下产生不可变代际，并由 `index.json` 指向当前代。事件包括：
 
 ```text
 system/message
@@ -681,9 +682,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 理解压缩 runs、时间差、流展开校验、事件历史环和 Last-Event-ID 恢复。
 
-### 第 15 层：定时提问与迟到交互（当前）
+### 第 15 层：定时提问与迟到交互
 
-理解前台超时、pending 与 skipped 的区别、待答保留、迟到用户消息和图形答题。对照 `docs/upstream-parity.md` 阅读。
+理解前台超时、pending 与 skipped 的区别、待答保留、迟到用户消息和图形答题。
+
+### 第 16 层：不可变代际与格式迁移（当前）
+
+理解完整快照代际、内容哈希、manifest 原子切换、旧格式迁移和篡改检测。对照 `docs/upstream-parity.md` 阅读。
 
 ## 当前边界
 
@@ -693,7 +698,7 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 - Web 搜索使用学习版 JSON provider，HTML 不是完整 Turndown/GFM；DNS 检查未做连接级地址固定。
 - HTTP/SSE 是学习 API，不兼容官方 Web Host 的认证、RPC 和多路复用协议。
 - 插件依赖在启动时收敛，尚不支持运行中热重载。
-- surface 只支持学习版消息事件和工具结果裁剪，尚无官方完整事件类型、插件消息投影、多代际不可变文件、Zstandard、Windows 写锁和格式目录。
+- surface 只支持学习版消息事件和工具结果裁剪，尚无官方完整事件类型、插件消息投影、Zstandard、Windows 写锁和完整格式目录。
 - token meter 是启发式估算，尚无精确 tokenizer、图片 token 定价和模型切换压缩。
 - 尚无内核沙箱和审批升级；PTY 仅支持 Unix `/bin/bash`，不支持 Windows ConPTY。
 - PTY 是进程内学习实现，尚无官方终端行缓冲/OSC 就绪协议、跨进程恢复和文件策略切换围栏。
