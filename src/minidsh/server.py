@@ -348,6 +348,14 @@ class ApiServer:
                                 raise RuntimeError("session.jsonl 当前被禁用")
                             operation = app.session.repair if action == "repair" else app.session.migrate
                             self._send_json(operation(session_id))
+                        elif action == "sandbox":
+                            sandbox = app.ctx.require("sandboxPolicy")
+                            sandbox.set_mode(app.session, session_id, body.get("mode"))
+                            self._send_json({"mode": body.get("mode")})
+                        elif action == "approval-policy":
+                            approval = app.ctx.require("approval")
+                            approval.set_policy(app.session, session_id, body.get("policy"))
+                            self._send_json({"policy": body.get("policy")})
                         else:
                             self._send_json({"error": "not found"}, 404)
                     elif path.startswith("/v1/terminals/"):
@@ -429,6 +437,10 @@ class ApiServer:
                     self._send_json({"todos": app.session.todos(session_id)})
                 elif len(parts) == 5 and parts[4] == "stream":
                     self._send_json({"chunks": app.session.stream_chunks(session_id)})
+                elif len(parts) == 5 and parts[4] == "sandbox":
+                    sandbox = app.ctx.require("sandboxPolicy")
+                    approval = app.ctx.require("approval")
+                    self._send_json({"mode": sandbox.resolve(app.session, session_id).mode, "approval_policy": approval.effective_policy(app.session, session_id)})
                 elif len(parts) == 4:
                     self._send_json(app.session.load(session_id))
                 else:

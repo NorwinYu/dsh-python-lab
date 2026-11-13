@@ -3,12 +3,14 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .approval import ApprovalService
 from .cancellation import CancellationToken, RunCancelled
 from .compaction import CompactionService
 from .events import EventBus
 from .images import load_image_blocks
 from .llm import Model, text_block
 from .observations import ObservationStore
+from .sandbox import SandboxPolicy
 from .session import SessionStore
 from .stream_codec import pack_stream
 from .system_prompt import SystemPrompt
@@ -31,6 +33,8 @@ class Agent:
         allow_outside: bool = False,
         streaming: bool = True,
         record_stream: bool = True,
+        sandbox_policy: Optional[SandboxPolicy] = None,
+        approval_service: Optional[ApprovalService] = None,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -45,6 +49,8 @@ class Agent:
         self.allow_outside = allow_outside
         self.streaming = streaming
         self.record_stream = record_stream
+        self.sandbox_policy = sandbox_policy
+        self.approval_service = approval_service
 
     def run(
         self,
@@ -97,7 +103,7 @@ class Agent:
         user_message = {"role": "user", "content": [text_block(prompt)] + image_blocks}
         runtime_message = {
             "role": "user",
-            "content": [text_block(self.runtime_context)],
+            "content": [text_block(self._current_runtime_context(session_id))],
             "source": {"kind": "runtime-context"},
         }
         messages.extend([user_message, runtime_message])
@@ -269,6 +275,15 @@ class Agent:
         if not isinstance(content, list):
             raise RuntimeError("压缩结果格式错误")
         return "".join(str(block.get("text", "")) for block in content if isinstance(block, dict))
+
+    def _current_runtime_context(self, session_id: str) -> str:
+        if self.sandbox_policy is None or self.approval_service is None:
+            return self.runtime_context
+        sandbox_context = self.sandbox_policy.context()
+        if self.session is not None:
+            sandbox_context = self.sandbox_policy.resolve(self.session, session_id).context()
+        approval_context = self.approval_service.context_for_session(self.session, session_id)
+        return self.system_prompt.runtime_context(self.workspace, sandbox_context, approval_context)
 
     @staticmethod
     def _is_runtime_context(message: Dict[str, object]) -> bool:

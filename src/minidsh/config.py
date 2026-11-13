@@ -20,6 +20,7 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "core.stream-recording": True,
     "core.sse-replay": True,
     "core.pty": True,
+    "core.kernel-sandbox": False,
     "core.tool-result-pruner": False,
     "core.user-questions": True,
     "core.web": True,

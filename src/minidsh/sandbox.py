@@ -1,18 +1,40 @@
 import json
 from pathlib import Path
+from typing import Optional
 
 from .plugins import Plugin, ServiceContext
+from .session import SessionStore
 
 
 SANDBOX_MODES = {"read-only", "workspace-write", "danger-full-access"}
 
 
 class SandboxPolicy:
-    def __init__(self, mode: str, workspace: Path) -> None:
+    def __init__(self, mode: str, workspace: Path, terminals: Optional[ServiceContext] = None) -> None:
         if mode not in SANDBOX_MODES:
             raise ValueError(f"未知文件策略: {mode}")
         self.mode = mode
         self.workspace = workspace
+        self.terminals = terminals
+
+    def resolve(self, session: SessionStore, session_id: str) -> "SandboxPolicy":
+        mode = self.mode
+        for event in session.load(session_id):
+            if event["type"] == "sandbox/mode":
+                override = event["payload"].get("mode")
+                if override not in SANDBOX_MODES:
+                    raise ValueError(f"会话包含无效 sandbox mode: {override}")
+                mode = override
+        return SandboxPolicy(mode, self.workspace, self.terminals)
+
+    def set_mode(self, session: SessionStore, session_id: str, mode: str) -> None:
+        if mode not in SANDBOX_MODES:
+            raise ValueError(f"未知文件策略: {mode}")
+        terminal_service = self.terminals.optional("terminals") if self.terminals is not None else None
+        if terminal_service is not None and terminal_service.list():
+            raise RuntimeError("cannot change sandbox mode while persistent terminal sessions are open; close them first")
+        if self.resolve(session, session_id).mode != mode:
+            session.append(session_id, "sandbox/mode", {"mode": mode})
 
     def context(self) -> str:
         if self.mode == "read-only":
@@ -27,9 +49,7 @@ class SandboxPolicy:
                 "Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files "
                 f"under the session workspace: {root}. Some platform temporary areas may also be writable."
             )
-        return (
-            "Current DSH file policy: danger-full-access. The DSH file sandbox does not restrict file modifications by available operations."
-        )
+        return "Current DSH file policy: danger-full-access. The DSH file sandbox does not restrict file modifications by available operations."
 
 
 class SandboxPolicyPlugin(Plugin):
@@ -41,4 +61,4 @@ class SandboxPolicyPlugin(Plugin):
         self.workspace = workspace
 
     def activate(self, ctx: ServiceContext) -> None:
-        ctx.provide("sandboxPolicy", SandboxPolicy(self.mode, self.workspace), self.name)
+        ctx.provide("sandboxPolicy", SandboxPolicy(self.mode, self.workspace, ctx), self.name)

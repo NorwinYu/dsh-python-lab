@@ -154,7 +154,17 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 初始化关闭输入 echo 和历史扩展；环境沿用凭据清理，并注入受管 DSH/PTY 变量。
 - 超时、取消、Shell 退出、HTTP kill 和应用关闭都会终止并重置终端，下一次从工作区新环境开始。
 - 提供 `pty/created`、`pty/reset`、终端列表和 kill API；CLI 短进程退出后不能恢复 PTY 内存状态。
-- 仅支持 Unix PTY；尚未实现官方终端行缓冲、OSC 就绪检测、ConPTY、跨进程恢复和 sandbox mode fence。
+- 仅支持 Unix PTY；尚未实现官方终端行缓冲、OSC 就绪检测、ConPTY 和跨进程恢复；已支持持久终端打开时的 sandbox mode fence。
+
+### 内核沙箱与策略升级
+
+- `core.kernel-sandbox` 默认关闭；启用后 macOS Seatbelt 接管一次性 Bash、后台 jobs 和持久 PTY，默认行为不变。
+- read-only 允许执行/读取但禁止写入；workspace-write 仅允许工作区、受管 jobs 和平台临时目录；danger-full-access 不启用隔离。
+- 通过实际子进程验证 Operation not permitted，不是 ToolRegistry 模拟错误；`/tmp` 映射和 `subpath` 规则在本机验证。
+- `sandbox/mode` 持久化会话覆盖，工具、运行时上下文和进程后端读取同一策略。
+- `approval/policy` 切换 ask/never，runtime context 同步更新；审批取消记录 cancelled 并丢弃迟到回答。
+- 持久终端打开时禁止 mode 切换，关闭后新终端按新模式创建。
+- 提供 GET sandbox、POST sandbox、POST approval-policy API；尚无 Landlock/bwrap 或 Windows 对应实现。
 
 ### 增量模型流与 SSE 背压
 
@@ -203,12 +213,12 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 
 - 官方完整工具集、profile/bundle 格式、运行时热重载和外部 npm 插件。
 - 官方 Web Host 的认证、鉴权、页面、RPC 与多路复用协议；当前 HTTP/SSE 是学习 API，不是官方兼容实现。
-- Landlock/bwrap 等内核沙箱；当前 `read-only` 保守拒绝全部 Shell。
-- `sandbox_permissions` 升级、会话中切换审批/文件策略和审批取消。
+- Linux Landlock/bwrap 和 Windows 隔离；当前仅 macOS Seatbelt，未启用时 `read-only` 保守拒绝 Shell。
+- 官方 `sandbox_permissions` 升级协议和审批取消通知的完整 Client 集成；当前仅支持会话 API 与审批取消结果。
 - 官方完整终端行缓冲、OSC 就绪协议、PTY 跨进程恢复和 Windows ConPTY；当前持久后端仅支持 Unix `/bin/bash`。
 - 任务完成后的 Agent 自动唤醒、跨进程任务恢复和长期常驻宿主。
 - 完整附件存储、图片变换/定价、持久上传索引和配额恢复、扩展请求头及遥测；完整模型目录元数据、后台 listing 刷新及官方通用 LLM 重试插件仍未移植。
-- 官方完整事件类型、任意插件消息投影、格式目录、多代际不可变发布、Zstandard 和 Windows 写锁；学习版仅自定义 v0/v1 JSONL 和 surface 切片。
+- 官方完整事件类型、任意插件消息投影、格式目录、Zstandard 和 Windows 写锁；学习版仅自定义 v0/v1/v2 JSONL 代际和 surface 切片。
 - 官方压缩区间选择、token 校准、模型切换压缩、重试和取消；pruner 使用学习版计量事件。
 - `read` 尚未实现大文件流式扫描；`glob` 尚未完全复刻 ripgrep 语义和 spill 行为。
 - 匿名用户 ID 只在进程内稳定，尚未持久化。
@@ -285,5 +295,9 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - v0/v1 迁移原文件不变，migrated 审计进入第 1 代，后续事件进入下一代，原始备份字节一致。
 - 外部修改当前代际后 SHA-256 校验失败；v0 截断尾部迁移、interrupted 恢复和 resume 通过。
 - 最终 wheel 包含 generations 模块；离线安装后新会话、resume 和 v1→v2 迁移通过，首代字节不变。
+- Seatbelt 实测 read-only 写入被内核拒绝，workspace-write 成功且 /var/tmp 越界写入被拒绝，/tmp 子路径规则通过。
+- sandbox/mode 与 approval/policy 切换、runtime context 更新、审批 cancelled 和迟到回答丢弃通过。
+- 持久 PTY 打开时 mode 切换被拒绝，kill 后新模式下写入被内核拒绝；默认非内核行为不变。
+- 最终 wheel 包含 seatbelt 后端；离线安装后工作区写入成功，越界写入和 read-only 写入均被内核拒绝。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

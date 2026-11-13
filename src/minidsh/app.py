@@ -16,6 +16,7 @@ from .questions import AskUserPlugin, UserQuestionsPlugin
 from .todo import TodoPlugin
 from .web_tools import WebPlugin, WebToolPlugin
 from .sandbox import SandboxPolicy, SandboxPolicyPlugin
+from .seatbelt import SeatbeltPlugin
 from .session import JsonlSessionPlugin, SessionStore
 from .shell import BashToolPlugin, JobToolsPlugin, make_bash_tool
 from .system_prompt import (
@@ -70,6 +71,8 @@ class AgentPlugin(Plugin):
             allow_outside=sandbox.mode == "danger-full-access",
             streaming=self.config.features["core.streaming"],
             record_stream=self.config.features["core.stream-recording"],
+            sandbox_policy=sandbox,
+            approval_service=approval,
         )
         ctx.provide("agent", agent, self.name)
 
@@ -90,12 +93,13 @@ class Application:
             answerer = lambda reason: "allowed-once"
 
         self.manager.register(SystemPromptPlugin())
+        self.manager.register(SeatbeltPlugin(config.workspace, config.session_dir.parent / "jobs"))
         self.manager.register(SandboxPolicyPlugin(config.sandbox_mode, config.workspace))
+        self.manager.register(PtyPlugin(config.workspace))
         self.manager.register(ApprovalPlugin(config.resolved_approval_policy(), answerer))
         self.manager.register(UserQuestionsPlugin(question_answerer))
         self.manager.register(ObservationPlugin())
         self.manager.register(JobPlugin(config.session_dir.parent / "jobs"))
-        self.manager.register(PtyPlugin(config.workspace))
         self.manager.register(WebPlugin())
         self.manager.register(CoreToolsPlugin())
         self.manager.register(SingleToolPlugin("tools.read", make_read_tool(config.workspace), ("tool:read", 1100, READ_GUIDANCE)))

@@ -52,6 +52,7 @@ minidsh run "请列出当前目录"
 - `core.stream-recording`：压缩原始 chunk 并随 assistant 事件持久化，默认启用。
 - `core.sse-replay`：进程内 SSE 历史环和 Last-Event-ID 恢复，默认启用。
 - `core.pty`：Unix PTY 服务与持久终端生命周期。
+- `core.kernel-sandbox`：macOS Seatbelt 内核隔离，默认关闭。
 - `core.tool-result-pruner`：手动 surface 工具结果裁剪，默认关闭。
 - `core.user-questions`：用户提问、待答和取消服务。
 - `core.web`：Web 获取与搜索 provider 服务。
@@ -126,6 +127,28 @@ PYTHONPATH=src python3 -m minidsh \
 ```
 
 `write` 覆盖已有文件前必须读过它；`edit` 默认要求旧文本恰好出现一次。读取后如果文件被外部修改，也会拒绝继续覆盖。
+
+## 内核沙箱与策略升级
+
+`core.kernel-sandbox` 默认关闭，上述保守策略不变。启用后，macOS Seatbelt 接管一次性 Bash、后台 jobs 和持久 PTY：read-only 允许执行与读取但禁止写入；workspace-write 只允许工作区、受管 jobs 目录和平台临时目录；danger-full-access 不启用隔离。
+
+```bash
+PYTHONPATH=src python3 -m minidsh \
+  --enable core.kernel-sandbox \
+  run "执行 printf denied > blocked.txt"
+```
+
+拒绝来自实际子进程，例如 `/bin/bash: blocked.txt: Operation not permitted`。这不是 ToolRegistry 的路径提示，而是 Seatbelt 的内核执行结果。
+
+会话可通过 `sandbox/mode` 和 `approval/policy` 事件升级或收紧：
+
+```text
+POST /v1/sessions/<id>/sandbox          {"mode": "workspace-write"}
+POST /v1/sessions/<id>/approval-policy  {"policy": "never"}
+GET  /v1/sessions/<id>/sandbox
+```
+
+后续模型 runtime context 和工具/进程边界读取同一覆盖。approval 取消会立即记录 `cancelled`，回答器线程迟到的结果会被丢弃。持久终端打开时禁止切换 sandbox mode，必须先 kill 终端；新终端按新模式创建。当前仅实现 macOS Seatbelt，不包含 Linux Landlock/bwrap 或 Windows 隔离。
 
 ## Shell 与后台任务
 
@@ -409,6 +432,9 @@ GET  /v1/sessions/<id>/transcript
 GET  /v1/sessions/<id>/surface
 GET  /v1/sessions/<id>/stream
 GET  /v1/sessions/<id>/todos
+GET  /v1/sessions/<id>/sandbox
+POST /v1/sessions/<id>/sandbox
+POST /v1/sessions/<id>/approval-policy
 GET  /v1/jobs
 GET  /v1/jobs/<id>/output
 GET  /v1/terminals
@@ -571,29 +597,30 @@ minidsh-headless / minidsh-web / minidsh-desktop
 10. `src/minidsh/jobs.py`：进程、输出环、任务隔离、等待、kill 和回收。
 11. `src/minidsh/shell.py`：Bash 与 jobs 工具及输出渲染。
 12. `src/minidsh/pty_shell.py`：PTY、命令标记、持久状态和终端回收。
-13. `src/minidsh/questions.py`：问题校验、CLI 回答器、HTTP 待答和取消。
-14. `src/minidsh/todo.py`：整表待办写入与并行策略。
-15. `src/minidsh/web_tools.py`：Web 获取、搜索 provider 和安全边界。
-16. `src/minidsh/llm.py`：模型接口、模型列表和 Mock 工具触发器。
-17. `src/minidsh/stream_codec.py`：原始分片压缩、展开和边界校验。
-18. `src/minidsh/retry.py`：重试模式、瞬时错误和指数退避。
-19. `src/minidsh/cancellation.py`：协作式取消令牌与资源关闭回调。
-20. `src/minidsh/images.py`：图片路径、格式、哈希和请求预算。
-21. `src/minidsh/files.py`：multipart 上传、文件对象校验和 Files CRUD。
-22. `src/minidsh/deepseek.py`：Messages 图片、增量 SSE、重试、列表缓存和原生 replay。
-23. `src/minidsh/generations.py`：不可变代际、内容哈希和 manifest 原子发布。
-24. `src/minidsh/session.py`：版本头、原子迁移、POSIX 写锁、流展开和消息投影。
-25. `src/minidsh/session_recovery.py`：工具结果补偿与开放 step/turn 闭环。
-26. `src/minidsh/surface.py`：surface 折叠、来源引用和 replacement 校验。
-27. `src/minidsh/pruner.py`：Unicode 工具结果裁剪与 replacement 写入。
-28. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
-29. `src/minidsh/agent.py`：Agent Loop、增量转发、压缩记录、恢复入口与取消终态。
-30. `src/minidsh/server.py`：HTTP API、有界 SSE、历史回放、待答队列和会话互斥。
-31. `src/minidsh/web/index.html`：Web 工作台、实时文本与裁剪操作。
-32. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
-33. `examples/minidsh-clock`：可独立安装的外部工具插件。
-34. `packages`：Headless、Web、Desktop 三个产品发行入口。
-35. `src/minidsh/cli.py`：命令行、流展开、交互提问、迁移恢复与常驻宿主入口。
+13. `src/minidsh/seatbelt.py`：Seatbelt profile、进程 argv 和内核写边界。
+14. `src/minidsh/questions.py`：问题校验、CLI 回答器、HTTP 待答和取消。
+15. `src/minidsh/todo.py`：整表待办写入与并行策略。
+16. `src/minidsh/web_tools.py`：Web 获取、搜索 provider 和安全边界。
+17. `src/minidsh/llm.py`：模型接口、模型列表和 Mock 工具触发器。
+18. `src/minidsh/stream_codec.py`：原始分片压缩、展开和边界校验。
+19. `src/minidsh/retry.py`：重试模式、瞬时错误和指数退避。
+20. `src/minidsh/cancellation.py`：协作式取消令牌与资源关闭回调。
+21. `src/minidsh/images.py`：图片路径、格式、哈希和请求预算。
+22. `src/minidsh/files.py`：multipart 上传、文件对象校验和 Files CRUD。
+23. `src/minidsh/deepseek.py`：Messages 图片、增量 SSE、重试、列表缓存和原生 replay。
+24. `src/minidsh/generations.py`：不可变代际、内容哈希和 manifest 原子发布。
+25. `src/minidsh/session.py`：版本头、原子迁移、POSIX 写锁、流展开和消息投影。
+26. `src/minidsh/session_recovery.py`：工具结果补偿与开放 step/turn 闭环。
+27. `src/minidsh/surface.py`：surface 折叠、来源引用和 replacement 校验。
+28. `src/minidsh/pruner.py`：Unicode 工具结果裁剪与 replacement 写入。
+29. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
+30. `src/minidsh/agent.py`：Agent Loop、增量转发、压缩记录、恢复入口与取消终态。
+31. `src/minidsh/server.py`：HTTP API、有界 SSE、历史回放、待答队列和会话互斥。
+32. `src/minidsh/web/index.html`：Web 工作台、实时文本与裁剪操作。
+33. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
+34. `examples/minidsh-clock`：可独立安装的外部工具插件。
+35. `packages`：Headless、Web、Desktop 三个产品发行入口。
+36. `src/minidsh/cli.py`：命令行、流展开、交互提问、迁移恢复与常驻宿主入口。
 
 ## 观察会话
 
@@ -686,9 +713,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 理解前台超时、pending 与 skipped 的区别、待答保留、迟到用户消息和图形答题。
 
-### 第 16 层：不可变代际与格式迁移（当前）
+### 第 16 层：不可变代际与格式迁移
 
-理解完整快照代际、内容哈希、manifest 原子切换、旧格式迁移和篡改检测。对照 `docs/upstream-parity.md` 阅读。
+理解完整快照代际、内容哈希、manifest 原子切换、旧格式迁移和篡改检测。
+
+### 第 17 层：内核沙箱与策略升级（当前）
+
+理解 Seatbelt 进程隔离、会话策略覆盖、审批取消和持久终端切换围栏。对照 `docs/upstream-parity.md` 阅读。
 
 ## 当前边界
 
@@ -700,8 +731,8 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 - 插件依赖在启动时收敛，尚不支持运行中热重载。
 - surface 只支持学习版消息事件和工具结果裁剪，尚无官方完整事件类型、插件消息投影、Zstandard、Windows 写锁和完整格式目录。
 - token meter 是启发式估算，尚无精确 tokenizer、图片 token 定价和模型切换压缩。
-- 尚无内核沙箱和审批升级；PTY 仅支持 Unix `/bin/bash`，不支持 Windows ConPTY。
-- PTY 是进程内学习实现，尚无官方终端行缓冲/OSC 就绪协议、跨进程恢复和文件策略切换围栏。
+- 内核隔离仅有 macOS Seatbelt，尚无 Linux Landlock/bwrap 或 Windows 对应实现；PTY 仅支持 Unix `/bin/bash`，不支持 Windows ConPTY。
+- PTY 是进程内学习实现，尚无官方终端行缓冲/OSC 就绪协议和跨进程恢复。
 - 图片上传只有进程内缓存和锁，尚无持久索引、独立等待者取消、配额回收、图片变换和浏览器文件选择器。
 - 模型列表尚未实现官方 badge、客户端版本要求、后台刷新和完整能力目录；列表请求不支持外部取消。
 - 网络连接建立前只能检查取消状态，已建立的响应流可以主动关闭；`always` 重试不会自行设置次数上限。

@@ -109,14 +109,18 @@ class ToolRegistry:
     def _authorize(self, execution: Execution, tool_name: str, kind: str) -> None:
         sandbox = execution.service("sandboxPolicy")
         assert isinstance(sandbox, SandboxPolicy)
-        if sandbox.mode == "read-only":
+        if execution.session_id is not None:
+            session = execution.session()
+            assert session is not None
+            sandbox = sandbox.resolve(session, execution.session_id)
+        if sandbox.mode == "read-only" and not (kind == "shell" and execution.ctx.optional("kernelSandbox") is not None):
             action = "Shell 命令" if kind == "shell" else "写操作"
             raise ToolError(f"[sandbox] 当前文件策略为 read-only，{action}被拒绝")
         if sandbox.mode == "danger-full-access":
             return
         approval = execution.service("approval")
         assert isinstance(approval, ApprovalService)
-        outcome = approval.request(tool_name, execution.call_id, execution.session_id, execution.session())
+        outcome = approval.request(tool_name, execution.call_id, execution.session_id, execution.session(), execution.cancel_token)
         if outcome != "allowed-once":
             raise ToolError(f"[sandbox] 操作审批结果: {outcome}")
 

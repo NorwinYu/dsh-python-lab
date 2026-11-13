@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Tuple
 from .cancellation import CancellationToken
 from .events import EventBus
 from .plugins import Plugin, ServiceContext
+from .seatbelt import SeatbeltService
 from .session import SessionStore
 
 
@@ -90,10 +91,11 @@ class JobRecord:
 
 
 class JobService:
-    def __init__(self, root: Path, events: Optional[EventBus] = None) -> None:
+    def __init__(self, root: Path, events: Optional[EventBus] = None, kernel_sandbox: Optional[SeatbeltService] = None) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self.events = events
+        self.kernel_sandbox = kernel_sandbox
         self._jobs: Dict[str, JobRecord] = {}
 
     def start(
@@ -104,6 +106,7 @@ class JobService:
         owner: Optional[str],
         session: Optional[SessionStore],
         call_id: Optional[str],
+        sandbox_mode: str = "read-only",
     ) -> JobRecord:
         active = sum(
             job.owner == owner and job.status in {"running", "stopping"}
@@ -118,8 +121,9 @@ class JobService:
         directory = self.root / job_id
         stdout = OutputChannel(directory / "stdout.log")
         stderr = OutputChannel(directory / "stderr.log")
+        argv = self.kernel_sandbox.argv(sandbox_mode, command) if self.kernel_sandbox is not None else ["/bin/bash", "-c", command]
         process = subprocess.Popen(
-            ["/bin/bash", "-c", command],
+            argv,
             cwd=str(cwd),
             env=env,
             stdin=subprocess.DEVNULL,
@@ -349,7 +353,9 @@ class JobPlugin(Plugin):
         self.root = root
 
     def activate(self, ctx: ServiceContext) -> None:
-        ctx.provide("jobs", JobService(self.root, ctx.events), self.name)
+        kernel = ctx.optional("kernelSandbox")
+        assert kernel is None or isinstance(kernel, SeatbeltService)
+        ctx.provide("jobs", JobService(self.root, ctx.events, kernel), self.name)
 
     def deactivate(self, ctx: ServiceContext) -> None:
         jobs = ctx.require("jobs")

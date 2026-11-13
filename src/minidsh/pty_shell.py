@@ -16,6 +16,8 @@ from typing import Dict, List, Optional, Tuple
 from .cancellation import CancellationToken, RunCancelled
 from .events import EventBus
 from .plugins import Plugin, ServiceContext
+from .sandbox import SandboxPolicy
+from .seatbelt import SeatbeltService
 from .session import SessionStore
 from .shell import scrub_environment
 from .tools import Execution, Tool, ToolError, ToolRegistry
@@ -41,7 +43,7 @@ class CommandResult:
 
 
 class PtySession:
-    def __init__(self, owner: str, workspace: Path) -> None:
+    def __init__(self, owner: str, workspace: Path, kernel_sandbox: Optional[SeatbeltService] = None, sandbox_mode: str = "read-only") -> None:
         self.id = uuid.uuid4().hex
         self.owner = owner
         self.workspace = workspace
@@ -54,9 +56,10 @@ class PtySession:
             os.setsid()
             fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
+        argv = kernel_sandbox.argv(sandbox_mode, interactive=True) if kernel_sandbox is not None else ["/bin/bash", "--noprofile", "--norc", "-i"]
         try:
             self.process = subprocess.Popen(
-                ["/bin/bash", "--noprofile", "--norc", "-i"],
+                argv,
                 stdin=slave,
                 stdout=slave,
                 stderr=slave,
@@ -190,9 +193,17 @@ class PtySession:
 
 
 class PtyService:
-    def __init__(self, workspace: Path, events: EventBus) -> None:
+    def __init__(
+        self,
+        workspace: Path,
+        events: EventBus,
+        kernel_sandbox: Optional[SeatbeltService] = None,
+        sandbox_policy: Optional[SandboxPolicy] = None,
+    ) -> None:
         self.workspace = workspace
         self.events = events
+        self.kernel_sandbox = kernel_sandbox
+        self.sandbox_policy = sandbox_policy
         self._sessions: Dict[str, PtySession] = {}
         self._owners: Dict[str, str] = {}
         self._locks: Dict[str, threading.Lock] = {}
@@ -238,7 +249,8 @@ class PtyService:
                 return existing
             if token is not None:
                 token.throw_if_cancelled()
-            shell = PtySession(owner, self.workspace)
+            mode = self.sandbox_policy.resolve(session, owner).mode if self.sandbox_policy is not None and session is not None else "read-only"
+            shell = PtySession(owner, self.workspace, self.kernel_sandbox, mode)
             self._sessions[shell.id] = shell
             self._owners[owner] = shell.id
         try:
@@ -303,7 +315,11 @@ class PtyPlugin(Plugin):
         self.workspace = workspace
 
     def activate(self, ctx: ServiceContext) -> None:
-        ctx.provide("terminals", PtyService(self.workspace, ctx.events), self.name)
+        kernel = ctx.optional("kernelSandbox")
+        policy = ctx.optional("sandboxPolicy")
+        assert kernel is None or isinstance(kernel, SeatbeltService)
+        assert policy is None or isinstance(policy, SandboxPolicy)
+        ctx.provide("terminals", PtyService(self.workspace, ctx.events, kernel, policy), self.name)
 
     def deactivate(self, ctx: ServiceContext) -> None:
         terminals = ctx.require("terminals")

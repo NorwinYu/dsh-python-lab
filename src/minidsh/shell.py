@@ -88,6 +88,10 @@ def make_bash_tool(workspace: Path) -> Tool:
             raise ToolError("run_in_background must be a boolean")
 
         sandbox = execution.service("sandboxPolicy")
+        if execution.session_id is not None:
+            session = execution.session()
+            assert session is not None
+            sandbox = sandbox.resolve(session, execution.session_id)
         allow_outside = getattr(sandbox, "mode") == "danger-full-access"
         workdir = workspace_path(workspace, arguments.get("workdir", "."), "workdir", allow_outside=allow_outside)
         if not workdir.is_dir():
@@ -102,6 +106,7 @@ def make_bash_tool(workspace: Path) -> Tool:
                 owner=execution.session_id,
                 session=execution.session(),
                 call_id=execution.call_id,
+                sandbox_mode=sandbox.mode,
             )
         except (OSError, ValueError) as exc:
             raise ToolError(str(exc)) from exc
