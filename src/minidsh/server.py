@@ -30,6 +30,7 @@ EVENT_NAMES = (
     "pty/created",
     "pty/reset",
     "question/asked",
+    "question/answered",
 )
 
 

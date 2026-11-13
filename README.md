@@ -64,6 +64,7 @@ minidsh run "请列出当前目录"
 - `tools.bash-persistent`：官方持久 `bash` 工具切片，默认禁用；启用后替代一次性 Bash。
 - `tools.jobs`：官方 `job_output/job_list/job_kill` 工具组。
 - `tools.ask-user`：官方 `ask_user_question` 工具切片，默认关闭。
+- `tools.ask-user-timed`：官方定时 pending 提问、超时继续和迟到回答，默认关闭。
 - `tools.todo`：官方 `todo_write` 工具切片，默认关闭。
 - `tools.web-fetch`：官方 `web_fetch` 工具切片，默认关闭。
 - `tools.web-search`：官方 `web_search` 工具切片，默认关闭。
@@ -360,7 +361,11 @@ GET  /v1/questions
 POST /v1/questions/<question-id>/answer
 ```
 
-答案 body 为 `{"answers": [{"id": "question-1", "selected": [], "custom": "回答"}]}`。运行取消或服务关闭会唤醒等待者并清理队列。当前 Web 页面只在事件流显示问题，尚无图形答题表单；可通过上述 API 回答。
+答案 body 为 `{"answers": [{"id": "question-1", "selected": [], "custom": "回答"}]}`。运行取消或服务关闭会唤醒等待者并清理队列。
+
+启用 `tools.ask-user-timed` 后默认前台等待 120 秒，也可用 `MINIDSH_ASK_TIMEOUT_SECONDS` 调整；工具参数 `timeout=-1` 表示无限等待。超时返回 `pending=true`、callId 和继续提示，待答问题不会删除。之后通过同一 API 或图形表单回答时，会作为 `answer_to_pending_question` 用户消息写回原会话，附 callId 和原问题，resume 可继续使用。
+
+Web 图形表单支持选项、多选、自定义文本和留空跳过；超时后表单仍保留，可继续提交。
 
 ### 会话待办
 
@@ -672,15 +677,19 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 理解同步增量回调、最终消息组装、attempt 隔离、实时文本展示和有界事件队列。
 
-### 第 14 层：原始流持久化与 SSE 续传（当前）
+### 第 14 层：原始流持久化与 SSE 续传
 
-理解压缩 runs、时间差、流展开校验、事件历史环和 Last-Event-ID 恢复。对照 `docs/upstream-parity.md` 阅读。
+理解压缩 runs、时间差、流展开校验、事件历史环和 Last-Event-ID 恢复。
+
+### 第 15 层：定时提问与迟到交互（当前）
+
+理解前台超时、pending 与 skipped 的区别、待答保留、迟到用户消息和图形答题。对照 `docs/upstream-parity.md` 阅读。
 
 ## 当前边界
 
 - 原始流是学习版 JSON runs，不使用官方完整持久化协议；SSE 历史环只覆盖同进程最近 2048 条，不支持跨重启续传。
 
-- 有文件、Bash、提问、待办和 Web 工具切片，仍不是完整官方工具集；尚无定时 pending 提问和图形答题表单。
+- 有文件、Bash、提问、待办和 Web 工具切片，仍不是完整官方工具集；尚无官方完整 Client 卡片系统。
 - Web 搜索使用学习版 JSON provider，HTML 不是完整 Turndown/GFM；DNS 检查未做连接级地址固定。
 - HTTP/SSE 是学习 API，不兼容官方 Web Host 的认证、RPC 和多路复用协议。
 - 插件依赖在启动时收敛，尚不支持运行中热重载。

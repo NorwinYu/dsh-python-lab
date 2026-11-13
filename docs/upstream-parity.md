@@ -185,7 +185,9 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - `tools.web-fetch`/`tools.web-search` 注册官方名称，使用上游外部不可信提示词段；默认关闭。
 - Web fetch 支持有界读取、30 秒默认超时、200000 字符输出、重定向复核、私网拒绝、HTML 安全降级和取消。
 - Web search 使用 MINIDSH_WEB_SEARCH_URL 的学习版 provider；支持查询去重、10 查询/10 来源、800 字符摘要和 Markdown 引用。
-- 当前没有官方 timed/pending 提问、图形答题表单、完整 Turndown/GFM、DeepSeek 搜索路由或 DNS 连接固定。
+- `tools.ask-user-timed` 支持官方 timeout 参数、pending/callId/message、默认 120 秒等待和迟到回答；超时问题保留在待答队列。
+- 迟到回答投影为 source.kind=answer_to_pending_question 的 user/message，附 callId 和原问题；Web 图形表单支持选项、多选、自定义和跳过。
+- 当前没有完整官方 Client 卡片系统、Turndown/GFM、DeepSeek 搜索路由或 DNS 连接固定。
 
 ### 外部插件与产品组装（学习版等价分层）
 
@@ -274,5 +276,8 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 压缩流随 assistant 事件保存，CLI/HTTP 展开读取通过；修复 Mock fallback 缺少 index 的问题。
 - core.stream-recording/core.sse-replay 禁用行为及既有背压回归通过。
 - 最终 wheel 离线安装后，本地 DeepSeek 分片可压缩保存、展开恢复文本，broker 历史可回放 assistant/message 和 turn/end。
+- 真实 50ms 超时后 pending 保留，HTTP 迟到回答投影为 answer_to_pending_question 并可 resume；取消后队列清空。
+- 浏览器在超时后通过图形表单提交自定义回答，待答面板正常关闭。
+- 最终 wheel 离线安装后，50ms 超时返回 pending，迟到回答写回原会话并可 resume，图形表单资源已打包。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

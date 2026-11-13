@@ -31,6 +31,7 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "tools.bash-persistent": False,
     "tools.jobs": True,
     "tools.ask-user": False,
+    "tools.ask-user-timed": False,
     "tools.todo": False,
     "tools.web-fetch": False,
     "tools.web-search": False,

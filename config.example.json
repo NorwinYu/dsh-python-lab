@@ -28,6 +28,7 @@
     "tools.bash-persistent": false,
     "tools.jobs": true,
     "tools.ask-user": false,
+    "tools.ask-user-timed": false,
     "tools.todo": false,
     "tools.web-fetch": false,
     "tools.web-search": false,

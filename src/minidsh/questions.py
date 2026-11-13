@@ -1,16 +1,21 @@
 import json
+import os
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
 from .cancellation import RunCancelled
 from .plugins import Plugin, ServiceContext
+from .session import SessionStore
 from .tools import Execution, Tool, ToolError, ToolRegistry
 
 
 SKIPPED_ANSWER_GUIDANCE = "An answer item with empty selected and no custom means the user skipped that question: continue without it, do not ask it again, and do not treat the skip as permission."
 ASK_DESCRIPTION = "Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. " + SKIPPED_ANSWER_GUIDANCE
+PENDING_NOTICE = "No answer batch arrived before the timeout. This is pending, not a skipped answer. Continue useful independent work. The user can still answer; their reply will be a user message identified as answer_to_pending_question with this callId and the original questions. Do not treat this as permission."
+TIMED_DESCRIPTION = "Ask brief, direct, self-contained questions about missing information, preferences, or decisions. Use user-facing terms; assume no knowledge of background work or internal names. Use distinct stable question IDs. " + SKIPPED_ANSWER_GUIDANCE + " A pending result instead means no answer batch arrived before the timeout and the user can still answer."
 
 
 @dataclass
@@ -21,8 +26,10 @@ class PendingQuestion:
     session_id: Optional[str]
     questions: List[Dict[str, object]]
     condition: threading.Condition
+    session: Optional[SessionStore] = None
     answers: Optional[Dict[str, object]] = None
     cancelled: bool = False
+    returned: bool = False
 
 
 def validate_questions(value: object) -> List[Dict[str, object]]:
@@ -108,7 +115,7 @@ class UserQuestionService:
         self._pending: Dict[str, PendingQuestion] = {}
         self._lock = threading.Lock()
 
-    def ask(self, questions: List[Dict[str, object]], execution: Execution) -> Dict[str, object]:
+    def ask(self, questions: List[Dict[str, object]], execution: Execution, timeout: Optional[float] = None) -> Dict[str, object]:
         session = execution.session()
         request_id = uuid.uuid4().hex
         payload = {
@@ -128,12 +135,13 @@ class UserQuestionService:
             except Exception as exc:
                 raise ToolError(f"用户提问不可用: {exc}") from exc
         else:
-            result = self._wait(payload, execution)
-        if session is not None and execution.session_id is not None:
+            result = self._wait(payload, execution, timeout)
+        if "answers" in result and session is not None and execution.session_id is not None:
             session.append(execution.session_id, "question/answered", {"id": request_id, "callId": execution.call_id, **result})
+        execution.ctx.events.emit("question/answered", {"id": request_id, "session_id": execution.session_id, **result})
         return result
 
-    def _wait(self, payload: Dict[str, object], execution: Execution) -> Dict[str, object]:
+    def _wait(self, payload: Dict[str, object], execution: Execution, timeout: Optional[float]) -> Dict[str, object]:
         pending = PendingQuestion(
             str(payload["id"]),
             execution.call_id,
@@ -141,6 +149,7 @@ class UserQuestionService:
             execution.session_id,
             payload["questions"],
             threading.Condition(),
+            execution.session(),
         )
         with self._lock:
             self._pending[pending.id] = pending
@@ -152,12 +161,20 @@ class UserQuestionService:
                 pending.condition.notify_all()
 
         unregister = token.on_cancel(wake) if token is not None else lambda: None
+        deadline = time.monotonic() + timeout if timeout is not None and timeout >= 0 else None
         try:
             with pending.condition:
                 while pending.answers is None and not pending.cancelled:
                     if token is not None:
                         token.throw_if_cancelled()
-                    pending.condition.wait()
+                    if deadline is None:
+                        pending.condition.wait()
+                    else:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            pending.returned = True
+                            return {"pending": True, "callId": execution.call_id, "message": PENDING_NOTICE}
+                        pending.condition.wait(remaining)
                 if pending.cancelled:
                     raise RunCancelled("用户提问服务已关闭")
                 if token is not None:
@@ -165,8 +182,9 @@ class UserQuestionService:
                 return pending.answers
         finally:
             unregister()
-            with self._lock:
-                self._pending.pop(pending.id, None)
+            if not pending.returned:
+                with self._lock:
+                    self._pending.pop(pending.id, None)
 
     def list(self) -> List[Dict[str, object]]:
         with self._lock:
@@ -177,6 +195,7 @@ class UserQuestionService:
                     "run_id": item.run_id,
                     "session_id": item.session_id,
                     "questions": item.questions,
+                    "timedOut": item.returned,
                 }
                 for item in self._pending.values()
             ]
@@ -192,11 +211,30 @@ class UserQuestionService:
                 raise ValueError("问题已经结束")
             pending.answers = result
             pending.condition.notify_all()
+        if pending.returned:
+            if pending.session is not None and pending.session_id is not None:
+                pending.session.append(
+                    pending.session_id,
+                    "user/message",
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}],
+                        "source": {
+                            "kind": "answer_to_pending_question",
+                            "callId": pending.call_id,
+                            "questionId": pending.id,
+                            "questions": pending.questions,
+                        },
+                    },
+                )
+            with self._lock:
+                self._pending.pop(request_id, None)
         return result
 
     def close(self) -> None:
         with self._lock:
             pending_items = list(self._pending.values())
+            self._pending.clear()
         for pending in pending_items:
             with pending.condition:
                 pending.cancelled = True
@@ -222,54 +260,67 @@ class AskUserPlugin(Plugin):
     name = "tools.ask-user"
     requires = ("tools", "userQuestions")
 
+    def __init__(self, timed: bool = False) -> None:
+        self.timed = timed
+        self.default_timeout = float(os.environ.get("MINIDSH_ASK_TIMEOUT_SECONDS", "120")) if timed else None
+        if self.default_timeout is not None and self.default_timeout != -1 and self.default_timeout <= 0:
+            raise ValueError("MINIDSH_ASK_TIMEOUT_SECONDS 必须是 -1 或正数")
+
     def activate(self, ctx: ServiceContext) -> None:
         registry = ctx.require("tools")
         questions = ctx.require("userQuestions")
         assert isinstance(registry, ToolRegistry)
         assert isinstance(questions, UserQuestionService)
-
-        def ask(arguments: Dict[str, object], execution: Execution) -> str:
-            normalized = validate_questions(arguments.get("questions"))
-            return json.dumps(questions.ask(normalized, execution), ensure_ascii=False)
-
-        registry.register(
-            Tool(
-                name="ask_user_question",
-                description=ASK_DESCRIPTION,
-                parameters={
+        properties: Dict[str, object] = {
+            "questions": {
+                "type": "array",
+                "description": "Questions to ask the user before continuing.",
+                "items": {
                     "type": "object",
+                    "additionalProperties": True,
                     "properties": {
-                        "questions": {
+                        "id": {"type": "string", "description": "Stable id for this question; echoed in the answer."},
+                        "question": {"type": "string", "description": "The specific question to ask the user."},
+                        "header": {"type": "string", "description": "Optional short heading for the question."},
+                        "options": {
                             "type": "array",
-                            "description": "Questions to ask the user before continuing.",
+                            "description": "Optional choices. Put the recommended choice first and append (Recommended).",
                             "items": {
                                 "type": "object",
                                 "additionalProperties": True,
                                 "properties": {
-                                    "id": {"type": "string", "description": "Stable id for this question; echoed in the answer."},
-                                    "question": {"type": "string", "description": "The specific question to ask the user."},
-                                    "header": {"type": "string", "description": "Optional short heading for the question."},
-                                    "options": {
-                                        "type": "array",
-                                        "description": "Optional choices. Put the recommended choice first and append (Recommended).",
-                                        "items": {
-                                            "type": "object",
-                                            "additionalProperties": True,
-                                            "properties": {
-                                                "label": {"type": "string"},
-                                                "description": {"type": "string"},
-                                            },
-                                            "required": ["label"],
-                                        },
-                                    },
-                                    "multi_select": {"type": "boolean"},
+                                    "label": {"type": "string"},
+                                    "description": {"type": "string"},
                                 },
-                                "required": ["id", "question"],
+                                "required": ["label"],
                             },
-                        }
+                        },
+                        "multi_select": {"type": "boolean"},
                     },
-                    "required": ["questions"],
+                    "required": ["id", "question"],
                 },
+            }
+        }
+        if self.timed:
+            properties["timeout"] = {
+                "type": "number",
+                "description": f"Wait seconds for the whole answer batch (default {self.default_timeout}); -1 waits indefinitely.",
+            }
+
+        def ask(arguments: Dict[str, object], execution: Execution) -> str:
+            normalized = validate_questions(arguments.get("questions"))
+            timeout = self.default_timeout
+            if self.timed and "timeout" in arguments:
+                timeout = arguments["timeout"]
+                if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or (timeout != -1 and timeout <= 0):
+                    raise ToolError("timeout 必须是 -1 或正数")
+            return json.dumps(questions.ask(normalized, execution, timeout), ensure_ascii=False)
+
+        registry.register(
+            Tool(
+                name="ask_user_question",
+                description=TIMED_DESCRIPTION if self.timed else ASK_DESCRIPTION,
+                parameters={"type": "object", "properties": properties, "required": ["questions"]},
                 handler=ask,
             )
         )

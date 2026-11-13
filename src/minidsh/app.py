@@ -109,7 +109,7 @@ class Application:
         self.manager.register(BashToolPlugin("tools.bash", make_bash_tool(config.workspace), ("tool:bash", 1000, BASH_GUIDANCE)))
         self.manager.register(PersistentBashPlugin())
         self.manager.register(JobToolsPlugin(("tool:jobs", 1600, JOBS_GUIDANCE)))
-        self.manager.register(AskUserPlugin())
+        self.manager.register(AskUserPlugin(config.features["tools.ask-user-timed"]))
         self.manager.register(TodoPlugin())
         self.manager.register(WebToolPlugin("tools.web-fetch", "web_fetch"))
         self.manager.register(WebToolPlugin("tools.web-search", "web_search", config.features["tools.web-fetch"]))

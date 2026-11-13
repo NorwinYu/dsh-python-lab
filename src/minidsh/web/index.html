@@ -143,6 +143,15 @@
     .button.danger:hover:not(:disabled) { border-color: #dca7a7; background: #fff3f3; }
     .button svg { width: 13px; height: 13px; }
     .shortcut { margin-left: 4px; color: #a2abc0; font-size: 10px; }
+    .question-panel { margin-bottom: 20px; border-color: #cdd6f3; box-shadow: 0 5px 20px #596fda10; }
+    .question-form { display: grid; gap: 16px; padding: 18px; }
+    .question-form fieldset { display: grid; gap: 10px; margin: 0; padding: 0; border: 0; }
+    .question-form legend { color: #28344a; font-size: 12px; font-weight: 650; line-height: 1.6; }
+    .question-option { display: flex; align-items: flex-start; gap: 8px; color: #5e6a7f; font-size: 11px; line-height: 1.5; }
+    .question-option input { width: auto; margin: 2px 0 0; accent-color: #596fda; }
+    .question-option small { display: block; margin-top: 2px; color: #8b95a8; }
+    .custom-answer { margin-top: 4px; font-family: inherit; }
+    .question-form .button { justify-self: end; }
     .terminal-card { margin-top: 20px; }
     .live-draft { padding: 16px 18px; border-bottom: 1px solid #283448; color: #e4eaf5; background: #1a2332; font-size: 12px; line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
     .live-draft[hidden] { display: none; }
@@ -202,6 +211,10 @@
         <div><div class="eyebrow">Harness playground</div><h1>Agent 工作台</h1></div>
         <div class="status" id="status"><span class="status-dot"></span><span id="statusText">本地服务已连接</span></div>
       </header>
+      <section class="card question-panel" id="questionPanel" hidden>
+        <div class="card-header"><h2 class="card-title">需要你的回答</h2><span class="card-kicker" id="questionRequestId"></span></div>
+        <form id="answerForm" class="question-form"></form>
+      </section>
       <div class="content-grid">
         <div>
           <section class="card">
@@ -265,6 +278,7 @@
     const statusText = document.querySelector('#statusText')
     let running = false
     let currentRunId = null
+    let currentQuestion = null
 
     const write = (text) => {
       events.textContent += `${text}\n`
@@ -278,6 +292,82 @@
       statusText.textContent = value ? 'Agent 正在运行' : '本地服务已连接'
       document.querySelector('#runText').textContent = value ? '正在运行…' : '运行 Agent'
     }
+
+    function showQuestion(question) {
+      currentQuestion = question
+      const panel = document.querySelector('#questionPanel')
+      const form = document.querySelector('#answerForm')
+      form.replaceChildren()
+      document.querySelector('#questionRequestId').textContent = question.id
+      for (const item of question.questions) {
+        const fieldset = document.createElement('fieldset')
+        fieldset.dataset.questionId = item.id
+        const legend = document.createElement('legend')
+        legend.textContent = item.header ? `${item.header} · ${item.question}` : item.question
+        fieldset.append(legend)
+        for (const option of item.options || []) {
+          const label = document.createElement('label')
+          label.className = 'question-option'
+          const input = document.createElement('input')
+          input.type = item.multi_select ? 'checkbox' : 'radio'
+          input.name = `question-${item.id}`
+          input.value = option.label
+          const text = document.createElement('span')
+          text.textContent = option.label
+          if (option.description) {
+            const description = document.createElement('small')
+            description.textContent = option.description
+            text.append(description)
+          }
+          label.append(input, text)
+          fieldset.append(label)
+        }
+        const custom = document.createElement('input')
+        custom.className = 'custom-answer'
+        custom.dataset.custom = 'true'
+        custom.placeholder = '自定义回答（留空表示跳过）'
+        fieldset.append(custom)
+        form.append(fieldset)
+      }
+      const submit = document.createElement('button')
+      submit.className = 'button primary'
+      submit.type = 'submit'
+      submit.textContent = '提交回答'
+      form.append(submit)
+      panel.hidden = false
+    }
+
+    async function refreshQuestions() {
+      try {
+        const pending = await api('/v1/questions')
+        if (pending.length) showQuestion(pending[0])
+        else {
+          currentQuestion = null
+          document.querySelector('#questionPanel').hidden = true
+        }
+      } catch (error) {
+        write(`读取待答问题失败: ${error.message}`)
+      }
+    }
+
+    document.querySelector('#answerForm').addEventListener('submit', async (event) => {
+      event.preventDefault()
+      if (!currentQuestion) return
+      const answers = []
+      for (const fieldset of event.currentTarget.querySelectorAll('fieldset')) {
+        const selected = [...fieldset.querySelectorAll('input[type="radio"]:checked, input[type="checkbox"]:checked')].map(input => input.value)
+        const custom = fieldset.querySelector('[data-custom]').value
+        const answer = { id: fieldset.dataset.questionId, selected }
+        if (custom) answer.custom = custom
+        answers.push(answer)
+      }
+      try {
+        await api(`/v1/questions/${currentQuestion.id}/answer`, { method: 'POST', body: JSON.stringify({ answers }) })
+        await refreshQuestions()
+      } catch (error) {
+        write(`提交回答失败: ${error.message}`)
+      }
+    })
 
     async function api(path, options = {}) {
       const response = await fetch(path, {
@@ -339,6 +429,9 @@
         currentRunId = data.run_id
         setRunning(true)
         write(`turn/start: ${event.data}`)
+      })
+      source.addEventListener('question/asked', (event) => {
+        showQuestion(JSON.parse(event.data))
       })
       for (const name of ['assistant/message', 'assistant/usage', 'llm/retry', 'llm/image-upload', 'llm/image-fallback', 'tools/pre-execute', 'tools/post-execute', 'job/settled', 'pty/created', 'pty/reset', 'turn/end']) {
         source.addEventListener(name, (event) => write(`${name}: ${event.data}`))
@@ -421,6 +514,7 @@
     }
     document.querySelector('#refresh').onclick = refreshSessions
     refreshSessions().catch((error) => write(`错误: ${error.message}`))
+    refreshQuestions()
   </script>
 </body>
 </html>
