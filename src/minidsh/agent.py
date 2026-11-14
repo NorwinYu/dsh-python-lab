@@ -39,6 +39,7 @@ class Agent:
         skills: Optional[object] = None,
         schedules: Optional[object] = None,
         goals: Optional[object] = None,
+        ptc: Optional[object] = None,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -59,6 +60,7 @@ class Agent:
         self.skills = skills
         self.schedules = schedules
         self.goals = goals
+        self.ptc = ptc
 
     def run(
         self,
@@ -88,7 +90,7 @@ class Agent:
         token = cancel_token or CancellationToken(run_id)
         token.throw_if_cancelled()
         image_blocks = load_image_blocks(self.workspace, image_paths or [], self.allow_outside)
-        system = self.system_prompt.render()
+        system = self.ptc.system_prompt(self.system_prompt) if self.ptc is not None else self.system_prompt.render()
         messages: List[Dict[str, object]] = []
         turn = 1
         resumed = session_id is not None
@@ -180,7 +182,7 @@ class Agent:
                 messages = self.compaction.compact_if_needed(
                     system,
                     messages,
-                    self.tools.definitions(),
+                    self.ptc.model_definitions(self.tools.definitions()) if self.ptc is not None else self.tools.definitions(),
                     session_id,
                     cancel_token=token,
                 )
@@ -205,7 +207,7 @@ class Agent:
             response = self.model.complete(
                 system,
                 messages,
-                self.tools.definitions(),
+                self.ptc.model_definitions(self.tools.definitions()) if self.ptc is not None else self.tools.definitions(),
                 session_id,
                 token,
                 forward_model_event if self.streaming else None,
@@ -314,7 +316,7 @@ class Agent:
         compacted = self.compaction.compact_if_needed(
             self.system_prompt.render(),
             messages,
-            self.tools.definitions(),
+            self.ptc.model_definitions(self.tools.definitions()) if self.ptc is not None else self.tools.definitions(),
             session_id,
             force=True,
         )

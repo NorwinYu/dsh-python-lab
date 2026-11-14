@@ -89,6 +89,11 @@ class ToolRegistry:
     def definitions(self) -> List[Dict[str, object]]:
         return [tool.definition() for tool in self._tools.values()]
 
+    def mutating(self, name: str) -> bool:
+        if name not in self._tools:
+            raise ToolError(f"工具未启用或不存在: {name}")
+        return self._tools[name].mutating
+
     def execute(
         self,
         name: str,

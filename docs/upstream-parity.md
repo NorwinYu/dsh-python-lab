@@ -271,6 +271,17 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 提供 goal CLI、HTTP 用户控制和 goal/changed/activation-changed SSE。
 - 当前没有官方 SessionProjection 单元、精确 AgentRegistry initiator、子树 idle 汇总、持久性 flush 前置条件或独立完成评估器。
 
+### run_code/PTC 执行层（学习版纵向切片）
+
+- `core.ptc` 与 `tools.run-code` 默认关闭；per-call 使用 async TypeScript 函数，persistent 使用 Node REPL 按 Session 保留变量。
+- 模型只看到 run_code 和动态 SDK；原生工具继续在宿主注册表供 RPC 调用，保留审批、取消、互斥和事件语义。
+- Node 原生 stripTypeScriptTypes 支持可擦除 TypeScript；REPL 支持顶层 await 与末尾表达式。独立 stdout/stderr 读取者与 Session 队列复用 worker。
+- 嵌套只读调用最多并行 10，mutating 调用独占；pending 默认 128，子调用额度为 timeout 分钟数×1024，独占 run_code。
+- 默认 120000ms 超时、600000ms 上限、64MiB 输出和 3000ms 停止宽限；支持 timeout/abort/exception/protocol/worker-exit/output-limit/invalid-output。
+- 返回 status/value/logs/diagnostic，字符串日志原样输出，顶层 undefined 按求值器映射为 null 或字符串。
+- 支持 process group 清理、持久进程释放、重启内存清空、Seatbelt 的 read-only/workspace-write/danger-full-access 执行策略。
+- 当前没有官方 Acorn 源码变换、完整协作式 revoke/进程树清理、PTC 图片投影、环境 reset 控件、sandbox_permissions 提权或独立 TypeScript 类型检查。
+
 ### 外部插件与产品组装（学习版等价分层）
 
 - 使用 Python 标准 `minidsh.plugins` entry points 发现独立发行包；外部功能默认禁用，只有显式启用才导入插件代码。
@@ -397,5 +408,9 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 两个真实 Goal Round 耗尽后产生 round-limit，模型第二轮完成后只产生一次 goal-wrapup 和最终总结。
 - 非人类创建、提前阻塞、HTTP/CLI 控制、损坏 revision 回放失败关闭和默认不可见通过。
 - 最终 wheel 离线安装后连续 Round、round-limit、恢复 disarmed 和显式 resume 通过。
+- 真实 TypeScript 嵌套 read、console 日志、ToolCallError、并行只读和 PTC 模型/schema 投影通过；修复顶层 return 的擦除包装。
+- REPL 两次调用保留变量，per-call 隔离和重启清空通过；修复 REPL stdout 混流、重复读取者与持久管道误关闭。
+- 同步死循环 timeout、取消 abort、子调用额度、输出上限、invalid-output、exception 和进程回收通过。
+- Seatbelt 下 Node 读取成功且 read-only 写入被内核拒绝，模型 run_code 返回结构化结果；最终 wheel 的两种执行模式通过。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

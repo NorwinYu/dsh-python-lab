@@ -19,5 +19,5 @@ minidsh = "minidsh.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"minidsh" = ["workflow_guest.js"]
+"minidsh" = ["workflow_guest.js", "ptc_runner.js"]
 "minidsh.web" = ["index.html"]

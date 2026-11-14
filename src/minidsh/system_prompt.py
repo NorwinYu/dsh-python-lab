@@ -51,6 +51,10 @@ class SystemPrompt:
         )
         return "\n\n".join(section.text for section in sections if section.text)
 
+    def render_without_tools(self) -> str:
+        sections = sorted(self._sections.values(), key=lambda section: (section.order, section.name))
+        return "\n\n".join(section.text for section in sections if section.text and not section.name.startswith("tool:"))
+
     def runtime_context(self, workspace: Path, sandbox_context: str = "", approval_context: str = "") -> str:
         sections = [
             f"Current working directory: {json.dumps(str(workspace), ensure_ascii=False)}.",

@@ -14,6 +14,7 @@ from .observations import ObservationPlugin, ObservationStore
 from .plugins import DisabledExternalPlugin, Plugin, PluginManager, ServiceContext
 from .pty_shell import PersistentBashPlugin, PtyPlugin
 from .pruner import ToolResultPrunerPlugin
+from .ptc import PtcPlugin, PtcService, RunCodePlugin
 from .questions import AskUserPlugin, UserQuestionsPlugin
 from .todo import TodoPlugin
 from .web_tools import WebPlugin, WebToolPlugin
@@ -59,6 +60,7 @@ class AgentPlugin(Plugin):
         skills = ctx.optional("skills")
         schedules = ctx.optional("schedule")
         goals = ctx.optional("goals")
+        ptc = ctx.optional("ptc")
         assert isinstance(model, Model)
         assert isinstance(tools, ToolRegistry)
         assert isinstance(prompt, SystemPrompt)
@@ -71,6 +73,7 @@ class AgentPlugin(Plugin):
         assert skills is None or isinstance(skills, SkillService)
         assert schedules is None or isinstance(schedules, ScheduleService)
         assert goals is None or isinstance(goals, GoalService)
+        assert ptc is None or isinstance(ptc, PtcService)
         runtime_context = prompt.runtime_context(self.config.workspace, sandbox.context(), approval.context())
         agent = Agent(
             model=model,
@@ -91,6 +94,7 @@ class AgentPlugin(Plugin):
             skills=skills,
             schedules=schedules,
             goals=goals,
+            ptc=ptc,
         )
         ctx.provide("agent", agent, self.name)
 
@@ -151,6 +155,8 @@ class Application:
         self.manager.register(GoalPlugin())
         self.manager.register(GoalToolPlugin())
         self.manager.register(GoalRoundDriver())
+        self.manager.register(PtcPlugin(config.workspace))
+        self.manager.register(RunCodePlugin())
         self.manager.register(MockModelPlugin())
         self.manager.register(
             DeepSeekModelPlugin(

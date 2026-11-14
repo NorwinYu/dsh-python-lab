@@ -134,6 +134,10 @@ class MockModel(Model):
                 text = str(content)
             return ModelResponse(blocks=[text_block(f"工具已经执行完成：\n{text}")])
 
+        if prompt.startswith("运行代码") and "run_code" in available:
+            call = ToolCall(name="run_code", arguments=json.loads(prompt[4:].strip()), call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
         if prompt.startswith("创建目标") and "create_goal" in available:
             objective, separator, rounds = prompt[4:].strip().partition("|")
             arguments: Dict[str, object] = {"objective": objective.strip()}

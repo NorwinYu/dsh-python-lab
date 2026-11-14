@@ -63,6 +63,7 @@ minidsh run "请列出当前目录"
 - `core.schedule`：宿主级定时任务、投递与恢复，默认关闭。
 - `core.goals`：会话内事件溯源的持久目标，默认关闭。
 - `core.goal-rounds`：独立开关的自动 Goal Round 驱动，默认关闭。
+- `core.ptc`：Node TypeScript/REPL 执行与嵌套工具 RPC，默认关闭。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
@@ -84,6 +85,7 @@ minidsh run "请列出当前目录"
 - `tools.skill`：官方 `skill` 精确名称加载工具，默认关闭。
 - `tools.schedule`：`schedule_create/list/view/edit` 工具组，默认关闭。
 - `tools.goal`：`get_goal/create_goal/update_goal` 工具组，默认关闭。
+- `tools.run-code`：官方 `run_code` TypeScript/REPL 执行切片，默认关闭。
 - `session.jsonl`：带版本头的 JSONL、v0 迁移、崩溃恢复和 POSIX 写锁。
 - `llm.mock`：确定性模拟模型，默认启用。
 - `llm.deepseek`：真实 DeepSeek Messages 模型，默认禁用。
@@ -611,6 +613,26 @@ POST /v1/sessions/<id>/goal-clear   {"goal_id":"...","revision":1}
 
 当前没有官方 SessionProjection、完整 AgentRegistry initiator、子树 idle 汇总或独立完成评估器。
 
+## run_code/PTC 执行层
+
+```bash
+PYTHONPATH=src python3 -m minidsh \
+  --enable core.ptc --enable tools.run-code \
+  run '运行代码 {"code":"const text: string = await tools.read({file_path: \"README.md\"}); return text.length","description":"Measure README"}'
+```
+
+PTC 模式下模型只看到 `run_code` 和动态 SDK，其他工具只作为程序内 `await tools.name(args)` 绑定。调用仍在同一 ToolRegistry 中执行，保留审批、取消、互斥与事件记录。
+
+- `per-call`：async TypeScript 函数体，支持 `return` 和 `console.log(...)`，进程执行后回收。
+- `persistent`：Node REPL，支持顶层 `await` 和末尾 JSON 表达式，按 Session 保留顶层变量，重启或失效后清空。
+- 默认只读子调用最多并行 10 个，mutating 独占；pending 默认 128；子调用额度为 timeout 分钟数×1024。
+- 默认 120000ms 超时、600000ms 上限、64MiB 输出、3000ms 停止宽限，可用 `MINIDSH_PTC_*` 环境变量调整。
+- 返回 `status/value/logs/diagnostic`，错误类型包括 timeout、abort、exception、protocol、worker-exit、output-limit 和 invalid-output。
+
+`MINIDSH_PTC_PERSISTENT=1` 设置默认保留模式，单次调用也可传 `persistent`。Seatbelt 启用时按 Session 文件策略执行真实 Node 进程，read-only 下写入会收到内核拒绝。
+
+当前没有官方 Acorn 源码变换、完整协作式 revoke/进程树清理、PTC 图片投影、环境 reset 控件或 `sandbox_permissions` 提权。
+
 ## HTTP 宿主与 Web 页面
 
 启动本地 HTTP/SSE 宿主：
@@ -950,9 +972,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 阅读 `src/minidsh/schedule_time.py` 的时间求值和 `src/minidsh/schedule.py` 的任务存储、目标投递、回执与追赶，理解收件箱确认和模型完成之间的区别。
 
-### 第 24 层：Goal 持久目标与自动 Round（当前）
+### 第 24 层：Goal 持久目标与自动 Round
 
 阅读 `src/minidsh/goals.py` 的事件回放、revision、权限、armed 状态和 Round 驱动，理解持久目标与进程内续行授权的分离。
+
+### 第 25 层：run_code/PTC 执行层（当前）
+
+对照 `src/minidsh/ptc_runner.js` 的两个求值器与 `src/minidsh/ptc.py` 的宿主调度，理解 SDK RPC、并行限制、持久 worker、超时与清理。
 
 ## 当前边界
 
