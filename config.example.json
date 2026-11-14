@@ -4,6 +4,7 @@
   "approval_policy": "ask",
   "approve_all": false,
   "context_window": 1048576,
+  "mcp_servers": {},
   "features": {
     "core.system-prompt": true,
     "core.tools": true,
@@ -23,6 +24,8 @@
     "core.web": true,
     "core.subagents": false,
     "core.workflow": false,
+    "core.mcp": false,
+    "tools.mcp-resources": false,
     "tools.workflow": false,
     "tools.subagent": false,
     "tools.subagent-fork": false,

@@ -58,6 +58,7 @@ minidsh run "请列出当前目录"
 - `core.web`：Web 获取与搜索 provider 服务。
 - `core.subagents`：本地子 Agent 树、独立会话、消息与生命周期，默认关闭。
 - `core.workflow`：Node 隔离 JavaScript workflow 引擎，默认关闭。
+- `core.mcp`：MCP stdio/HTTP 客户端与运行时管理器，默认关闭。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
@@ -75,6 +76,7 @@ minidsh run "请列出当前目录"
 - `tools.subagent-fork`：继承完整历史前缀的 `subagent_fork` 可配置名称实例，默认关闭。
 - `tools.subagent-control`：`send_message/interrupt_agent/list_agents/wait_agent` 工具组，默认关闭。
 - `tools.workflow`：官方 `workflow` JavaScript 前后台编排与 jobs 切片，默认关闭。
+- `tools.mcp-resources`：三个共享 MCP 资源工具，默认关闭；有服务器时可见。
 - `session.jsonl`：带版本头的 JSONL、v0 迁移、崩溃恢复和 POSIX 写锁。
 - `llm.mock`：确定性模拟模型，默认启用。
 - `llm.deepseek`：真实 DeepSeek Messages 模型，默认禁用。
@@ -463,6 +465,41 @@ Application 重启后，已完成 workflow 可从磁盘恢复输出；未上报�
 
 运行提供六类 `workflow/*` SSE 事件和四类 `tool-workflow/*` 会话记录；取消会停止 Node 进程并等待所有子级静止。当前不支持任意模型路由；vm 是学习版能力隔离，不是官方完整 PTC/OS 沙箱。
 
+## MCP 客户端、资源与管理器
+
+在 JSON 配置中显式启用并声明服务器：
+
+```json
+{
+  "features": {"core.mcp": true, "tools.mcp-resources": true},
+  "mcp_servers": {
+    "local": {
+      "transport": "stdio",
+      "command": "python3",
+      "args": ["-u", "server.py"],
+      "env": {"SERVER_VALUE": "${credential:SERVER_VALUE}"}
+    },
+    "remote": {
+      "transport": "streamable-http",
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": {"Authorization": "Bearer ${credential:MCP_TOKEN}"}
+    }
+  }
+}
+```
+
+客户端执行真实 JSON-RPC initialize/initialized 和分页工具发现，公开名称为 `mcp__<server>__<tool>`。stdio 使用清洗后的环境；HTTP 支持 JSON/SSE 和 MCP-Session-Id。调用支持超时与取消，服务器 `isError` 明确失败。远程重名或注册冲突会拒绝整个新工具代，旧工具保持可用。
+
+资源共享工具为 `list_mcp_resources`、`list_mcp_resource_templates`、`read_mcp_resource`，都必须显式传入 `server`。blob 仅显示 base64 长度，不把二进制载荷展开到模型历史。服务器指令按字面文本进入系统提示词。
+
+```text
+GET  /v1/mcp
+POST /v1/mcp                        {"name":"local","config":{...}}
+POST /v1/mcp/<name>/<action>        action = enable/disable/remove/restart/probe
+```
+
+未配置服务器时没有 MCP 资源工具或提示词。当前尚无自动重连预算、OAuth、完整凭据轮换、资源订阅、MCP prompts 和图片附件持久投影；HTTP 取消需等待传输边界，启动超时尚未覆盖所有版本协商与首次发现的单一总预算。
+
 ## HTTP 宿主与 Web 页面
 
 启动本地 HTTP/SSE 宿主：
@@ -786,9 +823,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 对照 `src/minidsh/workflow_guest.js` 的脚本 hooks 和 `src/minidsh/workflow.py` 的宿主 RPC，理解隔离运行时、并发调度、schema、生命周期事件与取消清理。
 
-### 第 20 层：Workflow 后台 Jobs 与恢复（当前）
+### 第 20 层：Workflow 后台 Jobs 与恢复
 
 阅读 `src/minidsh/jobs.py` 的 managed-job 发布、输出游标、终态上报和恢复路径，理解后台取消、会话归属与中断审计。
+
+### 第 21 层：MCP 客户端、资源与管理器（当前）
+
+阅读 `src/minidsh/mcp.py` 的传输、工具代际、资源路由和状态管理，理解远程命名、取消、凭据脱敏与失败关闭。
 
 ## 当前边界
 

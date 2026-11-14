@@ -8,6 +8,7 @@ from .deepseek import DeepSeekModelPlugin
 from .events import EventBus
 from .jobs import JobPlugin
 from .llm import MockModelPlugin, Model
+from .mcp import McpPlugin, McpResourcesPlugin
 from .observations import ObservationPlugin, ObservationStore
 from .plugins import DisabledExternalPlugin, Plugin, PluginManager, ServiceContext
 from .pty_shell import PersistentBashPlugin, PtyPlugin
@@ -129,6 +130,8 @@ class Application:
         self.manager.register(SubagentControlPlugin())
         self.manager.register(WorkflowPlugin())
         self.manager.register(WorkflowToolPlugin())
+        self.manager.register(McpResourcesPlugin())
+        self.manager.register(McpPlugin(config.workspace, config.mcp_servers))
         self.manager.register(MockModelPlugin())
         self.manager.register(
             DeepSeekModelPlugin(

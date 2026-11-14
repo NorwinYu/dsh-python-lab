@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
 
@@ -26,6 +26,8 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "core.web": True,
     "core.subagents": False,
     "core.workflow": False,
+    "core.mcp": False,
+    "tools.mcp-resources": False,
     "tools.workflow": False,
     "tools.subagent": False,
     "tools.subagent-fork": False,
@@ -66,6 +68,7 @@ class AppConfig:
     approval_policy: Optional[str] = None
     approve_all: bool = False
     context_window: int = 1_048_576
+    mcp_servers: Dict[str, Dict[str, object]] = field(default_factory=dict)
 
     @classmethod
     def load(
@@ -92,6 +95,7 @@ class AppConfig:
         resolved_approval: Optional[str] = None
         resolved_approve_all = False
         resolved_context_window = 1_048_576
+        resolved_mcp: Dict[str, Dict[str, object]] = {}
 
         if config_path is not None:
             config_path = config_path.expanduser().resolve()
@@ -101,7 +105,7 @@ class AppConfig:
                 raise ConfigError(f"无法读取配置 {config_path}: {exc}") from exc
             if not isinstance(data, dict):
                 raise ConfigError("配置文件顶层必须是 JSON 对象")
-            allowed = {"session_dir", "features", "sandbox_mode", "approval_policy", "approve_all", "context_window"}
+            allowed = {"session_dir", "features", "sandbox_mode", "approval_policy", "approve_all", "context_window", "mcp_servers"}
             unknown_keys = set(data) - allowed
             if unknown_keys:
                 raise ConfigError(f"未知配置项: {', '.join(sorted(unknown_keys))}")
@@ -117,6 +121,10 @@ class AppConfig:
             resolved_approval = data.get("approval_policy", resolved_approval)
             resolved_approve_all = data.get("approve_all", resolved_approve_all)
             resolved_context_window = data.get("context_window", resolved_context_window)
+            configured_mcp = data.get("mcp_servers", {})
+            if not isinstance(configured_mcp, dict) or any(not isinstance(value, dict) for value in configured_mcp.values()):
+                raise ConfigError("mcp_servers 必须是服务器配置对象映射")
+            resolved_mcp = configured_mcp
 
         cls._apply_overrides(features, enable, True)
         cls._apply_overrides(features, disable, False)
@@ -146,6 +154,7 @@ class AppConfig:
             approval_policy=resolved_approval,
             approve_all=resolved_approve_all,
             context_window=resolved_context_window,
+            mcp_servers=resolved_mcp,
         )
 
     @staticmethod
@@ -168,5 +177,6 @@ class AppConfig:
             "approval_policy": self.resolved_approval_policy(),
             "approve_all": self.approve_all,
             "context_window": self.context_window,
+            "mcp_servers": self.mcp_servers,
             "features": self.features,
         }

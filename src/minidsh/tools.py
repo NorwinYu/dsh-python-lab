@@ -74,6 +74,18 @@ class ToolRegistry:
     def unregister(self, name: str) -> None:
         self._tools.pop(name, None)
 
+    def replace_namespace(self, prefix: str, tools: List[Tool]) -> None:
+        names = [tool.name for tool in tools]
+        if len(names) != len(set(names)):
+            raise ValueError(f"MCP 工具名称重复: {prefix}")
+        retained = {name: tool for name, tool in self._tools.items() if not name.startswith(prefix)}
+        conflicts = set(retained).intersection(names)
+        if conflicts:
+            raise ValueError(f"MCP 工具与现有注册冲突: {', '.join(sorted(conflicts))}")
+        updated = dict(retained)
+        updated.update((tool.name, tool) for tool in tools)
+        self._tools = updated
+
     def definitions(self) -> List[Dict[str, object]]:
         return [tool.definition() for tool in self._tools.values()]
 

@@ -225,6 +225,17 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - HTTP jobs list/output/kill 支持可选 session_id 归属参数；原有无参数行为不变。
 - 当前不支持任意模型路由，vm 是学习版能力隔离而非官方完整 PTC/OS 沙箱；没有跨进程重连正在运行的 Node。
 
+### MCP 客户端、资源与管理器（学习版纵向切片）
+
+- `core.mcp` 默认关闭；stdio 和 streamable-http 使用真实 JSON-RPC initialize/initialized，依次协商 2026-07-28 至 2024-11-05。
+- 工具以 mcp__server__raw 注册，保留原始调用名；长/非法名称使用稳定 SHA-256 后缀。分页最多 16 页，远程重名和注册冲突拒绝整代，通知刷新串行。
+- stdio 清洗 KEY/TOKEN/SECRET/PASSWORD/DSH_* 环境并合并显式 env；HTTP 支持 JSON/SSE 响应和 MCP-Session-Id。
+- `${credential:REF}` 从宿主环境解析，失败诊断将解析值及 URL 编码替换为 [redacted]；成功结果保持原文。
+- 工具调用支持超时、取消和 notifications/cancelled；MCP isError 失败关闭，文本/结构化/不支持内容块有明确投影。
+- 共享 list_mcp_resources/list_mcp_resource_templates/read_mcp_resource 要求显式 server；支持游标、无 resources 能力空列表和 blob 长度说明。
+- 服务器指令有 32KiB 默认上限；管理器支持 upsert/remove/enable/disable/restart/probe/list、状态事件和 HTTP API，最后一个服务器移除时撤回共享资源工具。
+- 当前没有自动重连预算、OAuth、完整凭据提供方轮换、资源订阅、MCP prompts、官方 SDK 输出 schema 校验或图片附件持久投影；HTTP 取消等待传输超时，VM/进程隔离不适用于远端服务器。
+
 ### 外部插件与产品组装（学习版等价分层）
 
 - 使用 Python 标准 `minidsh.plugins` entry points 发现独立发行包；外部功能默认禁用，只有显式启用才导入插件代码。
@@ -336,5 +347,9 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - job_kill 映射 killed/cancelled 并等待子级静止；模型后台工具、job_output 和 HTTP session_id 列表/输出通过。
 - 重启后已完成结果可重读，未结算 managed job 标为 interrupted: host restarted；恢复审计 cause=recovery 且重复重启不重复补记。
 - 一次性 Bash 非零退出码和前台 workflow 回归通过；最终 wheel 离线安装后前台、后台及完成结果重启恢复通过。
+- 独立 stdio fixture 验证 initialize、分页发现、真实 echo、资源列表/读取、服务器指令和独立 probe；二进制只显示长度。
+- Streamable HTTP 验证 JSON/SSE 响应、MCP-Session-Id、凭据模板及结构化结果；未使用真实凭据。
+- 通知新增工具、远程重名保留旧代、恢复清除错误、RunCancelled 与 notifications/cancelled、管理启停/probe 和资源清理通过。
+- 最终 wheel 离线安装后真实 stdio MCP 工具与资源调用通过，关闭后子进程退出。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

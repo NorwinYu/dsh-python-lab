@@ -11,6 +11,7 @@ from .agent import Agent
 from .app import Application
 from .cancellation import CancellationToken, RunCancelled
 from .jobs import JobRecord, JobService
+from .mcp import McpManager
 from .pty_shell import PtyService
 from .questions import UserQuestionService
 from .subagents import SubagentService
@@ -40,6 +41,7 @@ EVENT_NAMES = (
     "workflow/agent-start",
     "workflow/agent-end",
     "workflow/end",
+    "mcp-manager/status",
 )
 
 
@@ -269,6 +271,10 @@ class ApiServer:
                         self._send_json(app.manager.status())
                     elif path == "/v1/tools":
                         self._send_json(app.tools.definitions())
+                    elif path == "/v1/mcp":
+                        manager = app.ctx.require("mcpManager")
+                        assert isinstance(manager, McpManager)
+                        self._send_json(manager.list())
                     elif path == "/v1/models":
                         if not app.config.features["llm.model-listing"]:
                             raise RuntimeError("llm.model-listing 当前被禁用")
@@ -341,6 +347,39 @@ class ApiServer:
                             self._send_json(questions.answer(parts[3], body))
                         else:
                             self._send_json({"error": "not found"}, 404)
+                    elif path == "/v1/mcp":
+                        manager = app.ctx.require("mcpManager")
+                        assert isinstance(manager, McpManager)
+                        name = body.get("name")
+                        config = body.get("config")
+                        if not isinstance(name, str) or not isinstance(config, dict):
+                            raise ValueError("name 和 config 必填")
+                        manager.upsert(name, config)
+                        self._send_json(manager.list())
+                    elif path.startswith("/v1/mcp/"):
+                        manager = app.ctx.require("mcpManager")
+                        assert isinstance(manager, McpManager)
+                        parts = path.split("/")
+                        if len(parts) != 5:
+                            self._send_json({"error": "not found"}, 404)
+                            return
+                        name, action = parts[3], parts[4]
+                        if action == "remove":
+                            manager.remove(name)
+                        elif action == "restart":
+                            manager.restart(name)
+                        elif action == "probe":
+                            self._send_json(manager.probe(name))
+                            return
+                        elif action in {"enable", "disable"}:
+                            current = next(row for row in manager.list() if row["name"] == name)
+                            config = dict(manager._entries[name][0])
+                            config["enabled"] = action == "enable"
+                            manager.upsert(name, config)
+                        else:
+                            self._send_json({"error": "not found"}, 404)
+                            return
+                        self._send_json(manager.list())
                     elif path.startswith("/v1/sessions/"):
                         parts = path.split("/")
                         session_id = parts[3]
@@ -515,7 +554,7 @@ class ApiServer:
                             if event in {"subagent/start", "subagent/end"} or event.startswith("workflow/"):
                                 if payload.get("root_session_id") != listener.session_id:
                                     continue
-                            elif event != "job/settled" and payload.get("run_id") != operation_id:
+                            elif event not in {"job/settled", "mcp-manager/status"} and payload.get("run_id") != operation_id:
                                 continue
                         data = json.dumps(payload, ensure_ascii=False)
                         self.wfile.write(f"id: {message['id']}\nevent: {event}\ndata: {data}\n\n".encode("utf-8"))
