@@ -13,6 +13,7 @@ from .cancellation import CancellationToken, RunCancelled
 from .jobs import JobRecord, JobService
 from .pty_shell import PtyService
 from .questions import UserQuestionService
+from .subagents import SubagentService
 
 
 EVENT_NAMES = (
@@ -31,6 +32,8 @@ EVENT_NAMES = (
     "pty/reset",
     "question/asked",
     "question/answered",
+    "subagent/start",
+    "subagent/end",
 )
 
 
@@ -147,6 +150,7 @@ class SseBroker:
                     raise RuntimeError(f"会话已有正在运行的回合: {session_id}")
                 self._session_runs[session_id] = operation_id
         listener = self.subscribe()
+        listener.session_id = session_id
         with self._cancellation_lock:
             self._cancellations[operation_id] = token
 
@@ -159,6 +163,7 @@ class SseBroker:
                         nonlocal actual_session_id
                         if payload.get("run_id") == operation_id:
                             actual_session_id = str(payload["session_id"])
+                            listener.session_id = actual_session_id
                             with self._cancellation_lock:
                                 self._session_runs[actual_session_id] = operation_id
                     stop_capture = self.agent.events.on("turn/start", capture)
@@ -356,6 +361,19 @@ class ApiServer:
                             approval = app.ctx.require("approval")
                             approval.set_policy(app.session, session_id, body.get("policy"))
                             self._send_json({"policy": body.get("policy")})
+                        elif action in {"subagent-message", "subagent-interrupt"}:
+                            subagents = app.ctx.require("subagents")
+                            assert isinstance(subagents, SubagentService)
+                            agent = body.get("agent")
+                            if not isinstance(agent, str) or not agent:
+                                raise ValueError("agent 必须是非空字符串")
+                            if action == "subagent-interrupt":
+                                self._send_json({"accepted": subagents.interrupt(session_id, agent)})
+                            else:
+                                message = body.get("message")
+                                if not isinstance(message, str) or not message:
+                                    raise ValueError("message 必须是非空字符串")
+                                self._send_json({"messageId": subagents.send(session_id, agent, message)})
                         else:
                             self._send_json({"error": "not found"}, 404)
                     elif path.startswith("/v1/terminals/"):
@@ -437,6 +455,10 @@ class ApiServer:
                     self._send_json({"todos": app.session.todos(session_id)})
                 elif len(parts) == 5 and parts[4] == "stream":
                     self._send_json({"chunks": app.session.stream_chunks(session_id)})
+                elif len(parts) == 5 and parts[4] == "subagents":
+                    subagents = app.ctx.require("subagents")
+                    assert isinstance(subagents, SubagentService)
+                    self._send_json(subagents.list_agents(session_id))
                 elif len(parts) == 5 and parts[4] == "sandbox":
                     sandbox = app.ctx.require("sandboxPolicy")
                     approval = app.ctx.require("approval")
@@ -481,7 +503,10 @@ class ApiServer:
                             operation_id = listener.operation_id
                             if event.startswith("run/") and payload.get("run_id") != operation_id:
                                 continue
-                            if event != "job/settled" and payload.get("run_id") != operation_id:
+                            if event in {"subagent/start", "subagent/end"}:
+                                if payload.get("root_session_id") != listener.session_id:
+                                    continue
+                            elif event != "job/settled" and payload.get("run_id") != operation_id:
                                 continue
                         data = json.dumps(payload, ensure_ascii=False)
                         self.wfile.write(f"id: {message['id']}\nevent: {event}\ndata: {data}\n\n".encode("utf-8"))

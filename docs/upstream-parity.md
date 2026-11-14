@@ -201,6 +201,16 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 迟到回答投影为 source.kind=answer_to_pending_question 的 user/message，附 callId 和原问题；Web 图形表单支持选项、多选、自定义和跳过。
 - 当前没有完整官方 Client 卡片系统、Turndown/GFM、DeepSeek 搜索路由或 DNS 连接固定。
 
+### 本地 Subagent 与协作控制（学习版纵向切片）
+
+- `core.subagents` 默认关闭；启用后提供 spawn/fork 两种本地后端、持久子 Session、父子树、名称和深度限制。
+- `subagent` 启动无父历史的全新子级；`subagent_fork` 对应上游可配置工具名，复制最后一个完整 turn/end 之前的历史，不包含当前开放回合。
+- 工具立即返回 agent-N 或指定名称；子级完成通过 subagent-settled 用户消息进入父级后续步骤，不泄露子级中间上下文。
+- `send_message` 可向运行中子级排队输入或唤醒空闲子级；`interrupt_agent` 校验祖先后代关系并传播取消；`list_agents` 列出根和后代；`wait_agent` 支持官方 10000–3600000ms 边界。
+- 记录父级 subagent/catalog 和进程内 subagent/start/end，提供会话 subagents 查询、subagent-message 和 subagent-interrupt 学习 API。
+- MINIDSH_SUBAGENT_MAX_DEPTH 默认 1，0 禁止委派；Application 关闭按深度回收子级。
+- 当前没有外部 ACP/Codex/Claude Code/DSH SDK 后端、模型/preset 选择、结构化输出、跨重启在线目录恢复；子 cwd 已校验持久化，但文件工具仍使用根工作区。父级完成通知在学习版 Agent Loop 后续 step 消费，不是官方完整 inbox/独立唤醒调度器。
+
 ### 外部插件与产品组装（学习版等价分层）
 
 - 使用 Python 标准 `minidsh.plugins` entry points 发现独立发行包；外部功能默认禁用，只有显式启用才导入插件代码。
@@ -299,5 +309,9 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - sandbox/mode 与 approval/policy 切换、runtime context 更新、审批 cancelled 和迟到回答丢弃通过。
 - 持久 PTY 打开时 mode 切换被拒绝，kill 后新模式下写入被内核拒绝；默认非内核行为不变。
 - 最终 wheel 包含 seatbelt 后端；离线安装后工作区写入成功，越界写入和 read-only 写入均被内核拒绝。
+- 真实 Mock 委派启动子级读取 README，父级收到 subagent-settled；spawn 不含父指令，fork 包含已完成父历史。
+- 子级后续消息产生第二个 turn/end，最大深度拒绝、等待唤醒与非法 timeout、根级中断 aborted、HTTP 查询/消息和应用关闭回收通过。
+- 修复预留子 session id 丢失、继续会话误新建和根级中断权限遗漏；默认 subagent 功能全部 disabled，不改变原提示词。
+- 最终 wheel 包含 subagents 模块；离线安装后在独立工作区真实 spawn、读取文件和完成通知通过，父子两个 Session 均持久化。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

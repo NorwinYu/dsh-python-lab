@@ -19,6 +19,7 @@ from .sandbox import SandboxPolicy, SandboxPolicyPlugin
 from .seatbelt import SeatbeltPlugin
 from .session import JsonlSessionPlugin, SessionStore
 from .shell import BashToolPlugin, JobToolsPlugin, make_bash_tool
+from .subagents import SubagentControlPlugin, SubagentPlugin, SubagentService, SubagentToolPlugin
 from .system_prompt import (
     BASH_GUIDANCE,
     EDIT_GUIDANCE,
@@ -49,6 +50,7 @@ class AgentPlugin(Plugin):
         session = ctx.optional("session")
         observations = ctx.optional("observations")
         compaction = ctx.optional("compaction")
+        subagents = ctx.optional("subagents")
         assert isinstance(model, Model)
         assert isinstance(tools, ToolRegistry)
         assert isinstance(prompt, SystemPrompt)
@@ -57,6 +59,7 @@ class AgentPlugin(Plugin):
         assert session is None or isinstance(session, SessionStore)
         assert observations is None or isinstance(observations, ObservationStore)
         assert compaction is None or isinstance(compaction, CompactionService)
+        assert subagents is None or isinstance(subagents, SubagentService)
         runtime_context = prompt.runtime_context(self.config.workspace, sandbox.context(), approval.context())
         agent = Agent(
             model=model,
@@ -73,6 +76,7 @@ class AgentPlugin(Plugin):
             record_stream=self.config.features["core.stream-recording"],
             sandbox_policy=sandbox,
             approval_service=approval,
+            subagents=subagents,
         )
         ctx.provide("agent", agent, self.name)
 
@@ -118,6 +122,10 @@ class Application:
         self.manager.register(WebToolPlugin("tools.web-fetch", "web_fetch"))
         self.manager.register(WebToolPlugin("tools.web-search", "web_search", config.features["tools.web-fetch"]))
         self.manager.register(JsonlSessionPlugin(config.session_dir))
+        self.manager.register(SubagentPlugin())
+        self.manager.register(SubagentToolPlugin())
+        self.manager.register(SubagentToolPlugin("tools.subagent-fork", "fork"))
+        self.manager.register(SubagentControlPlugin())
         self.manager.register(MockModelPlugin())
         self.manager.register(
             DeepSeekModelPlugin(

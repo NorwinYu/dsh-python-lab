@@ -56,6 +56,7 @@ minidsh run "请列出当前目录"
 - `core.tool-result-pruner`：手动 surface 工具结果裁剪，默认关闭。
 - `core.user-questions`：用户提问、待答和取消服务。
 - `core.web`：Web 获取与搜索 provider 服务。
+- `core.subagents`：本地子 Agent 树、独立会话、消息与生命周期，默认关闭。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
@@ -69,6 +70,9 @@ minidsh run "请列出当前目录"
 - `tools.todo`：官方 `todo_write` 工具切片，默认关闭。
 - `tools.web-fetch`：官方 `web_fetch` 工具切片，默认关闭。
 - `tools.web-search`：官方 `web_search` 工具切片，默认关闭。
+- `tools.subagent`：官方 `subagent` 全新子级委派切片，默认关闭。
+- `tools.subagent-fork`：继承完整历史前缀的 `subagent_fork` 可配置名称实例，默认关闭。
+- `tools.subagent-control`：`send_message/interrupt_agent/list_agents/wait_agent` 工具组，默认关闭。
 - `session.jsonl`：带版本头的 JSONL、v0 迁移、崩溃恢复和 POSIX 写锁。
 - `llm.mock`：确定性模拟模型，默认启用。
 - `llm.deepseek`：真实 DeepSeek Messages 模型，默认禁用。
@@ -406,6 +410,26 @@ Web 图形表单支持选项、多选、自定义文本和留空跳过；超时�
 
 Web 内容不是指令；系统提示词会随工具开关加入上游对应英文提醒。两个工具都支持运行取消。当前 HTML 转换不是完整 Turndown/GFM，搜索 provider 协议是学习版 JSON 接口，不是官方 DeepSeek 搜索凭据或路由实现。
 
+## 本地 Subagent 与协作控制
+
+```bash
+PYTHONPATH=src python3 -m minidsh \
+  --enable core.subagents --enable tools.subagent --enable tools.subagent-control \
+  run "委派 独立分析 | 读取 README.md"
+```
+
+`subagent` 立即返回 `agent-N`，子级在自己的 Session 中运行，父级后续步骤接收 `subagent-settled` 完成通知。`tools.subagent-fork` 另注册 `subagent_fork`，只继承最近一个完整 `turn/end` 及之前的历史。`send_message` 可唤醒空闲子级或给运行中子级排队输入；`interrupt_agent` 取消当前执行；`list_agents` 和 `wait_agent` 用于发现与等待输入。
+
+`MINIDSH_SUBAGENT_MAX_DEPTH` 默认是 1，设为 0 可禁止委派。每个父级的子级名称唯一，根名称为 `lead`。目录事件写入父 Session 的 `subagent/catalog`；常驻宿主还提供：
+
+```text
+GET  /v1/sessions/<id>/subagents
+POST /v1/sessions/<id>/subagent-message    {"agent":"agent-1","message":"继续"}
+POST /v1/sessions/<id>/subagent-interrupt  {"agent":"agent-1"}
+```
+
+当前仅实现进程内 spawn/fork；没有 ACP、Codex、Claude Code、DSH SDK、preset/模型选择和结构化输出。`cwd` 已校验并记录，但文件工具仍使用根工作区；完成通知在学习版 Loop 的后续 step 消费，不是官方完整 inbox 调度器。
+
 ## HTTP 宿主与 Web 页面
 
 启动本地 HTTP/SSE 宿主：
@@ -717,9 +741,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 理解完整快照代际、内容哈希、manifest 原子切换、旧格式迁移和篡改检测。
 
-### 第 17 层：内核沙箱与策略升级（当前）
+### 第 17 层：内核沙箱与策略升级
 
 理解 Seatbelt 进程隔离、会话策略覆盖、审批取消和持久终端切换围栏。对照 `docs/upstream-parity.md` 阅读。
+
+### 第 18 层：本地 Subagent 与协作控制（当前）
+
+阅读 `src/minidsh/subagents.py` 的父子树、独立 Session、完成通知、fork 历史前缀、消息、等待、中断和回收，再观察 Agent Loop 的输入注入点。
 
 ## 当前边界
 

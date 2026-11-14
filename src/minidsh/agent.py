@@ -35,6 +35,7 @@ class Agent:
         record_stream: bool = True,
         sandbox_policy: Optional[SandboxPolicy] = None,
         approval_service: Optional[ApprovalService] = None,
+        subagents: Optional[object] = None,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -51,6 +52,7 @@ class Agent:
         self.record_stream = record_stream
         self.sandbox_policy = sandbox_policy
         self.approval_service = approval_service
+        self.subagents = subagents
 
     def run(
         self,
@@ -59,11 +61,12 @@ class Agent:
         run_id: Optional[str] = None,
         cancel_token: Optional[CancellationToken] = None,
         image_paths: Optional[List[str]] = None,
+        new_session_id: Optional[str] = None,
     ) -> str:
         if session_id is not None and self.session is not None:
             with self.session.write_lease(session_id):
-                return self._run(prompt, session_id, run_id, cancel_token, image_paths)
-        return self._run(prompt, session_id, run_id, cancel_token, image_paths)
+                return self._run(prompt, session_id, run_id, cancel_token, image_paths, new_session_id)
+        return self._run(prompt, session_id, run_id, cancel_token, image_paths, new_session_id)
 
     def _run(
         self,
@@ -72,6 +75,7 @@ class Agent:
         run_id: Optional[str] = None,
         cancel_token: Optional[CancellationToken] = None,
         image_paths: Optional[List[str]] = None,
+        new_session_id: Optional[str] = None,
     ) -> str:
         token = cancel_token or CancellationToken(run_id)
         token.throw_if_cancelled()
@@ -95,7 +99,7 @@ class Agent:
                 self._record_system(session_id, system)
             self._record(session_id, "session/resume", {"turn": turn})
         else:
-            session_id = uuid.uuid4().hex
+            session_id = new_session_id or uuid.uuid4().hex
             self._record_system(session_id, system)
             self._record(session_id, "session/start", {"prompt": prompt})
 
@@ -111,6 +115,8 @@ class Agent:
         self._record(session_id, "user/message", runtime_message)
         self._record(session_id, "turn/start", {"turn": turn})
         self.events.emit("turn/start", {"session_id": session_id, "prompt": prompt, "run_id": run_id})
+        if self.subagents is not None:
+            self.subagents.set_root_running(session_id, True)
         try:
             return self._run_steps(system, messages, session_id, turn, run_id, token)
         except RunCancelled:
@@ -118,6 +124,9 @@ class Agent:
             self._record(session_id, "turn/end", {"turn": turn, "reason": reason})
             self.events.emit("turn/end", {"session_id": session_id, "content": "", "reason": reason, "run_id": run_id})
             raise
+        finally:
+            if self.subagents is not None:
+                self.subagents.set_root_running(session_id, False)
 
     def _run_steps(
         self,
@@ -130,6 +139,11 @@ class Agent:
     ) -> str:
         for step in range(1, self.max_steps + 1):
             token.throw_if_cancelled()
+            if self.subagents is not None:
+                inputs = self.subagents.consume_inputs(session_id)
+                for message in inputs:
+                    messages.append(message)
+                    self._record(session_id, "user/message", message)
             self._record(session_id, "step/start", {"turn": turn, "step": step})
             if self.compaction is not None:
                 messages = self.compaction.compact_if_needed(
@@ -213,6 +227,9 @@ class Agent:
             self.events.emit("assistant/message", {"session_id": session_id, "message": assistant_message, "run_id": run_id})
 
             if not response.tool_calls:
+                if self.subagents is not None and self.subagents.wait_for_parent_input(session_id, token):
+                    self._record(session_id, "step/end", {"turn": turn, "step": step})
+                    continue
                 reason = response.finish_reason
                 self._record(session_id, "step/end", {"turn": turn, "step": step})
                 self._record(session_id, "turn/end", {"turn": turn, "reason": reason})

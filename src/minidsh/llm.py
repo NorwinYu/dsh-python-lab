@@ -87,6 +87,10 @@ class MockModel(Model):
     ) -> ModelResponse:
         if cancel_token is not None:
             cancel_token.throw_if_cancelled()
+        if messages:
+            source = messages[-1].get("source", {})
+            if isinstance(source, dict) and source.get("kind") == "subagent-settled":
+                return ModelResponse(blocks=[text_block("已收到子代理结果并完成汇总。")])
         prompt = ""
         for message in reversed(messages):
             if message["role"] != "user":
@@ -151,6 +155,32 @@ class MockModel(Model):
 
         if prompt.startswith("搜索") and "web_search" in available:
             call = ToolCall(name="web_search", arguments={"queries": [prompt[2:].strip()]}, call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("委派") and "subagent" in available:
+            request = prompt[2:].strip()
+            description, separator, task = request.partition("|")
+            call = ToolCall(name="subagent", arguments={"description": description.strip() or "委派任务", "prompt": task.strip() if separator else request}, call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("派生") and "subagent_fork" in available:
+            call = ToolCall(name="subagent_fork", arguments={"description": "继承历史子任务", "prompt": prompt[2:].strip()}, call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("子代理列表") and "list_agents" in available:
+            return ModelResponse(blocks=[tool_call_block(ToolCall(name="list_agents", arguments={}, call_id="mock-1"))])
+
+        if prompt.startswith("发送消息") and "send_message" in available:
+            agent, message = prompt[4:].strip().split("：", 1)
+            call = ToolCall(name="send_message", arguments={"agent": agent, "message": message}, call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("中断子代理") and "interrupt_agent" in available:
+            call = ToolCall(name="interrupt_agent", arguments={"agent": prompt[5:].strip()}, call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("等待子代理输入") and "wait_agent" in available:
+            call = ToolCall(name="wait_agent", arguments={"timeout_ms": int(prompt[6:].strip() or "30000")}, call_id="mock-1")
             return ModelResponse(blocks=[tool_call_block(call)])
 
         if (prompt.startswith("执行") or prompt.startswith("执行后台")) and "bash" in available:
