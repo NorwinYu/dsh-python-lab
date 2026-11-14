@@ -34,6 +34,14 @@ def build_parser() -> argparse.ArgumentParser:
     skill_parser = subparsers.add_parser("skill", help="加载一份技能完整指令")
     skill_parser.add_argument("name")
     skill_parser.add_argument("--user", action="store_true", help="按用户显式调用策略加载")
+    goal_parser = subparsers.add_parser("goal", help="查看或控制会话目标")
+    goal_parser.add_argument("session_id")
+    goal_parser.add_argument("action", nargs="?", default="get", choices=["get", "create", "edit", "pause", "resume", "complete", "blocked", "clear"])
+    goal_parser.add_argument("--objective")
+    goal_parser.add_argument("--rounds", type=int)
+    goal_parser.add_argument("--reason")
+    goal_parser.add_argument("--goal-id")
+    goal_parser.add_argument("--revision", type=int)
 
     run_parser = subparsers.add_parser("run", help="新建会话并运行 Agent")
     run_parser.add_argument("prompt", nargs="+", help="用户提示词")
@@ -125,7 +133,7 @@ def interactive_questions(request: Dict[str, object]) -> Dict[str, object]:
 
 
 def _with_default_command(argv: List[str], command: str) -> List[str]:
-    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "skills", "skill", "run", "resume", "session", "transcript", "todos", "fork", "compact", "repair", "migrate", "surface", "stream", "prune", "serve", "desktop"}
+    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "skills", "skill", "goal", "run", "resume", "session", "transcript", "todos", "fork", "compact", "repair", "migrate", "surface", "stream", "prune", "serve", "desktop"}
     options_with_values = {"--workspace", "--config", "--enable", "--disable", "--sandbox-mode", "--approval-policy", "--context-window"}
     index = 0
     while index < len(argv):
@@ -228,6 +236,23 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
 
         if args.command == "skill":
             print(app.ctx.require("skills").load(args.name, model=not args.user))
+            return 0
+
+        if args.command == "goal":
+            goals = app.ctx.require("goals")
+            if args.action == "get":
+                result = goals.get(args.session_id)
+            elif args.action == "create":
+                result = goals.create(args.session_id, args.objective, args.rounds)
+            else:
+                current = goals.get(args.session_id)
+                if current is None:
+                    raise RuntimeError("当前会话没有 goal")
+                reason = {"code": "user-reported", "message": args.reason or ""} if args.action == "blocked" else None
+                result = goals.update(args.session_id, args.goal_id or current["id"], args.revision or current["revision"], args.action, args.objective, args.rounds, reason)
+                if args.action in {"pause", "complete", "blocked", "clear"}:
+                    goals.disarm(args.session_id)
+            print(json.dumps({"goal": result}, ensure_ascii=False, indent=2))
             return 0
 
         if args.command == "session":

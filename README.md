@@ -61,6 +61,8 @@ minidsh run "请列出当前目录"
 - `core.mcp`：MCP stdio/HTTP 客户端与运行时管理器，默认关闭。
 - `core.skills`：Skills 注册表、文件发现与持久目录，默认关闭。
 - `core.schedule`：宿主级定时任务、投递与恢复，默认关闭。
+- `core.goals`：会话内事件溯源的持久目标，默认关闭。
+- `core.goal-rounds`：独立开关的自动 Goal Round 驱动，默认关闭。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
@@ -81,6 +83,7 @@ minidsh run "请列出当前目录"
 - `tools.mcp-resources`：三个共享 MCP 资源工具，默认关闭；有服务器时可见。
 - `tools.skill`：官方 `skill` 精确名称加载工具，默认关闭。
 - `tools.schedule`：`schedule_create/list/view/edit` 工具组，默认关闭。
+- `tools.goal`：`get_goal/create_goal/update_goal` 工具组，默认关闭。
 - `session.jsonl`：带版本头的 JSONL、v0 迁移、崩溃恢复和 POSIX 写锁。
 - `llm.mock`：确定性模拟模型，默认启用。
 - `llm.deepseek`：真实 DeepSeek Messages 模型，默认禁用。
@@ -571,6 +574,43 @@ POST /v1/schedule/delete-inactive
 
 当前没有关联 Agent 变更通知、归档准入、批量 Session 提醒、独立执行槽或其他存储后端。
 
+## Goal 持久目标与自动 Round
+
+```bash
+# 只启用目标状态与模型工具，不自动续行
+PYTHONPATH=src python3 -m minidsh \
+  --enable core.goals --enable tools.goal \
+  run "创建目标 完成全部迁移|4"
+
+# 同时启用自动 Round
+PYTHONPATH=src python3 -m minidsh \
+  --enable core.goals --enable tools.goal --enable core.goal-rounds \
+  run "创建目标 完成全部迁移|4"
+
+# 用户直接查看或控制，不消耗模型 Round
+PYTHONPATH=src python3 -m minidsh --enable core.goals goal <session-id>
+PYTHONPATH=src python3 -m minidsh --enable core.goals goal <session-id> resume
+```
+
+每 Session 至多一个当前目标。`goal/change` v1 事件保存 objective、active/paused/blocked/complete、revision、Round 数量和 blocker reason；所有更新要求精确 id+revision，损坏回放失败关闭。已完成目标可以直接替换，clear 保留历史 tombstone。
+
+`create_goal` 等工具区分直接人类与自主 Goal Round 权限。paused 只能由用户恢复；自主 blocked 至少要求连续三个 Goal Round，并记录具体条件。`MINIDSH_GOAL_MAX_ROUNDS` 设置默认上限 256。
+
+`core.goal-rounds` 独立控制自动续行。armed 的 active goal 在 Agent 空闲时继续同 Session Round；只有写入 `kind=goal` 用户消息才消耗预算，耗尽记录 `round-limit` 阻塞。恢复、fork 或重启后总是 disarmed，必须显式 resume，异常取消不会隐式重试。完成或阻塞后只注入一次最终总结指令。
+
+```text
+GET  /v1/sessions/<id>/goal
+POST /v1/sessions/<id>/goal-create  {"objective":"...","max_goal_rounds":4}
+POST /v1/sessions/<id>/goal-edit    {"goal_id":"...","revision":1,"objective":"..."}
+POST /v1/sessions/<id>/goal-resume  {"goal_id":"...","revision":1}
+POST /v1/sessions/<id>/goal-pause   {"goal_id":"...","revision":1}
+POST /v1/sessions/<id>/goal-complete
+POST /v1/sessions/<id>/goal-blocked {"goal_id":"...","revision":1,"blocked_reason":"..."}
+POST /v1/sessions/<id>/goal-clear   {"goal_id":"...","revision":1}
+```
+
+当前没有官方 SessionProjection、完整 AgentRegistry initiator、子树 idle 汇总或独立完成评估器。
+
 ## HTTP 宿主与 Web 页面
 
 启动本地 HTTP/SSE 宿主：
@@ -906,9 +946,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 阅读 `src/minidsh/skills.py` 的提供方合并、frontmatter、目录 digest、统一渲染与手势入口，再观察 Agent 的持久消息注入。
 
-### 第 23 层：Schedule 宿主定时任务（当前）
+### 第 23 层：Schedule 宿主定时任务
 
 阅读 `src/minidsh/schedule_time.py` 的时间求值和 `src/minidsh/schedule.py` 的任务存储、目标投递、回执与追赶，理解收件箱确认和模型完成之间的区别。
+
+### 第 24 层：Goal 持久目标与自动 Round（当前）
+
+阅读 `src/minidsh/goals.py` 的事件回放、revision、权限、armed 状态和 Round 驱动，理解持久目标与进程内续行授权的分离。
 
 ## 当前边界
 

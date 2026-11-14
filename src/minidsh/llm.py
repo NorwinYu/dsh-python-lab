@@ -134,6 +134,21 @@ class MockModel(Model):
                 text = str(content)
             return ModelResponse(blocks=[text_block(f"工具已经执行完成：\n{text}")])
 
+        if prompt.startswith("创建目标") and "create_goal" in available:
+            objective, separator, rounds = prompt[4:].strip().partition("|")
+            arguments: Dict[str, object] = {"objective": objective.strip()}
+            if separator:
+                arguments["max_goal_rounds"] = int(rounds)
+            call = ToolCall(name="create_goal", arguments=arguments, call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("读取目标") and "get_goal" in available:
+            return ModelResponse(blocks=[tool_call_block(ToolCall(name="get_goal", arguments={}, call_id="mock-1"))])
+
+        if prompt.startswith("更新目标") and "update_goal" in available:
+            call = ToolCall(name="update_goal", arguments=json.loads(prompt[4:].strip()), call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
         if prompt.startswith("定时任务") and "schedule_create" in available:
             call = ToolCall(name="schedule_create", arguments=json.loads(prompt[4:].strip()), call_id="mock-1")
             return ModelResponse(blocks=[tool_call_block(call)])

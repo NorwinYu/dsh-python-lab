@@ -259,6 +259,18 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - HTTP 提供 create/list/view/history/edit/run/deleteInactive 和 schedule/changed；管理读取不激活目标 Session。
 - 当前没有完整 RFC 5545 求值器、关联 Agent 变更通知、归档准入、批量 Session 提醒、执行槽或独立存储后端。
 
+### Goal 持久目标与自动 Round（学习版纵向切片）
+
+- `core.goals`、`tools.goal`、`core.goal-rounds` 分别默认关闭；目标服务和自动调度可独立启用。
+- 每 Session 至多一个当前目标，goal/change v1 事件是唯一权威，支持 create/edit/pause/resume/complete/blocked/clear。
+- 精确 id+revision 比较并设置，拒绝陈旧更新；active/paused/blocked/complete 四态、clear tombstone、替换已完成目标。
+- 严格回放检查 phase、revision、时间单调性和连续 Goal Round；损坏记录失败关闭。
+- 自动续行使用独立 armed/disarmed 进程状态，resume/fork/重启后 disarmed，必须显式 resume；只有持久 kind=goal 用户消息消耗 Round。
+- get_goal/create_goal/update_goal 使用直接人类与 Goal Round 来源权限，paused 只能由用户控制恢复；blocked 自主路径至少连续 3 Round。
+- 驱动空闲后调度同 Session Round，round-limit 自动阻塞，完成/阻塞后仅一次 goal-wrapup 最终总结；异常取消不自动重启。
+- 提供 goal CLI、HTTP 用户控制和 goal/changed/activation-changed SSE。
+- 当前没有官方 SessionProjection 单元、精确 AgentRegistry initiator、子树 idle 汇总、持久性 flush 前置条件或独立完成评估器。
+
 ### 外部插件与产品组装（学习版等价分层）
 
 - 使用 Python 标准 `minidsh.plugins` entry points 发现独立发行包；外部功能默认禁用，只有显式启用才导入插件代码。
@@ -381,5 +393,9 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 创建/暂停/恢复/冲突、真实一秒定时回执、new_once 新会话、历史、pending 和 v2 存储通过。
 - 重启只投递一次并推进未来时点，运行中目标队列注入、委派拒绝、HTTP 管理和默认不可见通过。
 - 最终 wheel 离线安装后真实定时投递、回执和重启追赶通过。
+- Goal 创建/编辑/陈旧 revision/暂停恢复/完成替换/clear 通过；恢复与 fork 后 active 但 disarmed，显式 resume 后 armed。
+- 两个真实 Goal Round 耗尽后产生 round-limit，模型第二轮完成后只产生一次 goal-wrapup 和最终总结。
+- 非人类创建、提前阻塞、HTTP/CLI 控制、损坏 revision 回放失败关闭和默认不可见通过。
+- 最终 wheel 离线安装后连续 Round、round-limit、恢复 disarmed 和显式 resume 通过。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

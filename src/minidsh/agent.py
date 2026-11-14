@@ -38,6 +38,7 @@ class Agent:
         subagents: Optional[object] = None,
         skills: Optional[object] = None,
         schedules: Optional[object] = None,
+        goals: Optional[object] = None,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -57,6 +58,7 @@ class Agent:
         self.subagents = subagents
         self.skills = skills
         self.schedules = schedules
+        self.goals = goals
 
     def run(
         self,
@@ -109,6 +111,8 @@ class Agent:
             self._record_system(session_id, system)
             self._record(session_id, "session/start", {"prompt": prompt})
 
+        if self.goals is not None:
+            self.goals.note_turn(session_id, message_source)
         messages = [message for message in messages if not self._is_runtime_context(message)]
         user_message = {"role": "user", "content": [text_block(prompt)] + image_blocks}
         if message_source is not None:
@@ -165,6 +169,10 @@ class Agent:
             if self.skills is not None:
                 skill_inputs = self.skills.before_step(session_id, step, user_prompt)
                 for message in skill_inputs:
+                    messages.append(message)
+                    self._record(session_id, "user/message", message)
+            if self.goals is not None:
+                for message in self.goals.take_wrapups(session_id):
                     messages.append(message)
                     self._record(session_id, "user/message", message)
             self._record(session_id, "step/start", {"turn": turn, "step": step})

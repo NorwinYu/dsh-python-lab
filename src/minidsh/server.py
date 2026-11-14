@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlsplit
 from .agent import Agent
 from .app import Application
 from .cancellation import CancellationToken, RunCancelled
+from .goals import GoalService
 from .jobs import JobRecord, JobService
 from .mcp import McpManager
 from .pty_shell import PtyService
@@ -45,6 +46,8 @@ EVENT_NAMES = (
     "workflow/end",
     "mcp-manager/status",
     "schedule/changed",
+    "goal/changed",
+    "goal/activation-changed",
 )
 
 
@@ -438,7 +441,22 @@ class ApiServer:
                         parts = path.split("/")
                         session_id = parts[3]
                         action = parts[4] if len(parts) > 4 else ""
-                        if action == "resume":
+                        if action == "goal-create":
+                            goals = app.ctx.require("goals")
+                            assert isinstance(goals, GoalService)
+                            self._send_json({"goal": goals.create(session_id, body.get("objective"), body.get("max_goal_rounds"))})
+                        elif action in {"goal-edit", "goal-resume", "goal-pause", "goal-complete", "goal-blocked", "goal-clear"}:
+                            goals = app.ctx.require("goals")
+                            assert isinstance(goals, GoalService)
+                            operation = action[5:]
+                            reason = body.get("blocked_reason") if operation == "blocked" else None
+                            if operation == "blocked" and isinstance(reason, str):
+                                reason = {"code": "user-reported", "message": reason}
+                            result = goals.update(session_id, body.get("goal_id"), body.get("revision"), operation, body.get("objective"), body.get("max_goal_rounds"), reason)
+                            if operation in {"pause", "complete", "blocked", "clear"}:
+                                goals.disarm(session_id)
+                            self._send_json({"goal": result})
+                        elif action == "resume":
                             self._send_json(broker.wait(self._prompt(body), session_id, self._images(body)))
                         elif action == "fork":
                             self._send_json({"session_id": app.session.fork(session_id, body.get("at_seq"))})
@@ -551,6 +569,10 @@ class ApiServer:
                 session_id = parts[3]
                 if len(parts) == 5 and parts[4] == "transcript":
                     self._send_json({"text": app.session.transcript(session_id)})
+                elif len(parts) == 5 and parts[4] == "goal":
+                    goals = app.ctx.require("goals")
+                    assert isinstance(goals, GoalService)
+                    self._send_json({"goal": goals.get(session_id)})
                 elif len(parts) == 5 and parts[4] == "surface":
                     self._send_json(app.session.surface(session_id))
                 elif len(parts) == 5 and parts[4] == "todos":
@@ -607,6 +629,9 @@ class ApiServer:
                                 continue
                             if event in {"subagent/start", "subagent/end"} or event.startswith("workflow/"):
                                 if payload.get("root_session_id") != listener.session_id:
+                                    continue
+                            elif event.startswith("goal/"):
+                                if payload.get("session_id") != listener.session_id:
                                     continue
                             elif event not in {"job/settled", "mcp-manager/status", "schedule/changed"} and payload.get("run_id") != operation_id:
                                 continue

@@ -6,6 +6,7 @@ from .compaction import CompactionPlugin, CompactionService
 from .config import AppConfig
 from .deepseek import DeepSeekModelPlugin
 from .events import EventBus
+from .goals import GoalPlugin, GoalRoundDriver, GoalService, GoalToolPlugin
 from .jobs import JobPlugin
 from .llm import MockModelPlugin, Model
 from .mcp import McpPlugin, McpResourcesPlugin
@@ -57,6 +58,7 @@ class AgentPlugin(Plugin):
         subagents = ctx.optional("subagents")
         skills = ctx.optional("skills")
         schedules = ctx.optional("schedule")
+        goals = ctx.optional("goals")
         assert isinstance(model, Model)
         assert isinstance(tools, ToolRegistry)
         assert isinstance(prompt, SystemPrompt)
@@ -68,6 +70,7 @@ class AgentPlugin(Plugin):
         assert subagents is None or isinstance(subagents, SubagentService)
         assert skills is None or isinstance(skills, SkillService)
         assert schedules is None or isinstance(schedules, ScheduleService)
+        assert goals is None or isinstance(goals, GoalService)
         runtime_context = prompt.runtime_context(self.config.workspace, sandbox.context(), approval.context())
         agent = Agent(
             model=model,
@@ -87,6 +90,7 @@ class AgentPlugin(Plugin):
             subagents=subagents,
             skills=skills,
             schedules=schedules,
+            goals=goals,
         )
         ctx.provide("agent", agent, self.name)
 
@@ -144,6 +148,9 @@ class Application:
         self.manager.register(SkillToolPlugin())
         self.manager.register(SchedulePlugin(config.session_dir.parent / "schedule.json"))
         self.manager.register(ScheduleToolPlugin())
+        self.manager.register(GoalPlugin())
+        self.manager.register(GoalToolPlugin())
+        self.manager.register(GoalRoundDriver())
         self.manager.register(MockModelPlugin())
         self.manager.register(
             DeepSeekModelPlugin(
