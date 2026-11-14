@@ -14,6 +14,7 @@ from .jobs import JobRecord, JobService
 from .mcp import McpManager
 from .pty_shell import PtyService
 from .questions import UserQuestionService
+from .skills import SkillService
 from .subagents import SubagentService
 
 
@@ -285,6 +286,16 @@ class ApiServer:
                         self._send_json(app.model.list_files())
                     elif path == "/v1/prompt":
                         self._send_json({"system": app.system_prompt.render(), "runtime_context": app.runtime_context})
+                    elif path == "/v1/skills":
+                        skills = app.ctx.require("skills")
+                        assert isinstance(skills, SkillService)
+                        self._send_json(skills.snapshot())
+                    elif path.startswith("/v1/skills/"):
+                        skills = app.ctx.require("skills")
+                        assert isinstance(skills, SkillService)
+                        name = path.split("/")[3]
+                        user = query.get("user", ["false"])[0].lower() == "true"
+                        self._send_json({"name": name, "content": skills.load(name, model=not user)})
                     elif path == "/v1/questions":
                         questions = app.ctx.require("userQuestions")
                         assert isinstance(questions, UserQuestionService)

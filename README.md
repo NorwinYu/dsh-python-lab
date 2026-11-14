@@ -59,6 +59,7 @@ minidsh run "请列出当前目录"
 - `core.subagents`：本地子 Agent 树、独立会话、消息与生命周期，默认关闭。
 - `core.workflow`：Node 隔离 JavaScript workflow 引擎，默认关闭。
 - `core.mcp`：MCP stdio/HTTP 客户端与运行时管理器，默认关闭。
+- `core.skills`：Skills 注册表、文件发现与持久目录，默认关闭。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
@@ -77,6 +78,7 @@ minidsh run "请列出当前目录"
 - `tools.subagent-control`：`send_message/interrupt_agent/list_agents/wait_agent` 工具组，默认关闭。
 - `tools.workflow`：官方 `workflow` JavaScript 前后台编排与 jobs 切片，默认关闭。
 - `tools.mcp-resources`：三个共享 MCP 资源工具，默认关闭；有服务器时可见。
+- `tools.skill`：官方 `skill` 精确名称加载工具，默认关闭。
 - `session.jsonl`：带版本头的 JSONL、v0 迁移、崩溃恢复和 POSIX 写锁。
 - `llm.mock`：确定性模拟模型，默认启用。
 - `llm.deepseek`：真实 DeepSeek Messages 模型，默认禁用。
@@ -500,6 +502,47 @@ POST /v1/mcp/<name>/<action>        action = enable/disable/remove/restart/probe
 
 未配置服务器时没有 MCP 资源工具或提示词。当前尚无自动重连预算、OAuth、完整凭据轮换、资源订阅、MCP prompts 和图片附件持久投影；HTTP 取消需等待传输边界，启动超时尚未覆盖所有版本协商与首次发现的单一总预算。
 
+## Skills 发现、目录与调用
+
+Skills 支持目录 bundle 与平铺 Markdown：
+
+```text
+skills/
+├── review/
+│   └── SKILL.md
+└── hidden.md
+```
+
+```markdown
+---
+name: review
+description: Review code carefully
+---
+Read the relevant files before suggesting changes.
+```
+
+启用方式：
+
+```bash
+PYTHONPATH=src python3 -m minidsh \
+  --enable core.skills --enable tools.skill \
+  run "使用技能 review"
+
+PYTHONPATH=src python3 -m minidsh \
+  --enable core.skills --enable tools.skill skills
+
+PYTHONPATH=src python3 -m minidsh \
+  --enable core.skills --enable tools.skill skill review
+```
+
+`skill_dirs` 添加自定义根，`skill_include_default_roots=false` 可隔离默认项目/用户目录。默认根依次是项目 `.dsh/skills`、`.agents/skills`、自定义目录、`~/.dsh/skills`、`~/.agents/skills` 和可选 bundled 根；运行时注册优先于文件来源。
+
+首次请求前，模型可调用的 skill 以持久 `skill-catalog` 用户消息发布摘要。名称、描述或发现完整性变化会追加替换目录，删除全部时明确停用旧名称。`skill` 工具每次重新读取完整正文，统一返回 `<skill_content>` 和资源基底指引。
+
+`disable-model-invocation: true` 会隐藏模型目录与工具入口，但直接用户输入 `/name` 仍可加载；`user-invocable: false` 则禁止该手势。未知路径和工具结果不能伪造手势。HTTP 提供 `GET /v1/skills` 和 `GET /v1/skills/<name>[?user=true]`。
+
+当前 frontmatter 是学习版标量解析，不是完整 YAML；尚无 Office 内置技能、Chokidar、官方工作目录作用域链或文件系统服务。
+
 ## HTTP 宿主与 Web 页面
 
 启动本地 HTTP/SSE 宿主：
@@ -827,9 +870,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 阅读 `src/minidsh/jobs.py` 的 managed-job 发布、输出游标、终态上报和恢复路径，理解后台取消、会话归属与中断审计。
 
-### 第 21 层：MCP 客户端、资源与管理器（当前）
+### 第 21 层：MCP 客户端、资源与管理器
 
 阅读 `src/minidsh/mcp.py` 的传输、工具代际、资源路由和状态管理，理解远程命名、取消、凭据脱敏与失败关闭。
+
+### 第 22 层：Skills 发现、目录与调用（当前）
+
+阅读 `src/minidsh/skills.py` 的提供方合并、frontmatter、目录 digest、统一渲染与手势入口，再观察 Agent 的持久消息注入。
 
 ## 当前边界
 

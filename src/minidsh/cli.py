@@ -30,6 +30,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("files", help="列出 DeepSeek Files API 文件")
     subparsers.add_parser("prompt", help="输出当前系统提示词与 runtime context")
     subparsers.add_parser("sessions", help="列出本地会话")
+    subparsers.add_parser("skills", help="列出当前工作区技能")
+    skill_parser = subparsers.add_parser("skill", help="加载一份技能完整指令")
+    skill_parser.add_argument("name")
+    skill_parser.add_argument("--user", action="store_true", help="按用户显式调用策略加载")
 
     run_parser = subparsers.add_parser("run", help="新建会话并运行 Agent")
     run_parser.add_argument("prompt", nargs="+", help="用户提示词")
@@ -121,7 +125,7 @@ def interactive_questions(request: Dict[str, object]) -> Dict[str, object]:
 
 
 def _with_default_command(argv: List[str], command: str) -> List[str]:
-    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "run", "resume", "session", "transcript", "todos", "fork", "compact", "repair", "migrate", "surface", "stream", "prune", "serve", "desktop"}
+    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "skills", "skill", "run", "resume", "session", "transcript", "todos", "fork", "compact", "repair", "migrate", "surface", "stream", "prune", "serve", "desktop"}
     options_with_values = {"--workspace", "--config", "--enable", "--disable", "--sandbox-mode", "--approval-policy", "--context-window"}
     index = 0
     while index < len(argv):
@@ -216,6 +220,14 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
             if app.session is None:
                 raise RuntimeError("session.jsonl 当前被禁用")
             print(json.dumps(app.session.list_sessions(), ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "skills":
+            print(json.dumps(app.ctx.require("skills").snapshot(), ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "skill":
+            print(app.ctx.require("skills").load(args.name, model=not args.user))
             return 0
 
         if args.command == "session":

@@ -21,6 +21,7 @@ from .sandbox import SandboxPolicy, SandboxPolicyPlugin
 from .seatbelt import SeatbeltPlugin
 from .session import JsonlSessionPlugin, SessionStore
 from .shell import BashToolPlugin, JobToolsPlugin, make_bash_tool
+from .skills import SkillService, SkillsPlugin, SkillToolPlugin
 from .subagents import SubagentControlPlugin, SubagentPlugin, SubagentService, SubagentToolPlugin
 from .system_prompt import (
     BASH_GUIDANCE,
@@ -53,6 +54,7 @@ class AgentPlugin(Plugin):
         observations = ctx.optional("observations")
         compaction = ctx.optional("compaction")
         subagents = ctx.optional("subagents")
+        skills = ctx.optional("skills")
         assert isinstance(model, Model)
         assert isinstance(tools, ToolRegistry)
         assert isinstance(prompt, SystemPrompt)
@@ -62,6 +64,7 @@ class AgentPlugin(Plugin):
         assert observations is None or isinstance(observations, ObservationStore)
         assert compaction is None or isinstance(compaction, CompactionService)
         assert subagents is None or isinstance(subagents, SubagentService)
+        assert skills is None or isinstance(skills, SkillService)
         runtime_context = prompt.runtime_context(self.config.workspace, sandbox.context(), approval.context())
         agent = Agent(
             model=model,
@@ -79,6 +82,7 @@ class AgentPlugin(Plugin):
             sandbox_policy=sandbox,
             approval_service=approval,
             subagents=subagents,
+            skills=skills,
         )
         ctx.provide("agent", agent, self.name)
 
@@ -132,6 +136,8 @@ class Application:
         self.manager.register(WorkflowToolPlugin())
         self.manager.register(McpResourcesPlugin())
         self.manager.register(McpPlugin(config.workspace, config.mcp_servers))
+        self.manager.register(SkillsPlugin(config.workspace, config.skill_dirs, config.skill_include_default_roots, config.features["tools.skill"]))
+        self.manager.register(SkillToolPlugin())
         self.manager.register(MockModelPlugin())
         self.manager.register(
             DeepSeekModelPlugin(

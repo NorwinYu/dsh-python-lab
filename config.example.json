@@ -5,6 +5,8 @@
   "approve_all": false,
   "context_window": 1048576,
   "mcp_servers": {},
+  "skill_dirs": [],
+  "skill_include_default_roots": true,
   "features": {
     "core.system-prompt": true,
     "core.tools": true,
@@ -25,7 +27,9 @@
     "core.subagents": false,
     "core.workflow": false,
     "core.mcp": false,
+    "core.skills": false,
     "tools.mcp-resources": false,
+    "tools.skill": false,
     "tools.workflow": false,
     "tools.subagent": false,
     "tools.subagent-fork": false,

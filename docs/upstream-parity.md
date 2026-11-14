@@ -236,6 +236,17 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 服务器指令有 32KiB 默认上限；管理器支持 upsert/remove/enable/disable/restart/probe/list、状态事件和 HTTP API，最后一个服务器移除时撤回共享资源工具。
 - 当前没有自动重连预算、OAuth、完整凭据提供方轮换、资源订阅、MCP prompts、官方 SDK 输出 schema 校验或图片附件持久投影；HTTP 取消等待传输超时，VM/进程隔离不适用于远端服务器。
 
+### Skills 注册表、文件发现与调用（学习版纵向切片）
+
+- `core.skills` 与 `tools.skill` 默认关闭；支持运行时注册、提供方注册和项目/custom/user/bundled 根按 rank 合并，同名高优先级获胜。
+- 文件格式支持根下 `<name>/SKILL.md` 和 `<name>.md`，解析 name/description、disable-model-invocation、user-invocable 和严格布尔词；无效条目跳过。
+- 每次发现重新扫描，frontmatter/成员变化在下一步更新；每次加载重读正文，正文修改不改变目录 digest。
+- 持久 skill-catalog 用户消息按 entries+完整性 digest 去重，支持初始、替换、空目录、发现不完整及恢复；source 保留结构化 entries。
+- `skill` 工具按精确名称加载，disable-model-invocation 从目录和模型加载排除；`/name` 只扫描直接用户 prompt，支持重复去重和 user-invocable=false 拒绝。
+- 统一 `<skill_content>/<skill_resources>/<skill_instructions>` 渲染，提供 directory/url/opaque/provider 资源指引；目录描述规范化并默认最多 500 字符。
+- 提供 CLI skills/skill 和 HTTP 列表/加载；无 skill 或无工具时不发布初始空目录。
+- 当前 frontmatter 是学习版标量解析，不支持完整 YAML/Office 内置包/Chokidar/文件系统服务或官方工作目录作用域链。
+
 ### 外部插件与产品组装（学习版等价分层）
 
 - 使用 Python 标准 `minidsh.plugins` entry points 发现独立发行包；外部功能默认禁用，只有显式启用才导入插件代码。
@@ -351,5 +362,8 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - Streamable HTTP 验证 JSON/SSE 响应、MCP-Session-Id、凭据模板及结构化结果；未使用真实凭据。
 - 通知新增工具、远程重名保留旧代、恢复清除错误、RunCancelled 与 notifications/cancelled、管理启停/probe 和资源清理通过。
 - 最终 wheel 离线安装后真实 stdio MCP 工具与资源调用通过，关闭后子进程退出。
+- 真实 skill 文件验证初始目录、模型加载、隐藏模型的用户手势、描述更新、正文重读和空目录替换。
+- 项目/custom/runtime 优先级、严格布尔、发现不完整与恢复、user-invocable=false 拒绝、HTTP 和 CLI 加载通过。
+- 最终 wheel 离线安装后 skill 工具、/name 注入和目录替换通过；默认配置不产生 skill 工具或目录。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

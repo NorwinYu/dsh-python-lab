@@ -27,7 +27,9 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "core.subagents": False,
     "core.workflow": False,
     "core.mcp": False,
+    "core.skills": False,
     "tools.mcp-resources": False,
+    "tools.skill": False,
     "tools.workflow": False,
     "tools.subagent": False,
     "tools.subagent-fork": False,
@@ -69,6 +71,8 @@ class AppConfig:
     approve_all: bool = False
     context_window: int = 1_048_576
     mcp_servers: Dict[str, Dict[str, object]] = field(default_factory=dict)
+    skill_dirs: Tuple[Path, ...] = ()
+    skill_include_default_roots: bool = True
 
     @classmethod
     def load(
@@ -96,6 +100,8 @@ class AppConfig:
         resolved_approve_all = False
         resolved_context_window = 1_048_576
         resolved_mcp: Dict[str, Dict[str, object]] = {}
+        resolved_skill_dirs: Tuple[Path, ...] = ()
+        resolved_skill_defaults = True
 
         if config_path is not None:
             config_path = config_path.expanduser().resolve()
@@ -105,7 +111,7 @@ class AppConfig:
                 raise ConfigError(f"无法读取配置 {config_path}: {exc}") from exc
             if not isinstance(data, dict):
                 raise ConfigError("配置文件顶层必须是 JSON 对象")
-            allowed = {"session_dir", "features", "sandbox_mode", "approval_policy", "approve_all", "context_window", "mcp_servers"}
+            allowed = {"session_dir", "features", "sandbox_mode", "approval_policy", "approve_all", "context_window", "mcp_servers", "skill_dirs", "skill_include_default_roots"}
             unknown_keys = set(data) - allowed
             if unknown_keys:
                 raise ConfigError(f"未知配置项: {', '.join(sorted(unknown_keys))}")
@@ -125,6 +131,13 @@ class AppConfig:
             if not isinstance(configured_mcp, dict) or any(not isinstance(value, dict) for value in configured_mcp.values()):
                 raise ConfigError("mcp_servers 必须是服务器配置对象映射")
             resolved_mcp = configured_mcp
+            configured_skill_dirs = data.get("skill_dirs", [])
+            if not isinstance(configured_skill_dirs, list) or any(not isinstance(value, str) or not value for value in configured_skill_dirs):
+                raise ConfigError("skill_dirs 必须是非空路径字符串数组")
+            resolved_skill_dirs = tuple((workspace / value).expanduser().resolve() if not Path(value).is_absolute() else Path(value).expanduser().resolve() for value in configured_skill_dirs)
+            resolved_skill_defaults = data.get("skill_include_default_roots", True)
+            if not isinstance(resolved_skill_defaults, bool):
+                raise ConfigError("skill_include_default_roots 必须是布尔值")
 
         cls._apply_overrides(features, enable, True)
         cls._apply_overrides(features, disable, False)
@@ -155,6 +168,8 @@ class AppConfig:
             approve_all=resolved_approve_all,
             context_window=resolved_context_window,
             mcp_servers=resolved_mcp,
+            skill_dirs=resolved_skill_dirs,
+            skill_include_default_roots=resolved_skill_defaults,
         )
 
     @staticmethod
@@ -178,5 +193,7 @@ class AppConfig:
             "approve_all": self.approve_all,
             "context_window": self.context_window,
             "mcp_servers": self.mcp_servers,
+            "skill_dirs": [str(path) for path in self.skill_dirs],
+            "skill_include_default_roots": self.skill_include_default_roots,
             "features": self.features,
         }

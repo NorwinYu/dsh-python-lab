@@ -36,6 +36,7 @@ class Agent:
         sandbox_policy: Optional[SandboxPolicy] = None,
         approval_service: Optional[ApprovalService] = None,
         subagents: Optional[object] = None,
+        skills: Optional[object] = None,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -53,6 +54,7 @@ class Agent:
         self.sandbox_policy = sandbox_policy
         self.approval_service = approval_service
         self.subagents = subagents
+        self.skills = skills
 
     def run(
         self,
@@ -118,7 +120,7 @@ class Agent:
         if self.subagents is not None:
             self.subagents.set_root_running(session_id, True)
         try:
-            return self._run_steps(system, messages, session_id, turn, run_id, token)
+            return self._run_steps(system, messages, session_id, turn, run_id, token, prompt)
         except RunCancelled:
             reason = {"kind": "aborted"}
             self._record(session_id, "turn/end", {"turn": turn, "reason": reason})
@@ -136,12 +138,18 @@ class Agent:
         turn: int,
         run_id: Optional[str],
         token: CancellationToken,
+        user_prompt: str,
     ) -> str:
         for step in range(1, self.max_steps + 1):
             token.throw_if_cancelled()
             if self.subagents is not None:
                 inputs = self.subagents.consume_inputs(session_id)
                 for message in inputs:
+                    messages.append(message)
+                    self._record(session_id, "user/message", message)
+            if self.skills is not None:
+                skill_inputs = self.skills.before_step(session_id, step, user_prompt)
+                for message in skill_inputs:
                     messages.append(message)
                     self._record(session_id, "user/message", message)
             self._record(session_id, "step/start", {"turn": turn, "step": step})

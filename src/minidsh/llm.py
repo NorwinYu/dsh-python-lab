@@ -96,13 +96,15 @@ class MockModel(Model):
             if message["role"] != "user":
                 continue
             source = message.get("source", {})
-            if isinstance(source, dict) and source.get("kind") == "runtime-context":
+            if isinstance(source, dict) and source.get("kind") in {"runtime-context", "skill-catalog"}:
                 continue
             content = message["content"]
             if isinstance(content, list):
                 prompt = "".join(str(block.get("text", "")) for block in content if isinstance(block, dict)).strip()
             else:
                 prompt = str(content).strip()
+            if isinstance(source, dict) and source.get("kind") == "skill-invocation" and "<skill_instructions>\n" in prompt:
+                prompt = prompt.split("<skill_instructions>\n", 1)[1].rsplit("\n</skill_instructions>", 1)[0].strip()
             if prompt:
                 break
 
@@ -138,6 +140,10 @@ class MockModel(Model):
                 arguments={"questions": [{"id": "question-1", "question": question}]},
                 call_id="mock-1",
             )
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("使用技能") and "skill" in available:
+            call = ToolCall(name="skill", arguments={"name": prompt[4:].strip()}, call_id="mock-1")
             return ModelResponse(blocks=[tool_call_block(call)])
 
         if prompt.startswith("待办") and "todo_write" in available:
