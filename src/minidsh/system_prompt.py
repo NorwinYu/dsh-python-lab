@@ -44,6 +44,9 @@ class SystemPrompt:
         if name != "harness:identity":
             self._sections.pop(name, None)
 
+    def snapshot(self) -> List[PromptSection]:
+        return sorted(self._sections.values(), key=lambda section: (section.order, section.name))
+
     def render(self) -> str:
         sections: List[PromptSection] = sorted(
             self._sections.values(),

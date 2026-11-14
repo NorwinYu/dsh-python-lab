@@ -7,6 +7,8 @@
   "mcp_servers": {},
   "skill_dirs": [],
   "skill_include_default_roots": true,
+  "presets": {},
+  "default_preset": "standard",
   "features": {
     "core.system-prompt": true,
     "core.tools": true,
@@ -32,6 +34,7 @@
     "core.goals": false,
     "core.goal-rounds": false,
     "core.ptc": false,
+    "core.agent-presets": false,
     "tools.mcp-resources": false,
     "tools.run-code": false,
     "tools.skill": false,

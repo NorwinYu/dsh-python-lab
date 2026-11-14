@@ -14,6 +14,7 @@ from .goals import GoalService
 from .jobs import JobRecord, JobService
 from .mcp import McpManager
 from .pty_shell import PtyService
+from .presets import PresetService
 from .questions import UserQuestionService
 from .schedule import ScheduleService
 from .skills import SkillService
@@ -291,6 +292,10 @@ class ApiServer:
                         self._send_json(app.model.list_files())
                     elif path == "/v1/prompt":
                         self._send_json({"system": app.system_prompt.render(), "runtime_context": app.runtime_context})
+                    elif path == "/v1/presets":
+                        presets = app.ctx.require("agentPresets")
+                        assert isinstance(presets, PresetService)
+                        self._send_json({"default": presets.default, "items": presets.list()})
                     elif path == "/v1/skills":
                         skills = app.ctx.require("skills")
                         assert isinstance(skills, SkillService)
@@ -441,7 +446,14 @@ class ApiServer:
                         parts = path.split("/")
                         session_id = parts[3]
                         action = parts[4] if len(parts) > 4 else ""
-                        if action == "goal-create":
+                        if action == "preset":
+                            presets = app.ctx.require("agentPresets")
+                            assert isinstance(presets, PresetService)
+                            preset_id = body.get("id")
+                            if not isinstance(preset_id, str):
+                                raise ValueError("preset id 必须是字符串")
+                            self._send_json(presets.select(session_id, preset_id))
+                        elif action == "goal-create":
                             goals = app.ctx.require("goals")
                             assert isinstance(goals, GoalService)
                             self._send_json({"goal": goals.create(session_id, body.get("objective"), body.get("max_goal_rounds"))})
@@ -573,6 +585,10 @@ class ApiServer:
                     goals = app.ctx.require("goals")
                     assert isinstance(goals, GoalService)
                     self._send_json({"goal": goals.get(session_id)})
+                elif len(parts) == 5 and parts[4] == "preset":
+                    presets = app.ctx.require("agentPresets")
+                    assert isinstance(presets, PresetService)
+                    self._send_json({"id": presets.selected(session_id)})
                 elif len(parts) == 5 and parts[4] == "surface":
                     self._send_json(app.session.surface(session_id))
                 elif len(parts) == 5 and parts[4] == "todos":

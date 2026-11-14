@@ -70,14 +70,14 @@ class PtcService:
     def model_definitions(self, definitions: List[Dict[str, object]]) -> List[Dict[str, object]]:
         return [dict(definition) for definition in definitions if definition.get("name") == "run_code"]
 
-    def system_prompt(self, prompt: SystemPrompt) -> str:
+    def system_prompt(self, prompt: SystemPrompt, tools: Optional[ToolRegistry] = None) -> str:
         native = prompt.render_without_tools()
-        registry = self.ctx.require("tools")
+        registry = tools or self.ctx.require("tools")
         assert isinstance(registry, ToolRegistry)
         declarations = "\n\n".join(json.dumps(definition, ensure_ascii=False) for definition in registry.definitions() if definition["name"] != "run_code")
         return "\n\n".join(part for part in (native, PTC_ONLY_GUIDANCE, SDK_GUIDANCE + declarations) if part)
 
-    def execute(self, session_id: Optional[str], code: object, timeout_ms: object, token: Optional[CancellationToken], persistent: bool) -> Dict[str, object]:
+    def execute(self, session_id: Optional[str], code: object, timeout_ms: object, token: Optional[CancellationToken], persistent: bool, tool_ctx: Optional[ServiceContext] = None) -> Dict[str, object]:
         if not session_id:
             raise PtcError("run_code requires a calling session")
         if not isinstance(code, str) or not code.strip():
@@ -90,7 +90,7 @@ class PtcService:
             if self._closed or self._active.get(session_id):
                 raise PtcError("run_code is exclusive per session")
             self._active[session_id] = True
-        execution = _Execution(self, session_id, code, timeout, persistent, token)
+        execution = _Execution(self, session_id, code, timeout, persistent, token, tool_ctx)
         try:
             return execution.run()
         finally:
@@ -128,8 +128,9 @@ class PtcService:
 
 
 class _Execution:
-    def __init__(self, service: PtcService, session_id: str, code: str, timeout: int, persistent: bool, token: Optional[CancellationToken]) -> None:
+    def __init__(self, service: PtcService, session_id: str, code: str, timeout: int, persistent: bool, token: Optional[CancellationToken], tool_ctx: Optional[ServiceContext]) -> None:
         self.service = service
+        self.tool_ctx = tool_ctx or service.ctx
         self.session_id = session_id
         self.code = code
         self.timeout = timeout
@@ -232,7 +233,7 @@ class _Execution:
             self._start_pending()
 
     def _start_pending(self) -> None:
-        registry = self.service.ctx.require("tools")
+        registry = self.tool_ctx.require("tools")
         assert isinstance(registry, ToolRegistry)
         while self.pending and self.stop_status is None:
             mutating_active = any(call["mutating"] for call in self.active.values())
@@ -249,7 +250,7 @@ class _Execution:
             threading.Thread(target=self._run_tool, args=(call,), daemon=True).start()
 
     def _run_tool(self, call: Dict[str, object]) -> None:
-        registry = self.service.ctx.require("tools")
+        registry = self.tool_ctx.require("tools")
         assert isinstance(registry, ToolRegistry)
         call_id = int(call["id"])
         try:
@@ -375,7 +376,7 @@ class RunCodePlugin(Plugin):
             nonlocal persistent
             persistent = bool(arguments.get("persistent", persistent_default))
             timeout = arguments.get("timeoutMs")
-            result = service.execute(execution.session_id, arguments.get("code"), timeout, execution.cancel_token, persistent)
+            result = service.execute(execution.session_id, arguments.get("code"), timeout, execution.cancel_token, persistent, execution.ctx)
             rendered = {"status": result["status"], "value": result["value"], "logs": result["logs"], "diagnostic": result["diagnostic"]}
             return json.dumps(rendered, ensure_ascii=False)
         schema = {

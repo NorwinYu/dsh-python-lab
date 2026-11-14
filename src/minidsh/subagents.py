@@ -194,6 +194,9 @@ class SubagentService:
         with self._changed:
             record = self._children[child_id]
             token = record.token
+        presets = self.ctx.optional("agentPresets")
+        if presets is not None:
+            presets.inherit(record.parent_id, child_id)
         stop_reason = "completed"
         diagnostic = None
         output = ""

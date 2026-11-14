@@ -15,6 +15,7 @@ from .plugins import DisabledExternalPlugin, Plugin, PluginManager, ServiceConte
 from .pty_shell import PersistentBashPlugin, PtyPlugin
 from .pruner import ToolResultPrunerPlugin
 from .ptc import PtcPlugin, PtcService, RunCodePlugin
+from .presets import PLUGIN_TOOLS, PresetPlugin, PresetService
 from .questions import AskUserPlugin, UserQuestionsPlugin
 from .todo import TodoPlugin
 from .web_tools import WebPlugin, WebToolPlugin
@@ -61,6 +62,7 @@ class AgentPlugin(Plugin):
         schedules = ctx.optional("schedule")
         goals = ctx.optional("goals")
         ptc = ctx.optional("ptc")
+        presets = ctx.optional("agentPresets")
         assert isinstance(model, Model)
         assert isinstance(tools, ToolRegistry)
         assert isinstance(prompt, SystemPrompt)
@@ -74,6 +76,7 @@ class AgentPlugin(Plugin):
         assert schedules is None or isinstance(schedules, ScheduleService)
         assert goals is None or isinstance(goals, GoalService)
         assert ptc is None or isinstance(ptc, PtcService)
+        assert presets is None or isinstance(presets, PresetService)
         runtime_context = prompt.runtime_context(self.config.workspace, sandbox.context(), approval.context())
         agent = Agent(
             model=model,
@@ -95,6 +98,7 @@ class AgentPlugin(Plugin):
             schedules=schedules,
             goals=goals,
             ptc=ptc,
+            presets=presets,
         )
         ctx.provide("agent", agent, self.name)
 
@@ -157,6 +161,11 @@ class Application:
         self.manager.register(GoalRoundDriver())
         self.manager.register(PtcPlugin(config.workspace))
         self.manager.register(RunCodePlugin())
+        preset_definitions = config.presets or {
+            "standard": {"plugins": [name for name in PLUGIN_TOOLS if config.features[name]]},
+            "minimal": {"plugins": []},
+        }
+        self.manager.register(PresetPlugin(preset_definitions, config.default_preset))
         self.manager.register(MockModelPlugin())
         self.manager.register(
             DeepSeekModelPlugin(

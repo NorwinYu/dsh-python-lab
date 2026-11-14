@@ -42,6 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
     goal_parser.add_argument("--reason")
     goal_parser.add_argument("--goal-id")
     goal_parser.add_argument("--revision", type=int)
+    subparsers.add_parser("presets", help="列出 Agent presets")
+    preset_parser = subparsers.add_parser("preset", help="在首个模型回合前选择 Session preset")
+    preset_parser.add_argument("session_id")
+    preset_parser.add_argument("preset_id")
 
     run_parser = subparsers.add_parser("run", help="新建会话并运行 Agent")
     run_parser.add_argument("prompt", nargs="+", help="用户提示词")
@@ -133,7 +137,7 @@ def interactive_questions(request: Dict[str, object]) -> Dict[str, object]:
 
 
 def _with_default_command(argv: List[str], command: str) -> List[str]:
-    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "skills", "skill", "goal", "run", "resume", "session", "transcript", "todos", "fork", "compact", "repair", "migrate", "surface", "stream", "prune", "serve", "desktop"}
+    commands = {"config", "plugins", "tools", "models", "files", "prompt", "sessions", "skills", "skill", "goal", "presets", "preset", "run", "resume", "session", "transcript", "todos", "fork", "compact", "repair", "migrate", "surface", "stream", "prune", "serve", "desktop"}
     options_with_values = {"--workspace", "--config", "--enable", "--disable", "--sandbox-mode", "--approval-policy", "--context-window"}
     index = 0
     while index < len(argv):
@@ -253,6 +257,15 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
                 if args.action in {"pause", "complete", "blocked", "clear"}:
                     goals.disarm(args.session_id)
             print(json.dumps({"goal": result}, ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "presets":
+            presets = app.ctx.require("agentPresets")
+            print(json.dumps({"default": presets.default, "items": presets.list()}, ensure_ascii=False, indent=2))
+            return 0
+
+        if args.command == "preset":
+            print(json.dumps(app.ctx.require("agentPresets").select(args.session_id, args.preset_id), ensure_ascii=False))
             return 0
 
         if args.command == "session":

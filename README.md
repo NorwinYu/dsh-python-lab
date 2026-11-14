@@ -1,43 +1,104 @@
-# MiniDSH：从 0 学 Agent Harness
+# MiniDSH
 
-这是一个用于拆解 DeepSeek Harness（DSH）核心思想的 Python 学习项目。它不是官方 DSH 的完整移植，而是通过可运行的小切片逐层理解插件、工具、模型、审批、Shell、后台任务、会话恢复、压缩、HTTP/SSE、外部插件、产品发行和 Agent Loop。
+> 用 Python 从零拆解 DeepSeek Harness：一个能运行、能观察、能逐层关闭功能的 Agent Harness 学习项目。
 
-核心、Headless 和 Web 只使用 Python 标准库，支持 Python 3.9+；Desktop 的 `pywebview` 是独立可选依赖。MockModel 不需要 API Key；真实 DeepSeek 模型插件可独立开关。
+MiniDSH 把模型调用、工具执行、审批、会话、子 Agent 和宿主产品拆成可以独立验证的小层。你可以先跑通一个文件读取 Agent，再逐层打开工作流、MCP、Skills、定时任务、Goal 和 PTC，直接观察消息、事件与进程如何协作。
 
-## Git 与上游基线
+**它不是官方 DSH 的完整移植。** 已实现切片及剩余边界都明确写在 [`docs/upstream-parity.md`](docs/upstream-parity.md)，不会用“基本对齐”掩盖未实现能力。
 
-项目使用 Git 分阶段提交，对照的上游 commit 为：
+## 为什么适合学习
+
+- **核心零第三方依赖**：Python 3.9+ 即可运行，Node.js 仅用于 workflow 与 PTC。
+- **真实执行而非图示**：文件读写、Shell、JSON-RPC、JavaScript、子 Agent、定时投递都在实际进程中发生。
+- **功能逐层开关**：默认组合简单保守，高级能力按需启用，禁用后立即从 schema 和提示词消失。
+- **状态可检查**：JSONL 会话、事件流、工具结果、后台 job、goal revision 和投递回执都可直接读取。
+- **无需 API Key**：内置确定性 MockModel；DeepSeek Messages 适配器可单独启用，在线验收需要自己的凭据。
+
+## 功能地图
+
+| 层次 | 可以学到什么 | 默认状态 |
+|---|---|---|
+| Agent 基础 | 插件、系统提示词、工具、审批、文件策略、Agent Loop | 启用 |
+| 会话与宿主 | JSONL、恢复/fork、压缩、HTTP/SSE、后台 jobs、PTY | 启用 |
+| 协作执行 | 本地 spawn/fork 子 Agent、消息、中断、workflow 前后台 | 关闭 |
+| 扩展生态 | MCP 客户端与资源、文件 Skills、Agent Presets | 关闭 |
+| 长期工作 | Schedule 定时投递、持久 Goal 与自动 Round | 关闭 |
+| 程序执行 | TypeScript per-call、Node REPL、PTC SDK RPC | 关闭 |
+
+## 快速开始
+
+要求：macOS/Linux 上可用的 Python 3.9+。只有 workflow 和 PTC 需要 Node.js；Desktop 额外需要 `pywebview`。
+
+```bash
+git clone https://github.com/NorwinYu/dsh-python-lab.git
+cd dsh-python-lab
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install --upgrade pip
+python3 -m pip install -e .
+```
+
+先查看当前组合，再让 Mock Agent 读取项目说明：
+
+```bash
+minidsh plugins
+minidsh tools
+minidsh prompt
+minidsh run "读取 README.md" --trace
+```
+
+`--trace` 会显示 turn、工具调用及结果。默认文件策略是 `read-only`，写文件或执行 Shell 需要同时放宽模式并授权：
+
+```bash
+minidsh --sandbox-mode workspace-write --yes run "写入 demo.txt：hello"
+```
+
+> `--yes` 会批准本进程内的全部写入和 Shell 操作，只适合可信的本地学习场景。
+
+## 30 秒理解架构
+
+```text
+User / HTTP / CLI
+       │
+       ▼
+  Agent Loop ───────────────► DeepSeek Messages / MockModel
+       │                              │
+       ├─ ToolRegistry ───────────────┤
+       │  read/write/bash/jobs       tool calls
+       │  MCP/workflow/run_code         │
+       ├─ Session JSONL               │
+       │  messages/events/goals       ▼
+       ├─ Subagents/PTC workers    tool results
+       └─ Schedule / SSE / Web UI
+```
+
+每一层都是可替换插件：服务解决依赖，工具复用同一注册表，事件写入同一份会话历史。阅读顺序见[推荐学习路线](#推荐学习路线)。
+
+## 文档导航
+
+- [功能开关](#功能开关)
+- [文件策略与审批](#文件策略与写操作)
+- [会话恢复与压缩](#会话恢复与压缩)
+- [本地 Subagent 与协作控制](#本地-subagent-与协作控制)
+- [Workflow 与后台任务](#workflow-脚本编排与后台任务)
+- [MCP 客户端与资源](#mcp-客户端资源与管理器)
+- [Skills 发现与调用](#skills-发现目录与调用)
+- [Schedule 定时任务](#schedule-宿主定时任务)
+- [Goal 持久目标](#goal-持久目标与自动-round)
+- [run_code/PTC](#run_codeptc-执行层)
+- [Agent Presets](#agent-presets-与-persona)
+- [一致性边界与验证记录](docs/upstream-parity.md)
+- [配置示例](config.example.json)
+
+## 上游基线
+
+对照上游 `deepseek-ai/deepseek-harness` 的固定版本：
 
 ```text
 fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159
 ```
 
-已对齐和未对齐的边界记录在 `docs/upstream-parity.md`。工具提示词和 runtime-context 文案使用上游英文原文。
-
-```bash
-git log --oneline
-git status
-```
-
-## 立即运行
-
-```bash
-PYTHONPATH=src python3 -m minidsh plugins
-PYTHONPATH=src python3 -m minidsh tools
-PYTHONPATH=src python3 -m minidsh prompt
-PYTHONPATH=src python3 -m minidsh run "请列出当前目录" --trace
-PYTHONPATH=src python3 -m minidsh run "读取 README.md"
-```
-
-也可以安装成命令：
-
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-python3 -m pip install --upgrade pip
-python3 -m pip install -e .
-minidsh run "请列出当前目录"
-```
+工具提示词与 runtime-context 使用对应英文原文。项目按层提交并执行本地模拟服务、真实子进程、浏览器和离线 wheel 验收；尚未使用真实 DeepSeek API Key 做在线验收。
 
 ## 功能开关
 
@@ -64,6 +125,7 @@ minidsh run "请列出当前目录"
 - `core.goals`：会话内事件溯源的持久目标，默认关闭。
 - `core.goal-rounds`：独立开关的自动 Goal Round 驱动，默认关闭。
 - `core.ptc`：Node TypeScript/REPL 执行与嵌套工具 RPC，默认关闭。
+- `core.agent-presets`：按 Session 绑定工具、persona 与运行时上下文，默认关闭。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
@@ -633,6 +695,39 @@ PTC 模式下模型只看到 `run_code` 和动态 SDK，其他工具只作为程
 
 当前没有官方 Acorn 源码变换、完整协作式 revoke/进程树清理、PTC 图片投影、环境 reset 控件或 `sandbox_permissions` 提权。
 
+## Agent Presets 与 Persona
+
+```json
+{
+  "features": {"core.agent-presets": true},
+  "default_preset": "standard",
+  "presets": {
+    "standard": {"plugins": ["tools.read", "tools.glob"]},
+    "minimal": {
+      "plugins": [],
+      "persona": {"prefix": "Minimal agent", "complete": true, "includeRuntimeContext": false}
+    },
+    "coder": {
+      "plugins": ["tools.run-code", "tools.read"],
+      "persona": {"prefix": "Coder", "suffix": "End"}
+    }
+  }
+}
+```
+
+每个 Session 的工具注册表和系统提示词独立。`preset/selected` 事件持久化选择；未记录时使用 `default_preset`。默认 standard 继承当前启用的工具，minimal 不暴露工具。缺失的历史 preset 会失败关闭，而不是回退到其他组合。
+
+空白 Session 可在首个模型回合前切换，重复选择幂等；首回合后拒绝切换。fork 和本地子 Agent 继承父 preset。`complete` 只保留 persona prefix，`includeRuntimeContext=false` 不再追加 runtime-context 快照。
+
+PTC SDK 与嵌套 RPC 使用同一 scoped ServiceContext，因此从 preset 删除工具也会同时删除其 `run_code` 调用权限。
+
+```bash
+PYTHONPATH=src python3 -m minidsh --enable core.agent-presets presets
+PYTHONPATH=src python3 -m minidsh --enable core.agent-presets preset <session-id> minimal
+```
+
+HTTP 提供 `GET /v1/presets` 和 `GET/POST /v1/sessions/<id>/preset`。当前插件清单是学习版名称映射，不是官方 Cordis YAML/Loader 代际、激活审计、热重载或完整 AgentPresetInspection。
+
 ## HTTP 宿主与 Web 页面
 
 启动本地 HTTP/SSE 宿主：
@@ -976,9 +1071,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 阅读 `src/minidsh/goals.py` 的事件回放、revision、权限、armed 状态和 Round 驱动，理解持久目标与进程内续行授权的分离。
 
-### 第 25 层：run_code/PTC 执行层（当前）
+### 第 25 层：run_code/PTC 执行层
 
 对照 `src/minidsh/ptc_runner.js` 的两个求值器与 `src/minidsh/ptc.py` 的宿主调度，理解 SDK RPC、并行限制、持久 worker、超时与清理。
+
+### 第 26 层：Agent Presets 与 Persona（当前）
+
+阅读 `src/minidsh/presets.py` 的 scoped ServiceContext、选择事件和 persona，再观察 Agent 的绑定顺序与子 Agent 继承。
 
 ## 当前边界
 

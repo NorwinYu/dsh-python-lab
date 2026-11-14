@@ -282,6 +282,16 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 支持 process group 清理、持久进程释放、重启内存清空、Seatbelt 的 read-only/workspace-write/danger-full-access 执行策略。
 - 当前没有官方 Acorn 源码变换、完整协作式 revoke/进程树清理、PTC 图片投影、环境 reset 控件、sandbox_permissions 提权或独立 TypeScript 类型检查。
 
+### Agent Presets 与 Persona（学习版纵向切片）
+
+- `core.agent-presets` 默认关闭；preset/selected 事件按 Session 持久化选择，默认 standard 继承启用工具，minimal 不暴露工具。
+- 自定义 plugins 列表决定 scoped ToolRegistry 与提示词段；每次运行按 Session 绑定，互不影响并发会话，缺失历史 preset 失败关闭。
+- 空白 Session 可在首个模型回合前切换，重复选择幂等，首回合后拒绝；fork 和本地子 Agent 继承父 preset。
+- persona 支持 prefix/suffix、complete 和 includeRuntimeContext；complete 仅保留 prefix，关闭 runtime 时不再追加快照。
+- scoped ServiceContext 同时约束 PTC SDK 与嵌套 RPC，提示词被裁剪的工具不能经 run_code 越权调用。
+- 提供 CLI presets/preset 和 HTTP 列表、Session 查询与选择。
+- 当前插件清单是学习版名称映射，不是官方 Cordis YAML/Loader 代际、运行时热重载、激活审计或完整 AgentPresetInspection。
+
 ### 外部插件与产品组装（学习版等价分层）
 
 - 使用 Python 标准 `minidsh.plugins` entry points 发现独立发行包；外部功能默认禁用，只有显式启用才导入插件代码。
@@ -412,5 +422,8 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - REPL 两次调用保留变量，per-call 隔离和重启清空通过；修复 REPL stdout 混流、重复读取者与持久管道误关闭。
 - 同步死循环 timeout、取消 abort、子调用额度、输出上限、invalid-output、exception 和进程回收通过。
 - Seatbelt 下 Node 读取成功且 read-only 写入被内核拒绝，模型 run_code 返回结构化结果；最终 wheel 的两种执行模式通过。
+- standard 的 read/glob、minimal 完整 persona 和无 runtime context、空白重复选择幂等、首回合后拒绝与子 Agent 继承通过。
+- scoped PTC SDK 可读取允许文件，删除的 write 经 RPC 仍报工具不存在；HTTP 与 CLI 的列表/选择通过。
+- 最终 wheel 离线安装后 preset 隔离、完整 persona 和 scoped PTC 权限通过。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

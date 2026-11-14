@@ -86,6 +86,9 @@ class ToolRegistry:
         updated.update((tool.name, tool) for tool in tools)
         self._tools = updated
 
+    def snapshot(self) -> List[Tool]:
+        return list(self._tools.values())
+
     def definitions(self) -> List[Dict[str, object]]:
         return [tool.definition() for tool in self._tools.values()]
 

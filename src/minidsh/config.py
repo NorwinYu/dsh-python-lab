@@ -32,6 +32,7 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "core.goals": False,
     "core.goal-rounds": False,
     "core.ptc": False,
+    "core.agent-presets": False,
     "tools.mcp-resources": False,
     "tools.run-code": False,
     "tools.skill": False,
@@ -80,6 +81,8 @@ class AppConfig:
     mcp_servers: Dict[str, Dict[str, object]] = field(default_factory=dict)
     skill_dirs: Tuple[Path, ...] = ()
     skill_include_default_roots: bool = True
+    presets: Dict[str, Dict[str, object]] = field(default_factory=dict)
+    default_preset: str = "standard"
 
     @classmethod
     def load(
@@ -109,6 +112,8 @@ class AppConfig:
         resolved_mcp: Dict[str, Dict[str, object]] = {}
         resolved_skill_dirs: Tuple[Path, ...] = ()
         resolved_skill_defaults = True
+        resolved_presets: Dict[str, Dict[str, object]] = {}
+        resolved_default_preset = "standard"
 
         if config_path is not None:
             config_path = config_path.expanduser().resolve()
@@ -118,7 +123,7 @@ class AppConfig:
                 raise ConfigError(f"无法读取配置 {config_path}: {exc}") from exc
             if not isinstance(data, dict):
                 raise ConfigError("配置文件顶层必须是 JSON 对象")
-            allowed = {"session_dir", "features", "sandbox_mode", "approval_policy", "approve_all", "context_window", "mcp_servers", "skill_dirs", "skill_include_default_roots"}
+            allowed = {"session_dir", "features", "sandbox_mode", "approval_policy", "approve_all", "context_window", "mcp_servers", "skill_dirs", "skill_include_default_roots", "presets", "default_preset"}
             unknown_keys = set(data) - allowed
             if unknown_keys:
                 raise ConfigError(f"未知配置项: {', '.join(sorted(unknown_keys))}")
@@ -145,6 +150,13 @@ class AppConfig:
             resolved_skill_defaults = data.get("skill_include_default_roots", True)
             if not isinstance(resolved_skill_defaults, bool):
                 raise ConfigError("skill_include_default_roots 必须是布尔值")
+            configured_presets = data.get("presets", {})
+            if not isinstance(configured_presets, dict) or any(not isinstance(value, dict) for value in configured_presets.values()):
+                raise ConfigError("presets 必须是配置对象映射")
+            resolved_presets = configured_presets
+            resolved_default_preset = data.get("default_preset", "standard")
+            if not isinstance(resolved_default_preset, str) or not resolved_default_preset:
+                raise ConfigError("default_preset 必须是非空字符串")
 
         cls._apply_overrides(features, enable, True)
         cls._apply_overrides(features, disable, False)
@@ -177,6 +189,8 @@ class AppConfig:
             mcp_servers=resolved_mcp,
             skill_dirs=resolved_skill_dirs,
             skill_include_default_roots=resolved_skill_defaults,
+            presets=resolved_presets,
+            default_preset=resolved_default_preset,
         )
 
     @staticmethod
@@ -202,5 +216,7 @@ class AppConfig:
             "mcp_servers": self.mcp_servers,
             "skill_dirs": [str(path) for path in self.skill_dirs],
             "skill_include_default_roots": self.skill_include_default_roots,
+            "presets": self.presets,
+            "default_preset": self.default_preset,
             "features": self.features,
         }

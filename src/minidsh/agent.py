@@ -40,6 +40,7 @@ class Agent:
         schedules: Optional[object] = None,
         goals: Optional[object] = None,
         ptc: Optional[object] = None,
+        presets: Optional[object] = None,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -61,6 +62,7 @@ class Agent:
         self.schedules = schedules
         self.goals = goals
         self.ptc = ptc
+        self.presets = presets
 
     def run(
         self,
@@ -90,7 +92,6 @@ class Agent:
         token = cancel_token or CancellationToken(run_id)
         token.throw_if_cancelled()
         image_blocks = load_image_blocks(self.workspace, image_paths or [], self.allow_outside)
-        system = self.ptc.system_prompt(self.system_prompt) if self.ptc is not None else self.system_prompt.render()
         messages: List[Dict[str, object]] = []
         turn = 1
         resumed = session_id is not None
@@ -104,12 +105,29 @@ class Agent:
             messages = self.session.derive_messages(session_id)
             turn = self.session.latest_turn(session_id) + 1
             self._restore_observations(events)
-            previous_system = self.session.derive_system(session_id)
-            if previous_system != system:
-                self._record_system(session_id, system)
             self._record(session_id, "session/resume", {"turn": turn})
         else:
             session_id = new_session_id or uuid.uuid4().hex
+
+        tools = self.tools
+        include_runtime_context = True
+        if self.presets is not None:
+            composition = self.presets.bind(session_id)
+            tools = composition.tools
+            include_runtime_context = composition.include_runtime_context
+            if composition.complete:
+                system = next((section.text for section in composition.prompt.snapshot() if section.name == "deployment:persona-prefix"), "")
+            elif self.ptc is not None and any(definition["name"] == "run_code" for definition in tools.definitions()):
+                system = self.ptc.system_prompt(composition.prompt, tools)
+            else:
+                system = composition.prompt.render()
+        else:
+            system = self.ptc.system_prompt(self.system_prompt, tools) if self.ptc is not None else self.system_prompt.render()
+        if resumed:
+            previous_system = self.session.derive_system(session_id)
+            if previous_system != system:
+                self._record_system(session_id, system)
+        else:
             self._record_system(session_id, system)
             self._record(session_id, "session/start", {"prompt": prompt})
 
@@ -124,17 +142,20 @@ class Agent:
             "content": [text_block(self._current_runtime_context(session_id))],
             "source": {"kind": "runtime-context"},
         }
-        messages.extend([user_message, runtime_message])
+        messages.append(user_message)
+        if include_runtime_context:
+            messages.append(runtime_message)
         self._record(session_id, "user/message", user_message)
         if message_source is not None and message_source.get("kind") == "schedule":
             self.events.emit("schedule/inbox", {"session_id": session_id, "source": message_source, "run_id": run_id})
-        self._record(session_id, "user/message", runtime_message)
+        if include_runtime_context:
+            self._record(session_id, "user/message", runtime_message)
         self._record(session_id, "turn/start", {"turn": turn})
         self.events.emit("turn/start", {"session_id": session_id, "prompt": prompt, "run_id": run_id})
         if self.subagents is not None:
             self.subagents.set_root_running(session_id, True)
         try:
-            return self._run_steps(system, messages, session_id, turn, run_id, token, prompt)
+            return self._run_steps(system, messages, session_id, turn, run_id, token, prompt, tools)
         except RunCancelled:
             reason = {"kind": "aborted"}
             self._record(session_id, "turn/end", {"turn": turn, "reason": reason})
@@ -153,7 +174,9 @@ class Agent:
         run_id: Optional[str],
         token: CancellationToken,
         user_prompt: str,
+        tools: Optional[ToolRegistry] = None,
     ) -> str:
+        tools = tools or self.tools
         for step in range(1, self.max_steps + 1):
             token.throw_if_cancelled()
             if self.subagents is not None:
@@ -182,7 +205,7 @@ class Agent:
                 messages = self.compaction.compact_if_needed(
                     system,
                     messages,
-                    self.ptc.model_definitions(self.tools.definitions()) if self.ptc is not None else self.tools.definitions(),
+                    self.ptc.model_definitions(tools.definitions()) if self.ptc is not None and any(definition["name"] == "run_code" for definition in tools.definitions()) else tools.definitions(),
                     session_id,
                     cancel_token=token,
                 )
@@ -207,7 +230,7 @@ class Agent:
             response = self.model.complete(
                 system,
                 messages,
-                self.ptc.model_definitions(self.tools.definitions()) if self.ptc is not None else self.tools.definitions(),
+                self.ptc.model_definitions(tools.definitions()) if self.ptc is not None and any(definition["name"] == "run_code" for definition in tools.definitions()) else tools.definitions(),
                 session_id,
                 token,
                 forward_model_event if self.streaming else None,
@@ -278,7 +301,7 @@ class Agent:
                 )
                 is_error = False
                 try:
-                    result = self.tools.execute(
+                    result = tools.execute(
                         call.name,
                         call.arguments,
                         session_id,
@@ -316,7 +339,7 @@ class Agent:
         compacted = self.compaction.compact_if_needed(
             self.system_prompt.render(),
             messages,
-            self.ptc.model_definitions(self.tools.definitions()) if self.ptc is not None else self.tools.definitions(),
+            self.ptc.model_definitions(tools.definitions()) if self.ptc is not None and any(definition["name"] == "run_code" for definition in tools.definitions()) else tools.definitions(),
             session_id,
             force=True,
         )
