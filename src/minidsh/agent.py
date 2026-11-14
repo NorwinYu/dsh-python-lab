@@ -37,6 +37,7 @@ class Agent:
         approval_service: Optional[ApprovalService] = None,
         subagents: Optional[object] = None,
         skills: Optional[object] = None,
+        schedules: Optional[object] = None,
     ) -> None:
         self.model = model
         self.tools = tools
@@ -55,6 +56,7 @@ class Agent:
         self.approval_service = approval_service
         self.subagents = subagents
         self.skills = skills
+        self.schedules = schedules
 
     def run(
         self,
@@ -64,11 +66,12 @@ class Agent:
         cancel_token: Optional[CancellationToken] = None,
         image_paths: Optional[List[str]] = None,
         new_session_id: Optional[str] = None,
+        message_source: Optional[Dict[str, object]] = None,
     ) -> str:
         if session_id is not None and self.session is not None:
             with self.session.write_lease(session_id):
-                return self._run(prompt, session_id, run_id, cancel_token, image_paths, new_session_id)
-        return self._run(prompt, session_id, run_id, cancel_token, image_paths, new_session_id)
+                return self._run(prompt, session_id, run_id, cancel_token, image_paths, new_session_id, message_source)
+        return self._run(prompt, session_id, run_id, cancel_token, image_paths, new_session_id, message_source)
 
     def _run(
         self,
@@ -78,6 +81,7 @@ class Agent:
         cancel_token: Optional[CancellationToken] = None,
         image_paths: Optional[List[str]] = None,
         new_session_id: Optional[str] = None,
+        message_source: Optional[Dict[str, object]] = None,
     ) -> str:
         token = cancel_token or CancellationToken(run_id)
         token.throw_if_cancelled()
@@ -107,6 +111,8 @@ class Agent:
 
         messages = [message for message in messages if not self._is_runtime_context(message)]
         user_message = {"role": "user", "content": [text_block(prompt)] + image_blocks}
+        if message_source is not None:
+            user_message["source"] = message_source
         runtime_message = {
             "role": "user",
             "content": [text_block(self._current_runtime_context(session_id))],
@@ -114,6 +120,8 @@ class Agent:
         }
         messages.extend([user_message, runtime_message])
         self._record(session_id, "user/message", user_message)
+        if message_source is not None and message_source.get("kind") == "schedule":
+            self.events.emit("schedule/inbox", {"session_id": session_id, "source": message_source, "run_id": run_id})
         self._record(session_id, "user/message", runtime_message)
         self._record(session_id, "turn/start", {"turn": turn})
         self.events.emit("turn/start", {"session_id": session_id, "prompt": prompt, "run_id": run_id})
@@ -147,6 +155,13 @@ class Agent:
                 for message in inputs:
                     messages.append(message)
                     self._record(session_id, "user/message", message)
+            if self.schedules is not None:
+                scheduled_inputs = self.schedules.take_pending(session_id)
+                for scheduled in scheduled_inputs:
+                    message = {"role": "user", "content": [text_block(scheduled["text"])], "source": scheduled["source"]}
+                    messages.append(message)
+                    self._record(session_id, "user/message", message)
+                    self.events.emit("schedule/inbox", {"session_id": session_id, "source": scheduled["source"], "run_id": run_id})
             if self.skills is not None:
                 skill_inputs = self.skills.before_step(session_id, step, user_prompt)
                 for message in skill_inputs:

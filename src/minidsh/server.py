@@ -14,6 +14,7 @@ from .jobs import JobRecord, JobService
 from .mcp import McpManager
 from .pty_shell import PtyService
 from .questions import UserQuestionService
+from .schedule import ScheduleService
 from .skills import SkillService
 from .subagents import SubagentService
 
@@ -43,6 +44,7 @@ EVENT_NAMES = (
     "workflow/agent-end",
     "workflow/end",
     "mcp-manager/status",
+    "schedule/changed",
 )
 
 
@@ -300,6 +302,25 @@ class ApiServer:
                         questions = app.ctx.require("userQuestions")
                         assert isinstance(questions, UserQuestionService)
                         self._send_json(questions.list())
+                    elif path == "/v1/schedule":
+                        schedule = app.ctx.require("schedule")
+                        assert isinstance(schedule, ScheduleService)
+                        active_text = query.get("active", [None])[0]
+                        active = None if active_text is None else active_text.lower() == "true"
+                        limit = int(query.get("limit", ["100"])[0])
+                        offset = int(query.get("offset", ["0"])[0])
+                        self._send_json(schedule.list(active, limit, offset))
+                    elif path.startswith("/v1/schedule/"):
+                        schedule = app.ctx.require("schedule")
+                        assert isinstance(schedule, ScheduleService)
+                        parts = path.split("/")
+                        task_id = parts[3]
+                        if len(parts) == 5 and parts[4] == "history":
+                            limit = int(query.get("limit", ["100"])[0])
+                            before = query.get("before", [None])[0]
+                            self._send_json(schedule.history(task_id, limit, before))
+                        else:
+                            self._send_json(schedule.view(task_id))
                     elif path == "/v1/sessions":
                         self._send_json(app.session.list_sessions() if app.session is not None else [])
                     elif path.startswith("/v1/sessions/"):
@@ -356,6 +377,28 @@ class ApiServer:
                             questions = app.ctx.require("userQuestions")
                             assert isinstance(questions, UserQuestionService)
                             self._send_json(questions.answer(parts[3], body))
+                        else:
+                            self._send_json({"error": "not found"}, 404)
+                    elif path == "/v1/schedule":
+                        schedule = app.ctx.require("schedule")
+                        assert isinstance(schedule, ScheduleService)
+                        self._send_json(schedule.create(body.get("title"), body.get("prompt"), body.get("timing"), body.get("target")))
+                    elif path == "/v1/schedule/delete-inactive":
+                        schedule = app.ctx.require("schedule")
+                        assert isinstance(schedule, ScheduleService)
+                        self._send_json(schedule.delete_inactive())
+                    elif path.startswith("/v1/schedule/"):
+                        schedule = app.ctx.require("schedule")
+                        assert isinstance(schedule, ScheduleService)
+                        parts = path.split("/")
+                        if len(parts) != 5:
+                            self._send_json({"error": "not found"}, 404)
+                            return
+                        task_id, action = parts[3], parts[4]
+                        if action == "run":
+                            self._send_json(schedule.run(task_id))
+                        elif action == "edit":
+                            self._send_json(schedule.edit(task_id, body.get("action"), body.get("patch", {}), body.get("expectedUpdatedAt")))
                         else:
                             self._send_json({"error": "not found"}, 404)
                     elif path == "/v1/mcp":
@@ -565,7 +608,7 @@ class ApiServer:
                             if event in {"subagent/start", "subagent/end"} or event.startswith("workflow/"):
                                 if payload.get("root_session_id") != listener.session_id:
                                     continue
-                            elif event not in {"job/settled", "mcp-manager/status"} and payload.get("run_id") != operation_id:
+                            elif event not in {"job/settled", "mcp-manager/status", "schedule/changed"} and payload.get("run_id") != operation_id:
                                 continue
                         data = json.dumps(payload, ensure_ascii=False)
                         self.wfile.write(f"id: {message['id']}\nevent: {event}\ndata: {data}\n\n".encode("utf-8"))

@@ -60,6 +60,7 @@ minidsh run "请列出当前目录"
 - `core.workflow`：Node 隔离 JavaScript workflow 引擎，默认关闭。
 - `core.mcp`：MCP stdio/HTTP 客户端与运行时管理器，默认关闭。
 - `core.skills`：Skills 注册表、文件发现与持久目录，默认关闭。
+- `core.schedule`：宿主级定时任务、投递与恢复，默认关闭。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
@@ -79,6 +80,7 @@ minidsh run "请列出当前目录"
 - `tools.workflow`：官方 `workflow` JavaScript 前后台编排与 jobs 切片，默认关闭。
 - `tools.mcp-resources`：三个共享 MCP 资源工具，默认关闭；有服务器时可见。
 - `tools.skill`：官方 `skill` 精确名称加载工具，默认关闭。
+- `tools.schedule`：`schedule_create/list/view/edit` 工具组，默认关闭。
 - `session.jsonl`：带版本头的 JSONL、v0 迁移、崩溃恢复和 POSIX 写锁。
 - `llm.mock`：确定性模拟模型，默认启用。
 - `llm.deepseek`：真实 DeepSeek Messages 模型，默认禁用。
@@ -543,6 +545,32 @@ PYTHONPATH=src python3 -m minidsh \
 
 当前 frontmatter 是学习版标量解析，不是完整 YAML；尚无 Office 内置技能、Chokidar、官方工作目录作用域链或文件系统服务。
 
+## Schedule 宿主定时任务
+
+```bash
+PYTHONPATH=src python3 -m minidsh \
+  --enable core.schedule --enable tools.schedule \
+  run '定时任务 {"title":"部署检查","prompt":"检查部署状态","rrule":"DTSTART:20990101T090000Z\\nRRULE:FREQ=DAILY;COUNT=1","target":"this_session"}'
+```
+
+四个模型工具为 `schedule_create/list/view/edit`。任务属于宿主，可跨 Session 列举；创建和修改必须来自用户明确授权。`this_session` 复用当前会话，`new_once` 首次创建后复用，`new` 每次创建独立会话。委派子 Agent 不能管理或接收计划任务。
+
+支持 `after/at/every/daily/weekly/cron/rrule` 时间记录。Cron 是五字段格式；RRULE 支持主要频率、INTERVAL/COUNT/UNTIL、BYDAY/BYMONTHDAY/BYMONTH/BYSETPOS 等。当前不支持 BYWEEKNO/BYYEARDAY，BYHOUR/BYMINUTE/BYSECOND 各只接受一个值，不是完整 RFC 5545 求值器。
+
+任务原子写入 `.minidsh/schedule.json`（schedule v2）。重启只追赶最近一次发生时点；运行中目标在下一次模型步骤接收消息。`schedule/inbox` 回执只确认消息已持久化，不代表模型执行完成。每个任务保留最近 200 条、30 天投递记录，默认最小投递间隔 60 秒。
+
+```text
+GET  /v1/schedule[?active=true&limit=100&offset=0]
+POST /v1/schedule                  {"title":"...","prompt":"...","timing":{...},"target":{...}}
+GET  /v1/schedule/<id>
+GET  /v1/schedule/<id>/history
+POST /v1/schedule/<id>/run
+POST /v1/schedule/<id>/edit        {"action":"update","patch":{...},"expectedUpdatedAt":"..."}
+POST /v1/schedule/delete-inactive
+```
+
+当前没有关联 Agent 变更通知、归档准入、批量 Session 提醒、独立执行槽或其他存储后端。
+
 ## HTTP 宿主与 Web 页面
 
 启动本地 HTTP/SSE 宿主：
@@ -874,9 +902,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 阅读 `src/minidsh/mcp.py` 的传输、工具代际、资源路由和状态管理，理解远程命名、取消、凭据脱敏与失败关闭。
 
-### 第 22 层：Skills 发现、目录与调用（当前）
+### 第 22 层：Skills 发现、目录与调用
 
 阅读 `src/minidsh/skills.py` 的提供方合并、frontmatter、目录 digest、统一渲染与手势入口，再观察 Agent 的持久消息注入。
+
+### 第 23 层：Schedule 宿主定时任务（当前）
+
+阅读 `src/minidsh/schedule_time.py` 的时间求值和 `src/minidsh/schedule.py` 的任务存储、目标投递、回执与追赶，理解收件箱确认和模型完成之间的区别。
 
 ## 当前边界
 

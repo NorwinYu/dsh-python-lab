@@ -1,3 +1,4 @@
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
@@ -132,6 +133,21 @@ class MockModel(Model):
             else:
                 text = str(content)
             return ModelResponse(blocks=[text_block(f"工具已经执行完成：\n{text}")])
+
+        if prompt.startswith("定时任务") and "schedule_create" in available:
+            call = ToolCall(name="schedule_create", arguments=json.loads(prompt[4:].strip()), call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("定时列表") and "schedule_list" in available:
+            return ModelResponse(blocks=[tool_call_block(ToolCall(name="schedule_list", arguments={}, call_id="mock-1"))])
+
+        if prompt.startswith("定时查看") and "schedule_view" in available:
+            call = ToolCall(name="schedule_view", arguments={"id": prompt[4:].strip()}, call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
+
+        if prompt.startswith("定时编辑") and "schedule_edit" in available:
+            call = ToolCall(name="schedule_edit", arguments=json.loads(prompt[4:].strip()), call_id="mock-1")
+            return ModelResponse(blocks=[tool_call_block(call)])
 
         if prompt.startswith("提问") and "ask_user_question" in available:
             question = prompt[2:].strip()

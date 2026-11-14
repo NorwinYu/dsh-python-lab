@@ -247,6 +247,18 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 提供 CLI skills/skill 和 HTTP 列表/加载；无 skill 或无工具时不发布初始空目录。
 - 当前 frontmatter 是学习版标量解析，不支持完整 YAML/Office 内置包/Chokidar/文件系统服务或官方工作目录作用域链。
 
+### Schedule 宿主定时任务与投递（学习版纵向切片）
+
+- `core.schedule` 和 `tools.schedule` 默认关闭；支持 after/at/every/daily/weekly/cron/rrule 七种时间记录、UTC 毫秒时刻和本地时区。
+- Cron 支持五字段列表/范围/步长及 Vixie 日期 OR 语义；RRULE 支持 MINUTELY/HOURLY/DAILY/WEEKLY/MONTHLY/YEARLY、INTERVAL/COUNT/UNTIL、BYDAY/BYMONTHDAY/BYMONTH/BYHOUR/BYMINUTE/BYSECOND/BYSETPOS。
+- 当前 RRULE 不支持 BYWEEKNO/BYYEARDAY，BYHOUR/BYMINUTE/BYSECOND 各只接受一个值，DST 使用 zoneinfo 跳过不存在墙钟并选较早 fold。
+- `.minidsh/schedule.json` 使用 schedule v2 原子整单元持久化，打开校验版本、任务 id 和 scheduledAt；损坏输入不发布新文件。
+- schedule_create/list/view/edit 支持目标、活动筛选、分页、暂停恢复、expectedUpdatedAt 冲突和删除；run 不移动原发生时点，history 支持游标，deleteInactive 只清理 ended。
+- this_session 复用现有会话，new_once 预留并复用新会话，new 每次创建；委派调用和委派目标拒绝。
+- 定时器只追赶最近一次，运行中目标在下一边界注入；schedule/inbox 在消息持久化时确认回执，不代表模型完成。历史最多 200 条/30 天，60 秒单任务投递间隔。
+- HTTP 提供 create/list/view/history/edit/run/deleteInactive 和 schedule/changed；管理读取不激活目标 Session。
+- 当前没有完整 RFC 5545 求值器、关联 Agent 变更通知、归档准入、批量 Session 提醒、执行槽或独立存储后端。
+
 ### 外部插件与产品组装（学习版等价分层）
 
 - 使用 Python 标准 `minidsh.plugins` entry points 发现独立发行包；外部功能默认禁用，只有显式启用才导入插件代码。
@@ -365,5 +377,9 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 真实 skill 文件验证初始目录、模型加载、隐藏模型的用户手势、描述更新、正文重读和空目录替换。
 - 项目/custom/runtime 优先级、严格布尔、发现不完整与恢复、user-invocable=false 拒绝、HTTP 和 CLI 加载通过。
 - 最终 wheel 离线安装后 skill 工具、/name 注入和目录替换通过；默认配置不产生 skill 工具或目录。
+- Cron 工作时刻、月末最后一个工作日 BYSETPOS=-1、DAILY COUNT=2 耗尽和 DTSTART 默认值通过；修复 aware/naive 比较与负索引。
+- 创建/暂停/恢复/冲突、真实一秒定时回执、new_once 新会话、历史、pending 和 v2 存储通过。
+- 重启只投递一次并推进未来时点，运行中目标队列注入、委派拒绝、HTTP 管理和默认不可见通过。
+- 最终 wheel 离线安装后真实定时投递、回执和重启追赶通过。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。
