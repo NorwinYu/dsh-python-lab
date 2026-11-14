@@ -22,6 +22,8 @@
     "core.user-questions": true,
     "core.web": true,
     "core.subagents": false,
+    "core.workflow": false,
+    "tools.workflow": false,
     "tools.subagent": false,
     "tools.subagent-fork": false,
     "tools.subagent-control": false,

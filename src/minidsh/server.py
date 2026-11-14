@@ -34,6 +34,12 @@ EVENT_NAMES = (
     "question/answered",
     "subagent/start",
     "subagent/end",
+    "workflow/start",
+    "workflow/phase",
+    "workflow/log",
+    "workflow/agent-start",
+    "workflow/agent-end",
+    "workflow/end",
 )
 
 
@@ -503,7 +509,7 @@ class ApiServer:
                             operation_id = listener.operation_id
                             if event.startswith("run/") and payload.get("run_id") != operation_id:
                                 continue
-                            if event in {"subagent/start", "subagent/end"}:
+                            if event in {"subagent/start", "subagent/end"} or event.startswith("workflow/"):
                                 if payload.get("root_session_id") != listener.session_id:
                                     continue
                             elif event != "job/settled" and payload.get("run_id") != operation_id:

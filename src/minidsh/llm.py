@@ -157,6 +157,19 @@ class MockModel(Model):
             call = ToolCall(name="web_search", arguments={"queries": [prompt[2:].strip()]}, call_id="mock-1")
             return ModelResponse(blocks=[tool_call_block(call)])
 
+        if prompt.startswith("工作流") and "workflow" in available:
+            items = [item.strip() for item in prompt[3:].strip().split("|") if item.strip()] or ["你好"]
+            call = ToolCall(
+                name="workflow",
+                arguments={
+                    "script": "phase('agents'); return await parallel(args.items.map(item => () => agent(item)))",
+                    "meta": {"name": "mock-fanout", "description": "Run the requested parallel agents"},
+                    "args": {"items": items},
+                },
+                call_id="mock-1",
+            )
+            return ModelResponse(blocks=[tool_call_block(call)])
+
         if prompt.startswith("委派") and "subagent" in available:
             request = prompt[2:].strip()
             description, separator, task = request.partition("|")

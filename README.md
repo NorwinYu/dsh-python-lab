@@ -57,6 +57,7 @@ minidsh run "请列出当前目录"
 - `core.user-questions`：用户提问、待答和取消服务。
 - `core.web`：Web 获取与搜索 provider 服务。
 - `core.subagents`：本地子 Agent 树、独立会话、消息与生命周期，默认关闭。
+- `core.workflow`：Node 隔离 JavaScript workflow 引擎，默认关闭。
 - `core.tools`：工具注册表。
 - `tools.glob`：官方 `glob` 文件发现工具。
 - `tools.read`：官方 `read` 文本读取工具。
@@ -73,6 +74,7 @@ minidsh run "请列出当前目录"
 - `tools.subagent`：官方 `subagent` 全新子级委派切片，默认关闭。
 - `tools.subagent-fork`：继承完整历史前缀的 `subagent_fork` 可配置名称实例，默认关闭。
 - `tools.subagent-control`：`send_message/interrupt_agent/list_agents/wait_agent` 工具组，默认关闭。
+- `tools.workflow`：官方 `workflow` JavaScript 前台编排切片，默认关闭。
 - `session.jsonl`：带版本头的 JSONL、v0 迁移、崩溃恢复和 POSIX 写锁。
 - `llm.mock`：确定性模拟模型，默认启用。
 - `llm.deepseek`：真实 DeepSeek Messages 模型，默认禁用。
@@ -430,6 +432,28 @@ POST /v1/sessions/<id>/subagent-interrupt  {"agent":"agent-1"}
 
 当前仅实现进程内 spawn/fork；没有 ACP、Codex、Claude Code、DSH SDK、preset/模型选择和结构化输出。`cwd` 已校验并记录，但文件工具仍使用根工作区；完成通知在学习版 Loop 的后续 step 消费，不是官方完整 inbox 调度器。
 
+## 前台 Workflow 脚本编排
+
+```bash
+PYTHONPATH=src python3 -m minidsh \
+  --enable core.subagents --enable core.workflow --enable tools.workflow \
+  run "工作流 你好|你好"
+```
+
+`workflow` 在独立 Node 进程中执行普通 JavaScript async body，支持 `agent`、`pipeline`、`parallel`、`phase`、`log` 和顶层 `await`。脚本通过 JSON-RPC 请求 Python 宿主启动子 Agent，不能访问 `require/process/fs/net/timer`。每个子级只把结果返回脚本，不额外唤醒父级。
+
+```javascript
+phase('audit')
+const results = await pipeline(args.items,
+  async item => await agent(item, { schema: args.schema }),
+  async (answer, item, index) => ({ item, index, answer }))
+return results
+```
+
+对象根 JSON Schema 支持 `type/properties/required/additionalProperties/items/enum/const/oneOf`。普通子级失败或结构不匹配返回 `null`；参数错误、未知选项和上限违规中止整个运行。`MINIDSH_WORKFLOW_MAX_AGENTS` 默认 1000，`MINIDSH_WORKFLOW_MAX_CONCURRENT` 默认按 CPU 且最多 32，组合器单次最多 4096 项。
+
+运行提供六类 `workflow/*` SSE 事件和四类 `tool-workflow/*` 会话记录；取消会停止 Node 进程并等待所有子级静止。当前仅前台执行，尚未接入 `run_in_background`、jobs 结果投递或任意模型路由；vm 是学习版能力隔离，不是官方完整 PTC/OS 沙箱。
+
 ## HTTP 宿主与 Web 页面
 
 启动本地 HTTP/SSE 宿主：
@@ -745,9 +769,13 @@ PYTHONPATH=src python3 -m minidsh session <session-id>
 
 理解 Seatbelt 进程隔离、会话策略覆盖、审批取消和持久终端切换围栏。对照 `docs/upstream-parity.md` 阅读。
 
-### 第 18 层：本地 Subagent 与协作控制（当前）
+### 第 18 层：本地 Subagent 与协作控制
 
 阅读 `src/minidsh/subagents.py` 的父子树、独立 Session、完成通知、fork 历史前缀、消息、等待、中断和回收，再观察 Agent Loop 的输入注入点。
+
+### 第 19 层：前台 Workflow 脚本编排（当前）
+
+对照 `src/minidsh/workflow_guest.js` 的脚本 hooks 和 `src/minidsh/workflow.py` 的宿主 RPC，理解隔离运行时、并发调度、schema、生命周期事件与取消清理。
 
 ## 当前边界
 

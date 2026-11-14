@@ -211,6 +211,16 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - MINIDSH_SUBAGENT_MAX_DEPTH 默认 1，0 禁止委派；Application 关闭按深度回收子级。
 - 当前没有外部 ACP/Codex/Claude Code/DSH SDK 后端、模型/preset 选择、结构化输出、跨重启在线目录恢复；子 cwd 已校验持久化，但文件工具仍使用根工作区。父级完成通知在学习版 Agent Loop 后续 step 消费，不是官方完整 inbox/独立唤醒调度器。
 
+### 前台 Workflow 脚本编排（学习版纵向切片）
+
+- `core.workflow` 和 `tools.workflow` 默认关闭；复用本地 subagent 树，需要 Node.js 可执行文件，不增加 Python 运行时依赖。
+- Node 子进程用 vm 执行普通 JavaScript async body，脚本无 require/process/fs/net/timer；meta/args 作为 JSON 数据注入，不对元数据求值。
+- 支持 agent、pipeline、parallel、phase、log 和顶层 await；每个 agent 使用 delivery=caller，结果返回脚本，不额外唤醒父级。
+- 支持对象根 JSON Schema 子集、普通子级失败/结构不匹配映射 null、fatal hook 错误中止整次运行、非有限数/循环/稀疏数组拒绝。
+- MINIDSH_WORKFLOW_MAX_AGENTS 默认 1000，MINIDSH_WORKFLOW_MAX_CONCURRENT 默认按 CPU 且最多 32；单项组合器最多 4096 条。
+- 提供 workflow/start/phase/log/agent-start/agent-end/end 和父 Session 的 tool-workflow 四类记录；取消停止进程并等待子级终态后配对成员结束。
+- 当前仅前台执行，尚无 run_in_background 与 jobs 结果投递；不支持任意模型路由，vm 是学习版能力隔离而非官方完整 PTC/OS 沙箱。
+
 ### 外部插件与产品组装（学习版等价分层）
 
 - 使用 Python 标准 `minidsh.plugins` entry points 发现独立发行包；外部功能默认禁用，只有显式启用才导入插件代码。
@@ -313,5 +323,10 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 子级后续消息产生第二个 turn/end，最大深度拒绝、等待唤醒与非法 timeout、根级中断 aborted、HTTP 查询/消息和应用关闭回收通过。
 - 修复预留子 session id 丢失、继续会话误新建和根级中断权限遗漏；默认 subagent 功能全部 disabled，不改变原提示词。
 - 最终 wheel 包含 subagents 模块；离线安装后在独立工作区真实 spawn、读取文件和完成通知通过，父子两个 Session 均持久化。
+- 真实 JavaScript parallel 启动两个子 Agent 并返回文本数组；pipeline 两阶段无全局屏障，结构化对象及 index 正确。
+- process/require 不可见，未知 hook 选项、循环返回值和超过两个 Agent 的上限均失败关闭；普通 schema 结果可回到脚本。
+- 主动取消报告 cancelled，子级静止后 agent-end outcome=cancelled，Application 关闭同样回收运行；成功和失败均无悬挂控制进程。
+- 模型 workflow 工具前台结果、六类 SSE 生命周期和四类持久记录通过；修复跨 realm 对象、Node pending Promise 退出和控制管道竞态。
+- 最终 wheel 包含 Python 引擎和 workflow_guest.js；离线安装后真实运行两个子 Agent 并持久化三个独立 Session。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

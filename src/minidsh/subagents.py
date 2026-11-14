@@ -57,6 +57,7 @@ class ChildRecord:
     token: CancellationToken = field(default_factory=CancellationToken)
     inbox: List[Tuple[str, str, str]] = field(default_factory=list)
     thread: Optional[threading.Thread] = None
+    delivery: str = "parent"
 
 
 class SubagentService:
@@ -93,6 +94,7 @@ class SubagentService:
         name: Optional[str] = None,
         cwd: Optional[str] = None,
         cancel_token: Optional[CancellationToken] = None,
+        delivery: str = "parent",
     ) -> Dict[str, object]:
         if not parent_id:
             raise SubagentError("subagent tool requires a calling agent", "CALLER_REQUIRED")
@@ -100,6 +102,8 @@ class SubagentService:
             raise SubagentError("description and prompt must be non-empty strings", "INVALID_ARGUMENT")
         if provider not in {"spawn", "fork"}:
             raise SubagentError(f"unknown subagent provider: {provider}", "PROVIDER_NOT_FOUND")
+        if delivery not in {"parent", "caller"}:
+            raise SubagentError("delivery must be parent or caller", "INVALID_ARGUMENT")
         if name is not None and (not NAME_PATTERN.fullmatch(name) or name == ROOT_NAME):
             raise SubagentError("invalid subagent name", "INVALID_NAME")
         if cancel_token is not None:
@@ -143,6 +147,7 @@ class SubagentService:
                 provider=provider,
                 cwd=str(child_cwd),
                 depth=depth,
+                delivery=delivery,
             )
             if provider == "fork":
                 inherited = self._completed_turn_prefix(parent_id)
@@ -228,7 +233,8 @@ class SubagentService:
                     "senderSessionId": child_id,
                 },
             }
-            self._parent_inputs.setdefault(record.parent_id, []).append(notice)
+            if record.delivery == "parent":
+                self._parent_inputs.setdefault(record.parent_id, []).append(notice)
             self.events.emit("subagent/end", {
                 "session_id": record.parent_id,
                 "child_id": child_id,

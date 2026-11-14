@@ -15,6 +15,7 @@ from .pruner import ToolResultPrunerPlugin
 from .questions import AskUserPlugin, UserQuestionsPlugin
 from .todo import TodoPlugin
 from .web_tools import WebPlugin, WebToolPlugin
+from .workflow import WorkflowPlugin, WorkflowToolPlugin
 from .sandbox import SandboxPolicy, SandboxPolicyPlugin
 from .seatbelt import SeatbeltPlugin
 from .session import JsonlSessionPlugin, SessionStore
@@ -126,6 +127,8 @@ class Application:
         self.manager.register(SubagentToolPlugin())
         self.manager.register(SubagentToolPlugin("tools.subagent-fork", "fork"))
         self.manager.register(SubagentControlPlugin())
+        self.manager.register(WorkflowPlugin())
+        self.manager.register(WorkflowToolPlugin())
         self.manager.register(MockModelPlugin())
         self.manager.register(
             DeepSeekModelPlugin(

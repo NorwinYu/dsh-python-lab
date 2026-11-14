@@ -25,6 +25,8 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "core.user-questions": True,
     "core.web": True,
     "core.subagents": False,
+    "core.workflow": False,
+    "tools.workflow": False,
     "tools.subagent": False,
     "tools.subagent-fork": False,
     "tools.subagent-control": False,
