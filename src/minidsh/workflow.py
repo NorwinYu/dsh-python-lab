@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .cancellation import CancellationToken, RunCancelled
+from .jobs import JobService
 from .plugins import Plugin, ServiceContext
 from .session import SessionStore
 from .subagents import SubagentService
@@ -151,12 +152,17 @@ class WorkflowRun:
         script: str,
         meta: Dict[str, object],
         args: object,
+        background: bool = False,
+        call_id: Optional[str] = None,
     ) -> None:
         self.service = service
         self.parent_id = parent_id
         self.script = script
         self.meta = meta
         self.args = args
+        self.background = background
+        self.call_id = call_id
+        self.job_id: Optional[str] = None
         self.id = f"workflow-{uuid.uuid4().hex}"
         self._condition = threading.Condition()
         self._result: Optional[Dict[str, object]] = None
@@ -169,6 +175,14 @@ class WorkflowRun:
     def begin(self) -> None:
         self.service._register(self)
         self._thread.start()
+
+    def wait_publication(self) -> str:
+        with self._condition:
+            while self.job_id is None:
+                if self._result is not None:
+                    raise WorkflowError(str(self._result.get("error", "workflow failed before job publication")), "AGENT_START")
+                self._condition.wait(0.1)
+            return self.job_id
 
     @property
     def result(self) -> Optional[Dict[str, object]]:
@@ -184,11 +198,11 @@ class WorkflowRun:
                 self._condition.wait(0.1)
             return dict(self._result)
 
-    def cancel(self, reason: str = "workflow cancelled") -> None:
+    def cancel(self, reason: Optional[str] = None) -> None:
         with self._condition:
             if self._result is not None:
                 return
-            self._cancel_reason = reason
+            self._cancel_reason = reason or "workflow cancelled"
             process = self._process
             members = list(self._members.values())
         if process is not None and process.poll() is None:
@@ -236,6 +250,8 @@ class WorkflowRun:
             with self._condition:
                 self._process = process
                 cancelled = self._cancel_reason is not None
+            if self.background:
+                self.service._publish_job(self, process)
             if cancelled:
                 self.cancel(self._cancel_reason or "workflow cancelled")
             threading.Thread(target=self._read_stdout, args=(process, messages), daemon=True).start()
@@ -431,6 +447,13 @@ class WorkflowRun:
 
     def _emit(self, event: str, payload: Dict[str, object]) -> None:
         try:
+            if self.job_id is not None and self.service.jobs is not None:
+                if event == "workflow/phase":
+                    self.service.jobs.append(self.job_id, f"[phase] {payload.get('title', '')}\n")
+                elif event == "workflow/log":
+                    self.service.jobs.append(self.job_id, f"{payload.get('message', '')}\n")
+                elif event in {"workflow/agent-start", "workflow/agent-end"}:
+                    self.service.jobs.append(self.job_id, f"[agent {payload.get('seq')}] {event.rsplit('/', 1)[-1]}\n")
             payload.setdefault("session_id", self.parent_id)
             payload.setdefault("root_session_id", self.parent_id)
             self.service.ctx.events.emit(event, payload)
@@ -451,6 +474,16 @@ class WorkflowRun:
             self.service.session.append(self.parent_id, "tool-workflow/run-end", {"runId": self.id, "stopReason": stop_reason})
         except Exception:
             pass
+        if self.job_id is not None and self.service.jobs is not None:
+            status = "completed" if stop_reason == "completed" else ("killed" if stop_reason == "cancelled" else "failed")
+            detail = f"{count} agent" + ("" if count == 1 else "s") if status == "completed" else str(error or stop_reason)
+            rendered = None
+            if status == "completed":
+                rendered = json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False)
+                if len(rendered) > 50000:
+                    rendered = rendered[:50000] + f"\n… [truncated: {len(rendered) - 50000} more characters]"
+                rendered = f"workflow \"{self.meta['name']}\" completed ({count} agents).\nReturn value:\n{rendered}\n"
+            self.service.jobs.settle(self.job_id, status, detail, rendered)
 
 
 class WorkflowService:
@@ -458,6 +491,11 @@ class WorkflowService:
         self.ctx = ctx
         self.subagents = subagents
         self.session = session
+        jobs = ctx.optional("jobs")
+        assert jobs is None or isinstance(jobs, JobService)
+        self.jobs = jobs
+        if jobs is not None:
+            jobs.recover(session)
         self.max_total_agents = self._limit("MINIDSH_WORKFLOW_MAX_AGENTS", 1000)
         self.max_concurrent = self._limit("MINIDSH_WORKFLOW_MAX_CONCURRENT", min(32, os.cpu_count() or 1))
         self._runs: Dict[str, WorkflowRun] = {}
@@ -473,9 +511,19 @@ class WorkflowService:
             raise ValueError(f"{name} must be a positive integer")
         return value
 
-    def start(self, parent_id: Optional[str], script: object, meta: object, args: object = None) -> WorkflowRun:
+    def start(
+        self,
+        parent_id: Optional[str],
+        script: object,
+        meta: object,
+        args: object = None,
+        background: bool = False,
+        call_id: Optional[str] = None,
+    ) -> WorkflowRun:
         if not parent_id:
             raise WorkflowError("workflow tool requires a calling agent", "CALLER_REQUIRED")
+        if background and self.jobs is None:
+            raise WorkflowError("background jobs unavailable: enable core.jobs and tools.jobs", "JOBS_UNAVAILABLE")
         if not isinstance(script, str) or not script.strip():
             raise WorkflowError("script must be a non-empty string", "SCRIPT_PARSE")
         if not isinstance(meta, dict) or not isinstance(meta.get("name"), str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", str(meta.get("name"))):
@@ -487,9 +535,26 @@ class WorkflowService:
             raise WorkflowError("meta.phases must contain objects with string titles", "META_INVALID")
         _plain_json(meta, "meta")
         _plain_json(args, "args")
-        run = WorkflowRun(self, parent_id, script, dict(meta), args)
+        run = WorkflowRun(self, parent_id, script, dict(meta), args, background, call_id)
         run.begin()
         return run
+
+    def _publish_job(self, run: WorkflowRun, process: subprocess.Popen) -> None:
+        assert self.jobs is not None
+        job_id = f"workflow-{uuid.uuid4().hex[:16]}"
+        self.jobs.start_managed(
+            job_id,
+            process,
+            "workflow",
+            str(run.meta["name"]),
+            run.parent_id,
+            self.session,
+            run.call_id,
+            run.cancel,
+        )
+        with run._condition:
+            run.job_id = job_id
+            run._condition.notify_all()
 
     def _register(self, run: WorkflowRun) -> None:
         with self._lock:
@@ -545,7 +610,20 @@ class WorkflowToolPlugin(Plugin):
         assert isinstance(registry, ToolRegistry) and isinstance(prompt, SystemPrompt) and isinstance(engine, WorkflowService)
 
         def execute(arguments: Dict[str, object], execution: Execution) -> str:
-            run = engine.start(execution.session_id, arguments.get("script"), arguments.get("meta"), arguments.get("args"))
+            background = arguments.get("run_in_background", False)
+            if not isinstance(background, bool):
+                raise ToolError("run_in_background must be a boolean")
+            run = engine.start(
+                execution.session_id,
+                arguments.get("script"),
+                arguments.get("meta"),
+                arguments.get("args"),
+                background=background,
+                call_id=execution.call_id,
+            )
+            if background:
+                job_id = run.wait_publication()
+                return f"workflow \"{arguments['meta']['name']}\" started in the background as job {job_id}. Its return value arrives with the completion notice; check on it with job_output, stop it with job_kill."
             try:
                 result = run.wait(execution.cancel_token)
                 if result["stopReason"] != "completed":
@@ -566,6 +644,7 @@ class WorkflowToolPlugin(Plugin):
                     "script": {"type": "string", "description": "The plain JavaScript body, not TypeScript and without an `export const meta` statement; top-level await is allowed. End with `return <value>`; the JSON-serializable value is this tool's result."},
                     "meta": {"type": "object", "description": "The workflow identity as plain JSON, not code.", "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "whenToUse": {"type": "string"}, "phases": {"type": "array"}}, "required": ["name", "description"]},
                     "args": {"type": "object", "description": "Optional JSON input exposed to the script as the `args` global."},
+                    "run_in_background": {"type": "boolean", "description": "Run as a background job: return a job id immediately instead of waiting; the return value arrives with the completion notice."},
                 },
                 "required": ["script", "meta"],
                 "additionalProperties": False,

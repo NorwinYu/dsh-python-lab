@@ -294,14 +294,16 @@ class ApiServer:
                     elif path == "/v1/jobs":
                         jobs = app.ctx.require("jobs")
                         assert isinstance(jobs, JobService)
-                        self._send_json([job_view(job) for job in jobs.list(None)])
+                        owner = query.get("session_id", [None])[0]
+                        self._send_json([job_view(job) for job in jobs.list(owner)])
                     elif path.startswith("/v1/jobs/"):
                         jobs = app.ctx.require("jobs")
                         assert isinstance(jobs, JobService)
                         job_id = path.split("/")[3]
                         wait = query.get("wait", ["false"])[0].lower() == "true"
                         timeout = min(int(query.get("timeout_ms", ["30000"])[0]), 600_000)
-                        self._send_json({"text": jobs.read(job_id, None, wait, timeout)})
+                        owner = query.get("session_id", [None])[0]
+                        self._send_json({"text": jobs.read(job_id, owner, wait, timeout)})
                     elif path == "/v1/runs/stream":
                         prompt = query.get("prompt", [""])[0]
                         session_id = query.get("session_id", [None])[0] or None
@@ -398,7 +400,8 @@ class ApiServer:
                         if len(parts) == 5 and parts[4] == "kill":
                             jobs = app.ctx.require("jobs")
                             assert isinstance(jobs, JobService)
-                            outcome = jobs.kill(parts[3], None, body.get("reason"))
+                            owner = query.get("session_id", [None])[0]
+                            outcome = jobs.kill(parts[3], owner, body.get("reason"))
                             self._send_json({"outcome": outcome})
                         else:
                             self._send_json({"error": "not found"}, 404)

@@ -211,7 +211,7 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - MINIDSH_SUBAGENT_MAX_DEPTH 默认 1，0 禁止委派；Application 关闭按深度回收子级。
 - 当前没有外部 ACP/Codex/Claude Code/DSH SDK 后端、模型/preset 选择、结构化输出、跨重启在线目录恢复；子 cwd 已校验持久化，但文件工具仍使用根工作区。父级完成通知在学习版 Agent Loop 后续 step 消费，不是官方完整 inbox/独立唤醒调度器。
 
-### 前台 Workflow 脚本编排（学习版纵向切片）
+### Workflow 脚本编排、后台 Jobs 与恢复（学习版纵向切片）
 
 - `core.workflow` 和 `tools.workflow` 默认关闭；复用本地 subagent 树，需要 Node.js 可执行文件，不增加 Python 运行时依赖。
 - Node 子进程用 vm 执行普通 JavaScript async body，脚本无 require/process/fs/net/timer；meta/args 作为 JSON 数据注入，不对元数据求值。
@@ -219,7 +219,11 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 支持对象根 JSON Schema 子集、普通子级失败/结构不匹配映射 null、fatal hook 错误中止整次运行、非有限数/循环/稀疏数组拒绝。
 - MINIDSH_WORKFLOW_MAX_AGENTS 默认 1000，MINIDSH_WORKFLOW_MAX_CONCURRENT 默认按 CPU 且最多 32；单项组合器最多 4096 条。
 - 提供 workflow/start/phase/log/agent-start/agent-end/end 和父 Session 的 tool-workflow 四类记录；取消停止进程并等待子级终态后配对成员结束。
-- 当前仅前台执行，尚无 run_in_background 与 jobs 结果投递；不支持任意模型路由，vm 是学习版能力隔离而非官方完整 PTC/OS 沙箱。
+- run_in_background 使用独立 workflow job id；managed-job 复用 job_output/job_list/job_kill、输出环、并发上限和会话归属。
+- phase/log/member 生命周期进入增量输出，完成结果只投递一次；kill 同时取消 Node 和子级，job/registered/settled 持久化。
+- Application 重启从 Session 与 jobs 输出文件恢复已完成结果；未结算任务标记 interrupted: host restarted，补记唯一 cause=recovery 审计，不恢复旧进程。
+- HTTP jobs list/output/kill 支持可选 session_id 归属参数；原有无参数行为不变。
+- 当前不支持任意模型路由，vm 是学习版能力隔离而非官方完整 PTC/OS 沙箱；没有跨进程重连正在运行的 Node。
 
 ### 外部插件与产品组装（学习版等价分层）
 
@@ -328,5 +332,9 @@ PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 - 主动取消报告 cancelled，子级静止后 agent-end outcome=cancelled，Application 关闭同样回收运行；成功和失败均无悬挂控制进程。
 - 模型 workflow 工具前台结果、六类 SSE 生命周期和四类持久记录通过；修复跨 realm 对象、Node pending Promise 退出和控制管道竞态。
 - 最终 wheel 包含 Python 引擎和 workflow_guest.js；离线安装后真实运行两个子 Agent 并持久化三个独立 Session。
+- 后台发布生成独立 run/job id；增量 phase/log、最终结果单次投递、跨 owner 拒绝和 job 审计通过。
+- job_kill 映射 killed/cancelled 并等待子级静止；模型后台工具、job_output 和 HTTP session_id 列表/输出通过。
+- 重启后已完成结果可重读，未结算 managed job 标为 interrupted: host restarted；恢复审计 cause=recovery 且重复重启不重复补记。
+- 一次性 Bash 非零退出码和前台 workflow 回归通过；最终 wheel 离线安装后前台、后台及完成结果重启恢复通过。
 
 后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。

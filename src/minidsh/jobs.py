@@ -7,7 +7,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .cancellation import CancellationToken
 from .events import EventBus
@@ -31,6 +31,13 @@ class OutputChannel:
         self._earliest = 0
         self.total = 0
         self.retain_bytes = retain_bytes
+
+    def restore(self) -> None:
+        data = self.path.read_bytes() if self.path.exists() else b""
+        self.total = len(data)
+        self._text = data[-self.retain_bytes:]
+        self._earliest = self.total - len(self._text)
+        self._file.seek(0, os.SEEK_END)
 
     def append(self, data: bytes) -> None:
         if not data:
@@ -74,7 +81,7 @@ class JobRecord:
     kind: str
     label: str
     owner: Optional[str]
-    process: subprocess.Popen
+    process: Optional[subprocess.Popen]
     stdout: OutputChannel
     stderr: OutputChannel
     started_at: int
@@ -87,6 +94,8 @@ class JobRecord:
     stdout_cursor: int = 0
     stderr_cursor: int = 0
     result_delivered: bool = False
+    on_cancel: Optional[Callable[[Optional[str]], None]] = None
+    recovered: bool = False
     condition: threading.Condition = field(default_factory=threading.Condition)
 
 
@@ -152,6 +161,68 @@ class JobService:
         threading.Thread(target=self._wait_process, args=(job, stdout_thread, stderr_thread), daemon=True).start()
         return job
 
+    def start_managed(
+        self,
+        job_id: str,
+        process: subprocess.Popen,
+        kind: str,
+        label: str,
+        owner: str,
+        session: SessionStore,
+        call_id: Optional[str],
+        on_cancel: Callable[[Optional[str]], None],
+    ) -> JobRecord:
+        active = sum(job.owner == owner and job.status in {"running", "stopping"} for job in self._jobs.values())
+        if active >= MAX_CONCURRENT_JOBS:
+            raise ValueError(f"background job limit reached for this owner (limit: {MAX_CONCURRENT_JOBS})")
+        if not job_id.startswith("workflow-") or job_id in self._jobs:
+            raise ValueError(f"invalid or duplicate managed job id: {job_id}")
+        directory = self.root / job_id
+        job = JobRecord(
+            id=job_id,
+            kind=kind,
+            label=label,
+            owner=owner,
+            process=process,
+            stdout=OutputChannel(directory / "stdout.log"),
+            stderr=OutputChannel(directory / "stderr.log"),
+            started_at=int(time.time() * 1000),
+            session=session,
+            call_id=call_id,
+            on_cancel=on_cancel,
+        )
+        self._jobs[job_id] = job
+        self._record(job, "job/registered")
+        return job
+
+    def append(self, job_id: str, text: str, error: bool = False) -> None:
+        job = self._jobs[job_id]
+        if job.status not in {"running", "stopping"}:
+            return
+        channel = job.stderr if error else job.stdout
+        data = text.encode("utf-8")
+        with job.condition:
+            channel.append(data)
+
+    def settle(self, job_id: str, status: str, detail: str, result: Optional[str] = None) -> None:
+        job = self._jobs[job_id]
+        if status not in {"completed", "failed", "killed"}:
+            raise ValueError(f"invalid managed job status: {status}")
+        with job.condition:
+            if job.status in {"completed", "failed", "killed"}:
+                return
+            if result is not None:
+                job.stdout.append(result.encode("utf-8"))
+            job.status = status
+            job.detail = detail
+            job.finished_at = int(time.time() * 1000)
+            job.stdout.finish()
+            job.stderr.finish()
+            self._record(job, "job/settled")
+            if self.events is not None:
+                self.events.emit("job/settled", {"jobId": job.id, "owner": job.owner, "status": status, "detail": detail})
+            job.condition.notify_all()
+
     @staticmethod
     def _read_stream(stream: object, channel: OutputChannel) -> None:
         try:
@@ -206,8 +277,8 @@ class JobService:
                 {
                     "finishedAt": job.finished_at,
                     "status": job.status,
-                    "cause": "kill" if job.kill_reason is not None else "producer",
-                    "producerReported": True,
+                    "cause": "recovery" if job.recovered else ("kill" if job.kill_reason is not None else "producer"),
+                    "producerReported": not job.recovered,
                 }
             )
             if job.detail is not None:
@@ -284,8 +355,11 @@ class JobService:
         with job.condition:
             job.status = "stopping"
             job.kill_reason = reason
-            self._terminate(job.process)
+            if job.on_cancel is None:
+                self._terminate(job.process)
             job.condition.notify_all()
+        if job.on_cancel is not None:
+            job.on_cancel(reason)
         return "requested"
 
     def remove(self, job_id: str, owner: Optional[str]) -> None:
@@ -300,7 +374,10 @@ class JobService:
                 job.kill_reason = "jobs service disposed"
                 with job.condition:
                     job.status = "stopping"
-                self._terminate(job.process)
+                if job.on_cancel is not None:
+                    job.on_cancel(job.kill_reason)
+                else:
+                    self._terminate(job.process)
         deadline = time.monotonic() + 5
         for job in list(self._jobs.values()):
             remaining = max(0.0, deadline - time.monotonic())
@@ -309,6 +386,55 @@ class JobService:
                     job.condition.wait(remaining)
             if job.status in {"running", "stopping"}:
                 self._kill(job.process)
+            if job.recovered:
+                job.stdout.finish()
+                job.stderr.finish()
+
+    def recover(self, session: SessionStore) -> None:
+        for row in session.list_sessions():
+            if row.get("state") != "ok":
+                continue
+            owner = str(row["session_id"])
+            events = session.load(owner)
+            registered: Dict[str, Dict[str, object]] = {}
+            settled: Dict[str, Dict[str, object]] = {}
+            for event in events:
+                payload = event["payload"]
+                if event["type"] == "job/registered" and payload.get("kind") == "workflow":
+                    registered[str(payload["jobId"])] = payload
+                elif event["type"] == "job/settled" and payload.get("kind") == "workflow":
+                    settled[str(payload["jobId"])] = payload
+            for job_id, registration in registered.items():
+                if job_id in self._jobs:
+                    continue
+                outcome = settled.get(job_id)
+                interrupted = outcome is None
+                status = "failed" if interrupted else str(outcome["status"])
+                detail = "interrupted: host restarted" if interrupted else outcome.get("detail")
+                stdout = OutputChannel(self.root / job_id / "stdout.log")
+                stderr = OutputChannel(self.root / job_id / "stderr.log")
+                stdout.restore()
+                stderr.restore()
+                call = registration.get("toolCall", {})
+                job = JobRecord(
+                    id=job_id,
+                    kind="workflow",
+                    label=str(registration.get("label", job_id)),
+                    owner=owner,
+                    process=None,
+                    stdout=stdout,
+                    stderr=stderr,
+                    started_at=int(registration.get("startedAt", 0)),
+                    session=session,
+                    call_id=str(call.get("callId")) if isinstance(call, dict) and call.get("callId") else None,
+                    status=status,
+                    detail=str(detail) if detail is not None else None,
+                    finished_at=int(outcome["finishedAt"]) if outcome is not None else int(time.time() * 1000),
+                    recovered=True,
+                )
+                self._jobs[job_id] = job
+                if interrupted:
+                    self._record(job, "job/settled")
 
     def expect(self, job_id: str, owner: Optional[str]) -> JobRecord:
         if not job_id:
@@ -327,8 +453,8 @@ class JobService:
         return f"[status: {job.status}]"
 
     @staticmethod
-    def _terminate(process: subprocess.Popen) -> None:
-        if process.poll() is not None:
+    def _terminate(process: Optional[subprocess.Popen]) -> None:
+        if process is None or process.poll() is not None:
             return
         try:
             os.killpg(process.pid, signal.SIGTERM)
@@ -336,8 +462,8 @@ class JobService:
             pass
 
     @staticmethod
-    def _kill(process: subprocess.Popen) -> None:
-        if process.poll() is not None:
+    def _kill(process: Optional[subprocess.Popen]) -> None:
+        if process is None or process.poll() is not None:
             return
         try:
             os.killpg(process.pid, signal.SIGKILL)
