@@ -32,7 +32,7 @@ def backup_original(root: Path, session_id: str, raw: bytes) -> str:
     target = backups / name
     if target.exists():
         if target.read_bytes() != raw:
-            raise GenerationError("备份哈希冲突")
+            raise GenerationError("backup hash conflict")
     else:
         with target.open("xb") as file:
             file.write(raw)
@@ -48,7 +48,7 @@ def read_current(root: Path, session_id: str) -> Optional[Tuple[bytes, int]]:
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise GenerationError(f"会话 manifest 无效: {session_id}") from exc
+        raise GenerationError(f"invalid session manifest: {session_id}") from exc
     if (
         not isinstance(manifest, dict)
         or manifest.get("format") != 2
@@ -61,14 +61,14 @@ def read_current(root: Path, session_id: str) -> Optional[Tuple[bytes, int]]:
         or not isinstance(manifest.get("sha256"), str)
         or len(manifest["sha256"]) != 64
     ):
-        raise GenerationError(f"会话 manifest 格式无效: {session_id}")
+        raise GenerationError(f"invalid session manifest format: {session_id}")
     generation_path = root / session_id / manifest["path"]
     try:
         raw = generation_path.read_bytes()
     except OSError as exc:
-        raise GenerationError(f"无法读取当前会话代际: {generation_path}") from exc
+        raise GenerationError(f"cannot read current session generation: {generation_path}") from exc
     if hashlib.sha256(raw).hexdigest() != manifest["sha256"]:
-        raise GenerationError(f"当前会话代际内容哈希不一致: {generation_path}")
+        raise GenerationError(f"current session generation content hash mismatch: {generation_path}")
     return raw, int(manifest["generation"])
 
 
@@ -86,7 +86,7 @@ def publish(
     relative = f"generations/{generation:08d}.jsonl"
     target = parent / relative
     if target.exists():
-        raise GenerationError(f"代际已存在，禁止覆盖: {target}")
+        raise GenerationError(f"generation already exists; refusing to overwrite: {target}")
     header = {
         "record": "minidsh-session-header",
         "format": 2,

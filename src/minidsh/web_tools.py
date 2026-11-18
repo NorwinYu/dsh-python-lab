@@ -100,27 +100,27 @@ class WebService:
         self.timeout_ms = int(os.environ.get("MINIDSH_WEB_TIMEOUT_MS", "30000"))
         self.max_output_chars = int(os.environ.get("MINIDSH_WEB_FETCH_MAX_OUTPUT_CHARS", str(MAX_FETCH_OUTPUT_CHARS)))
         if self.timeout_ms <= 0 or self.max_output_chars <= 0:
-            raise ValueError("Web 超时和输出上限必须大于 0")
+            raise ValueError("web timeout and output limit must be greater than 0")
         self._opener = build_opener(NoRedirect)
 
     def _validate_url(self, url: str) -> None:
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
-            raise ToolError("Web URL 必须是无凭据的 HTTP(S) 地址")
+            raise ToolError("web URL must be a credential-free HTTP(S) address")
         try:
             parsed.port
         except ValueError as exc:
-            raise ToolError("Web URL 端口无效") from exc
+            raise ToolError("invalid web URL port") from exc
         if self.allow_private:
             return
         try:
             addresses = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
         except OSError as exc:
-            raise ToolError(f"Web 地址解析失败: {exc}") from exc
+            raise ToolError(f"web address resolution failed: {exc}") from exc
         for address in addresses:
             ip = ipaddress.ip_address(address[4][0])
             if not ip.is_global:
-                raise ToolError("默认拒绝访问 loopback、私网、链路本地或其他非公网地址")
+                raise ToolError("access to loopback, private, link-local, and other non-public addresses is denied by default")
 
     def _open(
         self,
@@ -154,12 +154,12 @@ class WebService:
             except (URLError, TimeoutError, OSError) as exc:
                 if token is not None:
                     token.throw_if_cancelled()
-                raise ToolError(f"Web 请求失败: {exc}") from exc
-        raise ToolError("Web 重定向次数过多")
+                raise ToolError(f"web request failed: {exc}") from exc
+        raise ToolError("too many web redirects")
 
     def fetch(self, url: str, token: Optional[CancellationToken]) -> str:
         if not isinstance(url, str) or not url.strip():
-            raise ToolError("url 必须是非空字符串")
+            raise ToolError("url must be a non-empty string")
         response, final_url = self._open(url.strip(), token)
         unregister = token.on_cancel(response.close) if token is not None else lambda: None
         try:
@@ -171,7 +171,7 @@ class WebService:
         except (OSError, ValueError) as exc:
             if token is not None:
                 token.throw_if_cancelled()
-            raise ToolError(f"Web 内容读取失败: {exc}") from exc
+            raise ToolError(f"failed to read web content: {exc}") from exc
         finally:
             unregister()
         source_truncated = len(raw) > MAX_RESPONSE_BYTES
@@ -201,12 +201,12 @@ class WebService:
 
     def search(self, queries: object, token: Optional[CancellationToken]) -> str:
         if not isinstance(queries, list) or not queries or len(queries) > 10:
-            raise ToolError("queries 必须包含 1 到 10 个查询")
+            raise ToolError("queries must contain between 1 and 10 queries")
         if any(not isinstance(query, str) or not query.strip() for query in queries):
-            raise ToolError("每个查询都必须是非空字符串")
+            raise ToolError("each query must be a non-empty string")
         queries = list(dict.fromkeys(queries))
         if not self.search_url:
-            raise ToolError("web_search provider 未配置，请设置 MINIDSH_WEB_SEARCH_URL")
+            raise ToolError("web_search provider is not configured; set MINIDSH_WEB_SEARCH_URL")
         results = [self._search_one(query, token) for query in queries]
         return self._format_search(self._merge_search(results))
 
@@ -220,17 +220,17 @@ class WebService:
         except (OSError, ValueError) as exc:
             if token is not None:
                 token.throw_if_cancelled()
-            raise ToolError(f"Web 搜索读取失败: {exc}") from exc
+            raise ToolError(f"failed to read web search response: {exc}") from exc
         finally:
             unregister()
         if len(raw) > MAX_RESPONSE_BYTES:
-            raise ToolError("Web 搜索响应过大")
+            raise ToolError("web search response is too large")
         try:
             result = json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ToolError("Web 搜索响应不是有效 JSON") from exc
+            raise ToolError("web search response is not valid JSON") from exc
         if not isinstance(result, dict) or not isinstance(result.get("sources"), list) or not isinstance(result.get("truncated"), bool):
-            raise ToolError("Web 搜索响应缺少 sources 或 truncated")
+            raise ToolError("web search response is missing sources or truncated")
         sources = []
         seen = set()
         for source in result["sources"]:
@@ -241,7 +241,7 @@ class WebService:
             for name in ("title", "snippet", "summary", "publishedAt"):
                 if source.get(name) is not None:
                     if not isinstance(source[name], str):
-                        raise ToolError(f"搜索来源 {name} 必须是字符串")
+                        raise ToolError(f"search source {name} must be a string")
                     normalized[name] = source[name]
             sources.append(normalized)
         return {

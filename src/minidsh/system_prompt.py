@@ -37,7 +37,7 @@ class SystemPrompt:
 
     def register(self, name: str, order: int, text: str) -> None:
         if name in self._sections:
-            raise ValueError(f"提示词段落已注册: {name}")
+            raise ValueError(f"prompt section already registered: {name}")
         self._sections[name] = PromptSection(name, order, text)
 
     def unregister(self, name: str) -> None:

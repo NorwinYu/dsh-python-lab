@@ -12,7 +12,7 @@ FORKED_STARTED = "The history inherited by this branch records this tool call st
 
 def open_turn_closers(events: List[Dict[str, object]], cause: str = "interrupted") -> List[Dict[str, object]]:
     if cause not in {"interrupted", "forked"}:
-        raise ValueError("未知恢复原因")
+        raise ValueError("unknown recovery reason")
     open_turn = None
     open_step = None
     pending: Dict[str, Dict[str, object]] = {}

@@ -11,7 +11,7 @@ def run_desktop(app: Application, width: int = 1100, height: int = 760, webview_
         try:
             webview_module = importlib.import_module("webview")
         except ImportError as exc:
-            raise RuntimeError("Desktop 需要可选依赖，请安装 minidsh[desktop] 或 minidsh-desktop") from exc
+            raise RuntimeError("Desktop requires an optional dependency; install minidsh[desktop] or minidsh-desktop") from exc
     server = ApiServer(app, "127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, name="minidsh-desktop-http", daemon=True)
     thread.start()
@@ -19,7 +19,7 @@ def run_desktop(app: Application, width: int = 1100, height: int = 760, webview_
         window = webview_module.create_window("MiniDSH", server.url, width=width, height=height)
         webview_module.start()
         if window is None:
-            raise RuntimeError("Desktop 窗口创建失败")
+            raise RuntimeError("Failed to create the Desktop window")
     finally:
         server.close()
         thread.join(timeout=5)

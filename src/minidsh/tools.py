@@ -68,7 +68,7 @@ class ToolRegistry:
 
     def register(self, tool: Tool) -> None:
         if tool.name in self._tools:
-            raise ValueError(f"工具已注册: {tool.name}")
+            raise ValueError(f"tool already registered: {tool.name}")
         self._tools[tool.name] = tool
 
     def unregister(self, name: str) -> None:
@@ -77,11 +77,11 @@ class ToolRegistry:
     def replace_namespace(self, prefix: str, tools: List[Tool]) -> None:
         names = [tool.name for tool in tools]
         if len(names) != len(set(names)):
-            raise ValueError(f"MCP 工具名称重复: {prefix}")
+            raise ValueError(f"duplicate MCP tool name: {prefix}")
         retained = {name: tool for name, tool in self._tools.items() if not name.startswith(prefix)}
         conflicts = set(retained).intersection(names)
         if conflicts:
-            raise ValueError(f"MCP 工具与现有注册冲突: {', '.join(sorted(conflicts))}")
+            raise ValueError(f"MCP tools conflict with existing registrations: {', '.join(sorted(conflicts))}")
         updated = dict(retained)
         updated.update((tool.name, tool) for tool in tools)
         self._tools = updated
@@ -94,7 +94,7 @@ class ToolRegistry:
 
     def mutating(self, name: str) -> bool:
         if name not in self._tools:
-            raise ToolError(f"工具未启用或不存在: {name}")
+            raise ToolError(f"tool not enabled or does not exist: {name}")
         return self._tools[name].mutating
 
     def execute(
@@ -111,7 +111,7 @@ class ToolRegistry:
         event_context = {"session_id": session_id, "call_id": call_id, "run_id": run_id}
         self._events.emit("tools/pre-execute", {"name": name, "arguments": arguments, **event_context})
         if name not in self._tools:
-            raise ToolError(f"工具未启用或不存在: {name}")
+            raise ToolError(f"tool not enabled or does not exist: {name}")
         tool = self._tools[name]
         execution = Execution(self._ctx, session_id, call_id, run_id, cancel_token)
         try:
@@ -134,15 +134,15 @@ class ToolRegistry:
             assert session is not None
             sandbox = sandbox.resolve(session, execution.session_id)
         if sandbox.mode == "read-only" and not (kind == "shell" and execution.ctx.optional("kernelSandbox") is not None):
-            action = "Shell 命令" if kind == "shell" else "写操作"
-            raise ToolError(f"[sandbox] 当前文件策略为 read-only，{action}被拒绝")
+            action = "shell command" if kind == "shell" else "write operation"
+            raise ToolError(f"[sandbox] current sandbox policy is read-only; the {action} was rejected")
         if sandbox.mode == "danger-full-access":
             return
         approval = execution.service("approval")
         assert isinstance(approval, ApprovalService)
         outcome = approval.request(tool_name, execution.call_id, execution.session_id, execution.session(), execution.cancel_token)
         if outcome != "allowed-once":
-            raise ToolError(f"[sandbox] 操作审批结果: {outcome}")
+            raise ToolError(f"[sandbox] operation approval result: {outcome}")
 
 
 class CoreToolsPlugin(Plugin):
@@ -180,13 +180,13 @@ class SingleToolPlugin(Plugin):
 
 def workspace_path(workspace: Path, value: object, field: str = "path", allow_outside: bool = False) -> Path:
     if not isinstance(value, str) or not value.strip():
-        raise ToolError(f"{field} 必须是非空字符串")
+        raise ToolError(f"{field} must be a non-empty string")
     candidate = (workspace / value).expanduser().resolve()
     if not allow_outside:
         try:
             candidate.relative_to(workspace)
         except ValueError as exc:
-            raise ToolError("路径不能离开当前工作区") from exc
+            raise ToolError("path must not leave the current workspace") from exc
     return candidate
 
 
@@ -236,11 +236,11 @@ def make_read_tool(workspace: Path) -> Tool:
             raise ToolError(f"limit must be less than or equal to {READ_LIMIT}")
         path = workspace_path(workspace, file_path, "file_path")
         if not path.is_file():
-            raise ToolError(f"不是文件: {path}")
+            raise ToolError(f"not a file: {path}")
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError as exc:
-            raise ToolError("read 只读取 UTF-8 文本") from exc
+            raise ToolError("read only reads UTF-8 text") from exc
 
         all_lines = text.splitlines()
         total_lines = len(all_lines)
@@ -296,7 +296,7 @@ def make_glob_tool(workspace: Path) -> Tool:
             raise ToolError("pattern must be a non-empty string")
         root = workspace_path(workspace, arguments.get("path", "."))
         if not root.is_dir():
-            raise ToolError(f"不是目录: {root}")
+            raise ToolError(f"not a directory: {root}")
 
         matches: List[Path] = []
         for current, directories, files in os.walk(root):
@@ -361,7 +361,7 @@ def make_write_tool(workspace: Path) -> Tool:
         operation = "update" if path.exists() else "create"
         if operation == "update":
             if not path.is_file():
-                raise ToolError(f"不是文件: {path}")
+                raise ToolError(f"not a file: {path}")
             try:
                 observations(execution).require_current(execution.session_id, path)
             except ValueError as exc:
@@ -409,14 +409,14 @@ def make_edit_tool(workspace: Path) -> Tool:
 
         path = mutation_path(execution, workspace, file_path)
         if not path.is_file():
-            raise ToolError(f"不是文件: {path}")
+            raise ToolError(f"not a file: {path}")
         try:
             observations(execution).require_current(execution.session_id, path)
             text = path.read_text(encoding="utf-8")
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
         except UnicodeDecodeError as exc:
-            raise ToolError("edit 只读取 UTF-8 文本") from exc
+            raise ToolError("edit only reads UTF-8 text") from exc
 
         occurrences = text.count(old_string)
         if occurrences == 0:

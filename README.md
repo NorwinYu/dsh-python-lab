@@ -1,524 +1,851 @@
 # MiniDSH
 
-> 用 Python 从零拆解 DeepSeek Harness：一个能运行、能观察、能逐层关闭功能的 Agent Harness 学习项目。
+**A layered, inspectable agent harness written in Python — built to be read, run, and taken apart.**
 
-MiniDSH 把模型调用、工具执行、审批、会话、子 Agent 和宿主产品拆成可以独立验证的小层。你可以先跑通一个文件读取 Agent，再逐层打开工作流、MCP、Skills、定时任务、Goal 和 PTC，直接观察消息、事件与进程如何协作。
+English | [简体中文](README.zh-CN.md)
 
-**它不是官方 DSH 的完整移植。** 已实现切片及剩余边界都明确写在 [`docs/upstream-parity.md`](docs/upstream-parity.md)，不会用“基本对齐”掩盖未实现能力。
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776ab?logo=python&logoColor=white)](https://www.python.org)
+[![Dependencies: none](https://img.shields.io/badge/core%20dependencies-none-2ea44f)](pyproject.toml)
+[![Docs site](https://img.shields.io/badge/docs-github%20pages-4c53d6)](https://norwinyu.github.io/dsh-python-lab/)
+[![Upstream parity](https://img.shields.io/badge/upstream-dsh%20parity%20report-6b74f0)](docs/upstream-parity.md)
 
-## 为什么适合学习
+MiniDSH re-implements the *shape* of a modern coding-agent harness in about 12,000 lines of
+dependency-free Python. It is not a chatbot demo and not a wrapper around an SDK: it contains a
+plugin kernel, an agent loop, a tool registry, a permission stack, an event-sourced session store,
+subagents, a workflow engine, an MCP client, skills, a scheduler, persistent goals, programmatic
+tool calling, and three product shells (CLI, HTTP + Web, Desktop).
 
-- **核心零第三方依赖**：Python 3.9+ 即可运行，Node.js 仅用于 workflow 与 PTC。
-- **真实执行而非图示**：文件读写、Shell、JSON-RPC、JavaScript、子 Agent、定时投递都在实际进程中发生。
-- **功能逐层开关**：默认组合简单保守，高级能力按需启用，禁用后立即从 schema 和提示词消失。
-- **状态可检查**：JSONL 会话、事件流、工具结果、后台 job、goal revision 和投递回执都可直接读取。
-- **无需 API Key**：内置确定性 MockModel；DeepSeek Messages 适配器可单独启用，在线验收需要自己的凭据。
+Every layer can be switched on or off, observed, and verified independently. If you have ever
+wondered *where the tool call actually happens*, *why a resumed session forgets a file it wrote*,
+or *what stops an agent from deleting your home directory*, this repository answers those
+questions with running code instead of diagrams.
 
-## 功能地图
+> **It is not an official port of DeepSeek Harness.** Exactly which slices are implemented, and
+> which boundaries remain, is recorded in [docs/upstream-parity.md](docs/upstream-parity.md)
+> (335 bullets, deliberately blunt). We never use "mostly aligned" to hide a missing capability.
 
-| 层次 | 可以学到什么 | 默认状态 |
-|---|---|---|
-| Agent 基础 | 插件、系统提示词、工具、审批、文件策略、Agent Loop | 启用 |
-| 会话与宿主 | JSONL、恢复/fork、压缩、HTTP/SSE、后台 jobs、PTY | 启用 |
-| 协作执行 | 本地 spawn/fork 子 Agent、消息、中断、workflow 前后台 | 关闭 |
-| 扩展生态 | MCP 客户端与资源、文件 Skills、Agent Presets | 关闭 |
-| 长期工作 | Schedule 定时投递、持久 Goal 与自动 Round | 关闭 |
-| 程序执行 | TypeScript per-call、Node REPL、PTC SDK RPC | 关闭 |
+---
 
-## 快速开始
+## Table of contents
 
-要求：macOS/Linux 上可用的 Python 3.9+。只有 workflow 和 PTC 需要 Node.js；Desktop 额外需要 `pywebview`。
+- [Why this exists](#why-this-exists)
+- [What you can do in ten minutes](#what-you-can-do-in-ten-minutes)
+- [Quick start](#quick-start)
+- [Repository layout](#repository-layout)
+- [Architecture](#architecture)
+- [The lifecycle of one run](#the-lifecycle-of-one-run)
+- [Feature map](#feature-map)
+- [Feature deep dives](#feature-deep-dives)
+  - [1. Plugin kernel and composition](#1-plugin-kernel-and-composition)
+  - [2. Agent loop](#2-agent-loop)
+  - [3. System prompt and runtime context](#3-system-prompt-and-runtime-context)
+  - [4. File tools](#4-file-tools)
+  - [5. Sandbox policy, approval, observations](#5-sandbox-policy-approval-observations)
+  - [6. Kernel sandbox (macOS Seatbelt)](#6-kernel-sandbox-macos-seatbelt)
+  - [7. Shell, jobs, and PTY](#7-shell-jobs-and-pty)
+  - [8. Sessions: generations, resume, fork, repair](#8-sessions-generations-resume-fork-repair)
+  - [9. Surface replacement and tool-result pruning](#9-surface-replacement-and-tool-result-pruning)
+  - [10. Compaction](#10-compaction)
+  - [11. Streaming, stream recording, SSE replay](#11-streaming-stream-recording-sse-replay)
+  - [12. Questions and todos](#12-questions-and-todos)
+  - [13. Web fetch and search](#13-web-fetch-and-search)
+  - [14. Subagents](#14-subagents)
+  - [15. Workflow engine](#15-workflow-engine)
+  - [16. MCP client](#16-mcp-client)
+  - [17. Skills](#17-skills)
+  - [18. Schedule](#18-schedule)
+  - [19. Goals and automatic rounds](#19-goals-and-automatic-rounds)
+  - [20. Programmatic tool calling (PTC)](#20-programmatic-tool-calling-ptc)
+  - [21. Agent presets](#21-agent-presets)
+  - [22. HTTP host and Web workbench](#22-http-host-and-web-workbench)
+  - [23. External plugins](#23-external-plugins)
+  - [24. Product distributions](#24-product-distributions)
+  - [25. Real DeepSeek adapter](#25-real-deepseek-adapter)
+- [Configuration reference](#configuration-reference)
+- [Event reference](#event-reference)
+- [How this maps to the 2026 agent ecosystem](#how-this-maps-to-the-2026-agent-ecosystem)
+- [The 27-layer learning path](#the-27-layer-learning-path)
+- [Debugging cookbook](#debugging-cookbook)
+- [Boundaries and non-goals](#boundaries-and-non-goals)
+- [FAQ](#faq)
+- [Documentation index](#documentation-index)
+
+---
+
+## Why this exists
+
+Most agent frameworks are optimized for *shipping an app quickly*. They hide the interesting
+parts: how tool schemas are registered, when approval is checked, what happens on cancellation,
+how history is compacted, what is durable after a crash. That is fine for products and terrible
+for learning.
+
+MiniDSH optimizes for the opposite: **every mechanism is visible, and every mechanism can be
+disabled to see what breaks.**
+
+Three design rules make this work:
+
+1. **Services, not globals.** Everything is a plugin that provides and requires named services.
+   Turning a feature off removes its service, its tool schema, and its prompt section together.
+2. **Facts and projections are separate.** The session log is append-only and immutable. What the
+   model sees is a derived view that can be compacted, pruned, or replaced without rewriting
+   history.
+3. **Fail closed.** Missing approver, unknown feature flag, corrupted session, missing preset,
+   oversized payload — all of them stop the operation with an explicit error instead of degrading
+   silently.
+
+The result is a harness that behaves like a real one at small scale, and that you can hold in your
+head.
+
+**Who it is for:** engineers who want to understand harness internals, teams evaluating build vs.
+buy, and anyone preparing for agent-platform interviews where "how would you implement X" is the
+question.
+
+---
+
+## What you can do in ten minutes
+
+```bash
+# 1. Run an offline agent with no API key at all
+minidsh run "read README.md" --trace
+
+# 2. Watch a tool call disappear because you disabled the tool
+minidsh --disable tools.read prompt      # the read section vanishes from the prompt
+
+# 3. See a permission decision and its audit trail
+minidsh --sandbox-mode workspace-write run "write demo.txt: hello"
+minidsh session <session-id>             # approval/asked + approval/decided events
+
+# 4. Resume a session and watch the file observation come back
+minidsh resume <session-id> "edit demo.txt: replace hello with world"
+
+# 5. Open the workbench
+minidsh serve --port 3080                # http://127.0.0.1:3080 (EN / 中文 toggle)
+```
+
+Everything above works offline with the deterministic `MockModel`. The same commands work with a
+real model after exporting `DEEPSEEK_API_KEY` and enabling `llm.deepseek`.
+
+---
+
+## Quick start
+
+**Requirements:** Python 3.9+ on macOS or Linux. Node.js is needed only for `workflow` and
+`run_code`. `pywebview` is needed only for the Desktop shell.
 
 ```bash
 git clone https://github.com/NorwinYu/dsh-python-lab.git
 cd dsh-python-lab
+
 python3 -m venv .venv
 . .venv/bin/activate
 python3 -m pip install --upgrade pip
 python3 -m pip install -e .
 ```
 
-先查看当前组合，再让 Mock Agent 读取项目说明：
+Then:
 
 ```bash
-minidsh plugins
-minidsh tools
+minidsh plugins      # which layers are active, pending, disabled, or missing a dependency
+minidsh tools        # the tool schemas the model currently sees
+minidsh prompt       # the exact system prompt + runtime context
+minidsh run "read README.md" --trace
+```
+
+If `minidsh` reports `ModuleNotFoundError: No module named 'minidsh'`, your interpreter skipped the
+editable-install `.pth` file (some bundled or patched CPython builds do). Either install in compat
+mode or run from source — the module entry point is identical:
+
+```bash
+python3 -m pip install -e . --config-settings editable_mode=compat
+# or:
+PYTHONPATH=src python3 -m minidsh plugins
+```
+
+`--trace` prints the turn, every tool call, and every event payload, so you can follow the loop
+without opening the session file.
+
+### Your first allowed write
+
+The default sandbox policy is `read-only`, so writes and shells are refused. To allow writing
+inside the workspace you must do **two** things: widen the policy and approve the operation.
+
+```bash
+# Non-interactive: approve every write/shell in this process (learning only)
+minidsh --sandbox-mode workspace-write --yes run "write demo.txt: hello"
+
+# Interactive: approve each operation at the prompt
+minidsh --sandbox-mode workspace-write run "write demo.txt: hello"
+```
+
+> `--yes` approves **everything** in the current process. Never use it in an environment where
+> the model reads untrusted content.
+
+### Mock model cheat sheet
+
+`MockModel` has no natural-language understanding. It maps explicit prefixes to intents, which is
+exactly what makes trajectories reproducible. English is the default grammar; every intent also
+accepts a Chinese alias, because the lab started in Chinese and real sessions mix languages.
+
+| Intent | English | Chinese alias | Tool |
+|---|---|---|---|
+| List directory | `list` | `目录` | `glob` |
+| Read a file | `read README.md` | `读取 README.md` | `read` |
+| Write a file | `write demo.txt: hello` | `写入 demo.txt：hello` | `write` |
+| Edit a file | `edit demo.txt: replace hello with world` | `编辑 demo.txt：把hello替换为world` | `read` → `edit` |
+| Run a command | `run printf hello` | `执行 printf hello` | `bash` |
+| Background command | `run in background sleep 10` | `执行后台 sleep 10` | `bash` |
+| List jobs | `jobs` | `任务列表` | `job_list` |
+| Read job output | `job output bash-1` | `读取任务 bash-1` | `job_output` |
+| Kill a job | `kill job bash-1` | `终止任务 bash-1` | `job_kill` |
+| Ask the user | `ask Continue?` | `提问 是否继续？` | `ask_user_question` |
+| Write todos | `todo Finish the lab` | `待办 完成实验` | `todo_write` |
+| Fetch a URL | `fetch https://example.com` | `获取 https://example.com` | `web_fetch` |
+| Search the web | `search agent harness` | `搜索 agent harness` | `web_search` |
+| Load a skill | `skill review` | `使用技能 review` | `skill` |
+| Delegate | `delegate analysis \| read README.md` | `委派 分析 \| 读取 README.md` | `subagent` |
+| Fork a subagent | `fork agent summarize` | `派生 总结` | `subagent_fork` |
+| List agents | `agents` | `子代理列表` | `list_agents` |
+| Message an agent | `message agent-1: keep going` | `发送消息 agent-1：继续` | `send_message` |
+| Interrupt an agent | `interrupt agent-1` | `中断子代理 agent-1` | `interrupt_agent` |
+| Wait for input | `wait agent 5000` | `等待子代理输入 5000` | `wait_agent` |
+| Run a workflow | `workflow hello\|world` | `工作流 你好\|你好` | `workflow` |
+| Run code | `run code {"code": "return 1"}` | `运行代码 {...}` | `run_code` |
+| Create a goal | `goal create finish migration\|4` | `创建目标 完成迁移\|4` | `create_goal` |
+| Read the goal | `goal get` | `读取目标` | `get_goal` |
+| Update the goal | `goal update {...}` | `更新目标 {...}` | `update_goal` |
+| Create a schedule | `schedule create {...}` | `定时任务 {...}` | `schedule_create` |
+| List schedules | `schedule list` | `定时列表` | `schedule_list` |
+| View a schedule | `schedule view s1` | `定时查看 s1` | `schedule_view` |
+| Edit a schedule | `schedule edit {...}` | `定时编辑 {...}` | `schedule_edit` |
+
+An unknown prefix returns a help message rather than a guessed tool call — a small but important
+property: **the mock never invents intent.** Full grammar details live in
+[docs/mock-model.md](docs/mock-model.md).
+
+### Open the Web workbench
+
+```bash
+minidsh serve --port 3080
+# then open http://127.0.0.1:3080
+```
+
+The workbench is a single dependency-free HTML file served by the harness itself. It has an
+English/中文 switch, light/dark themes, a structured execution trace, live streaming text,
+pending-question forms, session browsing, and compact/prune/fork controls.
+
+---
+
+## Repository layout
+
+```text
+dsh-python-lab/
+├── README.md                 English guide (this file)
+├── README.zh-CN.md           Chinese guide
+├── AGENTS.md                 Instructions for coding agents working in this repo
+├── config.example.json       Every feature flag in one place
+├── pyproject.toml            Zero-dependency core; optional [desktop] extra
+├── docs/
+│   ├── index.html            Bilingual GitHub Pages site (EN / 中文)
+│   ├── assets/               Workbench screenshots used by the site
+│   ├── modules.md            Module atlas: role, contracts, and traps per file
+│   ├── exercises.md          Runnable labs mapped to 2026 practice
+│   ├── mock-model.md         The deterministic prompt grammar
+│   ├── upstream-parity.md    What matches upstream, what does not (English)
+│   └── upstream-parity.zh-CN.md
+├── src/minidsh/              The harness: 36 modules, ~12k lines
+│   └── web/index.html        The local workbench UI
+├── packages/                 headless / web / desktop distribution entry points
+└── examples/minidsh-clock/   A standalone external plugin (installable)
+```
+
+---
+
+## Architecture
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Products       minidsh CLI      minidsh-web (HTTP)     minidsh-desktop   │
+│                                 + web/index.html        (pywebview)      │
+└───────────────────────────┬─────────────────────────────────────────────┘
+                            │  same Application, one object graph
+┌───────────────────────────▼─────────────────────────────────────────────┐
+│ Composition    Application (app.py)                                     │
+│                  └─ PluginManager: flags → dependency order → activate   │
+│                       └─ ServiceContext: named services, one provider    │
+└───────────────────────────┬─────────────────────────────────────────────┘
+        ┌───────────────────┼───────────────────┬────────────────────┐
+        ▼                   ▼                   ▼                    ▼
+  ┌───────────┐      ┌────────────┐      ┌────────────┐      ┌──────────────┐
+  │ Agent     │      │ Session    │      │ Permissions│      │ Execution    │
+  │ loop      │◄────►│ store      │      │ sandbox    │      │ jobs / PTY   │
+  │ turn/step │      │ generations│      │ approval   │      │ subagents    │
+  │ tools     │      │ surface    │      │ observe    │      │ workflow/PTC │
+  └─────┬─────┘      │ compact    │      │ seatbelt   │      └──────────────┘
+        │            └────────────┘      └────────────┘
+        ▼
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │ Model adapters: MockModel (deterministic) · DeepSeek Messages (SSE)   │
+  └──────────────────────────────────────────────────────────────────────┘
+```
+
+Everything above `app.py` is a product shell. Everything below it is a service. No tool imports
+the Agent; no product imports another product; the dependency arrow only points inward.
+
+A detailed per-file breakdown lives in [docs/modules.md](docs/modules.md).
+
+---
+
+## The lifecycle of one run
+
+This is the sequence you can watch in the trace panel or with `--trace`:
+
+```text
+POST /v1/runs/stream  (or: minidsh run "...")
+  │
+  ├─ 1. config merge        file config → CLI overrides → frozen AppConfig
+  ├─ 2. plugin activation    retry until no pending plugin can start
+  ├─ 3. turn/start          emits session_id + run_id (the cancellation handle)
+  ├─ 4. context assembly    system prompt sections + runtime context + skill catalog
+  │                         + schedule inbox + surface-derived history
+  ├─ 5. pressure check      estimate tokens; compact if > 80% of the window
+  ├─ 6. model call          SSE deltas → assistant/delta; final → assistant/message
+  ├─ 7. tool loop           for each tool call (bounded by max_steps):
+  │      ├─ policy check     path inside workspace? sandbox mode allows it?
+  │      ├─ approval         ask / never / unavailable → approval/decided
+  │      ├─ observation      write/edit require a prior read of this exact version
+  │      ├─ execution        process spawn, HTTP, JSON-RPC, or in-process call
+  │      └─ tool/result      envelope + error classification
+  ├─ 8. persistence         one new immutable generation + index.json manifest
+  └─ 9. turn/end            reason: stop | max_steps | aborted | error
+```
+
+Each numbered step is a place where a real harness makes a design decision. MiniDSH makes each
+one explicit and separately testable.
+
+---
+
+## Feature map
+
+| Layer | What you learn | Default |
+|---|---|---|
+| **Kernel** | Plugin flags, dependency activation, service graph, composition root | on |
+| **Agent core** | Turn/step loop, prompt assembly, tool dispatch, cancellation | on |
+| **Tools** | Schema design, envelopes, path safety, atomic writes | on |
+| **Permissions** | Sandbox modes, approval, audit events, file observations | on |
+| **Processes** | Job isolation, output cursors, process groups, PTY persistence | on |
+| **Memory** | JSONL generations, resume, fork, repair, surface, compaction | on |
+| **Transport** | HTTP API, SSE, run correlation, backpressure, replay | on |
+| **Collaboration** | Subagents, message passing, interruption, workflow orchestration | off |
+| **Ecosystem** | MCP servers/resources, skills, agent presets | off |
+| **Long horizon** | Scheduled delivery, persistent goals, automatic rounds | off |
+| **Programmatic** | TypeScript `run_code`, Node REPL, SDK RPC back into the tool registry | off |
+| **Products** | CLI, Web workbench, Desktop shell, external plugin discovery | on |
+
+Everything marked *off* is off for a reason: each one widens the attack surface or weakens the
+"small enough to read" property. Turn them on one at a time.
+
+---
+
+## Feature deep dives
+
+Each section follows the same shape: **what it does**, **how to try it**, **what to observe**,
+**design notes**, and **boundaries**.
+
+### 1. Plugin kernel and composition
+
+**What it does.** `PluginManager` turns a dictionary of feature flags into a live service graph.
+A plugin declares `provides`, `requires`, and `activate`. Activation loops until no pending
+plugin can make progress, so declaration order never matters — only dependencies do.
+
+**Try it.**
+
+```bash
+minidsh plugins                          # active / disabled / pending with missing services
+minidsh --disable core.jobs plugins      # jobs dependents go 'missing=jobs'
+minidsh --disable core.compaction plugins
+minidsh --disable llm.mock --disable llm.deepseek plugins   # agent.core stays pending
+```
+
+**What to observe.** Disabling a *service* differs from disabling a *tool*: tools disappear from
+the schema, services disappear from the graph, and dependents stay `pending` instead of crashing.
+
+**Design notes.**
+
+- One provider per service name; a second registration raises.
+- Deactivation runs in reverse registration order, so resources unwind correctly.
+- External plugins are registered as `DisabledExternalPlugin` placeholders when off — visible in
+  `plugins` output, never imported.
+- There is no hot reload. The graph converges once, at startup, and is then stable.
+
+**Boundary.** No runtime plugin swap, no scoped child graphs beyond presets, no YAML loader.
+
+---
+
+### 2. Agent loop
+
+**What it does.** `Agent.run()` is one turn. Inside a turn, the loop alternates model calls and
+tool calls, up to `max_steps` (default 4). It owns ordering, budgets, persistence, and failure
+handling — but not intelligence.
+
+**Try it.**
+
+```bash
+minidsh run "read README.md" --trace
+minidsh run "delegate analysis | read README.md" \
+  --enable core.subagents --enable tools.subagent --enable tools.subagent-control
+```
+
+**What to observe.** `turn/start` → `assistant/message` → `tools/pre-execute` →
+`tools/post-execute` → `assistant/message` → `turn/end`. A turn can end with `max_steps` reached,
+which is a budget outcome, not an error.
+
+**Design notes.**
+
+- Cancellation is checked at model, tool, and shell boundaries. `RunCancelled` propagates.
+- Subagent completion arrives as a `subagent-settled` user message and is consumed by a later
+  step, not by a separate scheduler.
+- Streaming deltas carry `session_id`, `run_id`, `turn`, `step`, and `attempt` so a consumer can
+  discard a failed attempt's draft.
+
+**Boundary.** `max_steps` is fixed per Agent instance, not adaptive. There is no planner, no
+reflection step, no automatic retry of failed tool calls beyond the model's own decision.
+
+---
+
+### 3. System prompt and runtime context
+
+**What it does.** Builds the prompt from ordered sections: a fixed identity block, per-tool
+guidance, and a runtime context snapshot.
+
+**Try it.**
+
+```bash
 minidsh prompt
-minidsh run "读取 README.md" --trace
+minidsh --disable tools.edit prompt        # the "prefer edit" clause disappears with the tool
+minidsh --sandbox-mode workspace-write --yes prompt
 ```
 
-`--trace` 会显示 turn、工具调用及结果。默认文件策略是 `read-only`，写文件或执行 Shell 需要同时放宽模式并授权：
+**What to observe.** The runtime context is a **separate user message**, not part of the static
+system prompt, and it is regenerated on resume. That is why a resumed session sees the *current*
+policy, not the policy it started with.
+
+**Design notes.**
+
+- Identity is fixed: `You are an AI agent powered by DeepSeek Harness.`
+- Tool guidance is registered by the tool plugin with an explicit order (bash 1000, read 1100,
+  write 1200, edit 1300, glob 1400, jobs 1600).
+- `write` guidance gains "and prefer edit for targeted changes" only when `edit` is enabled.
+- Turning a tool off removes its schema *and* its instructions in the same step. A model told to
+  use a tool it cannot call is a harness bug, not a model bug.
+
+**Boundary.** Section ordering is fixed in code; there is no per-preset prompt authoring beyond
+persona prefix/suffix.
+
+---
+
+### 4. File tools
+
+**What it does.** Implements `read`, `glob`, `write`, and `edit` with upstream-compatible names,
+schemas, envelopes, and limits.
+
+**Try it.**
 
 ```bash
-minidsh --sandbox-mode workspace-write --yes run "写入 demo.txt：hello"
+minidsh run "read README.md"
+minidsh run "list"
+minidsh --sandbox-mode workspace-write --yes run "write demo.txt: hello"
+minidsh --sandbox-mode workspace-write --yes run "edit demo.txt: replace hello with world"
 ```
 
-> `--yes` 会批准本进程内的全部写入和 Shell 操作，只适合可信的本地学习场景。
+**What to observe.**
 
-## 30 秒理解架构
-
-```text
-User / HTTP / CLI
-       │
-       ▼
-  Agent Loop ───────────────► DeepSeek Messages / MockModel
-       │                              │
-       ├─ ToolRegistry ───────────────┤
-       │  read/write/bash/jobs       tool calls
-       │  MCP/workflow/run_code         │
-       ├─ Session JSONL               │
-       │  messages/events/goals       ▼
-       ├─ Subagents/PTC workers    tool results
-       └─ Schedule / SSE / Web UI
-```
-
-每一层都是可替换插件：服务解决依赖，工具复用同一注册表，事件写入同一份会话历史。阅读顺序见[推荐学习路线](#推荐学习路线)。
-
-## 文档导航
-
-- [功能开关](#功能开关)
-- [文件策略与审批](#文件策略与写操作)
-- [会话恢复与压缩](#会话恢复与压缩)
-- [本地 Subagent 与协作控制](#本地-subagent-与协作控制)
-- [Workflow 与后台任务](#workflow-脚本编排与后台任务)
-- [MCP 客户端与资源](#mcp-客户端资源与管理器)
-- [Skills 发现与调用](#skills-发现目录与调用)
-- [Schedule 定时任务](#schedule-宿主定时任务)
-- [Goal 持久目标](#goal-持久目标与自动-round)
-- [run_code/PTC](#run_codeptc-执行层)
-- [Agent Presets](#agent-presets-与-persona)
-- [一致性边界与验证记录](docs/upstream-parity.md)
-- [配置示例](config.example.json)
-
-## 上游基线
-
-对照上游 `deepseek-ai/deepseek-harness` 的固定版本：
-
-```text
-fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159
-```
-
-工具提示词与 runtime-context 使用对应英文原文。项目按层提交并执行本地模拟服务、真实子进程、浏览器和离线 wheel 验收；尚未使用真实 DeepSeek API Key 做在线验收。
-
-## 功能开关
-
-- `core.system-prompt`：身份段、工具段和 runtime context。
-- `core.sandbox-policy`：文件策略与工作区边界。
-- `core.approval`：写/Shell 操作审批与失败关闭。
-- `core.fs-observation`：同会话文件读取版本及恢复。
-- `core.jobs`：进程、输出、任务隔离和生命周期。
-- `core.compaction`：自动/手动压缩检查点。
-- `core.cancellation`：HTTP/Web 运行取消及模型、工具、前台 Shell 取消传播。
-- `core.streaming`：模型增量事件与 Web 实时文本，默认启用。
-- `core.stream-recording`：压缩原始 chunk 并随 assistant 事件持久化，默认启用。
-- `core.sse-replay`：进程内 SSE 历史环和 Last-Event-ID 恢复，默认启用。
-- `core.pty`：Unix PTY 服务与持久终端生命周期。
-- `core.kernel-sandbox`：macOS Seatbelt 内核隔离，默认关闭。
-- `core.tool-result-pruner`：手动 surface 工具结果裁剪，默认关闭。
-- `core.user-questions`：用户提问、待答和取消服务。
-- `core.web`：Web 获取与搜索 provider 服务。
-- `core.subagents`：本地子 Agent 树、独立会话、消息与生命周期，默认关闭。
-- `core.workflow`：Node 隔离 JavaScript workflow 引擎，默认关闭。
-- `core.mcp`：MCP stdio/HTTP 客户端与运行时管理器，默认关闭。
-- `core.skills`：Skills 注册表、文件发现与持久目录，默认关闭。
-- `core.schedule`：宿主级定时任务、投递与恢复，默认关闭。
-- `core.goals`：会话内事件溯源的持久目标，默认关闭。
-- `core.goal-rounds`：独立开关的自动 Goal Round 驱动，默认关闭。
-- `core.ptc`：Node TypeScript/REPL 执行与嵌套工具 RPC，默认关闭。
-- `core.agent-presets`：按 Session 绑定工具、persona 与运行时上下文，默认关闭。
-- `core.tools`：工具注册表。
-- `tools.glob`：官方 `glob` 文件发现工具。
-- `tools.read`：官方 `read` 文本读取工具。
-- `tools.write`：官方 `write` 创建/覆盖工具。
-- `tools.edit`：官方 `edit` 字面替换工具。
-- `tools.bash`：官方一次性 `bash -c` 进程工具，默认启用。
-- `tools.bash-persistent`：官方持久 `bash` 工具切片，默认禁用；启用后替代一次性 Bash。
-- `tools.jobs`：官方 `job_output/job_list/job_kill` 工具组。
-- `tools.ask-user`：官方 `ask_user_question` 工具切片，默认关闭。
-- `tools.ask-user-timed`：官方定时 pending 提问、超时继续和迟到回答，默认关闭。
-- `tools.todo`：官方 `todo_write` 工具切片，默认关闭。
-- `tools.web-fetch`：官方 `web_fetch` 工具切片，默认关闭。
-- `tools.web-search`：官方 `web_search` 工具切片，默认关闭。
-- `tools.subagent`：官方 `subagent` 全新子级委派切片，默认关闭。
-- `tools.subagent-fork`：继承完整历史前缀的 `subagent_fork` 可配置名称实例，默认关闭。
-- `tools.subagent-control`：`send_message/interrupt_agent/list_agents/wait_agent` 工具组，默认关闭。
-- `tools.workflow`：官方 `workflow` JavaScript 前后台编排与 jobs 切片，默认关闭。
-- `tools.mcp-resources`：三个共享 MCP 资源工具，默认关闭；有服务器时可见。
-- `tools.skill`：官方 `skill` 精确名称加载工具，默认关闭。
-- `tools.schedule`：`schedule_create/list/view/edit` 工具组，默认关闭。
-- `tools.goal`：`get_goal/create_goal/update_goal` 工具组，默认关闭。
-- `tools.run-code`：官方 `run_code` TypeScript/REPL 执行切片，默认关闭。
-- `session.jsonl`：带版本头的 JSONL、v0 迁移、崩溃恢复和 POSIX 写锁。
-- `llm.mock`：确定性模拟模型，默认启用。
-- `llm.deepseek`：真实 DeepSeek Messages 模型，默认禁用。
-- `llm.retry`：DeepSeek 有界瞬时错误重试，默认启用。
-- `llm.model-listing`：模型列表查询与缓存，默认启用。
-- `llm.files`：图片文件上传、进程内复用和 Files API 列表，默认启用。
-- `agent.core`：Agent Loop。
-
-```bash
-PYTHONPATH=src python3 -m minidsh --disable tools.glob tools
-PYTHONPATH=src python3 -m minidsh --disable tools.edit prompt
-PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
-PYTHONPATH=src python3 -m minidsh --disable core.compaction plugins
-```
-
-禁用全部模型后，`agent.core` 因缺少 `llm` 服务而保持 `pending`。禁用 `session.jsonl` 后 Agent 仍可运行，但不能 resume/fork/compact，也不会保存会话、审批或任务事件。
-
-完整配置示例见 `config.example.json`。配置文件先合并，命令行的 `--enable` 和 `--disable` 后生效。
-
-## 文件策略与写操作
-
-默认文件策略是 `read-only`，写操作和 Shell 都会被拒绝。若要允许工作区写入：
-
-1. 设置 `--sandbox-mode workspace-write`。
-2. 在交互提示中允许，或显式传入 `--yes`。
-
-```bash
-PYTHONPATH=src python3 -m minidsh \
-  --sandbox-mode workspace-write \
-  --yes \
-  run "写入 demo.txt：hello"
-```
-
-Mock 编辑会先 `read`，再在同一会话中 `edit`：
-
-```bash
-PYTHONPATH=src python3 -m minidsh \
-  --sandbox-mode workspace-write \
-  --yes \
-  run "编辑 demo.txt：把hello替换为world"
-```
-
-`--yes` 会允许本次进程内的所有写和 Shell 操作，不应在内容不可信时使用。交互终端省略 `--yes` 会逐次询问；非交互环境没有可用审批者时返回 `unavailable`。
-
-```bash
-# 自动拒绝需要审批的操作
-PYTHONPATH=src python3 -m minidsh \
-  --sandbox-mode workspace-write \
-  --approval-policy never \
-  run "写入 denied.txt：hello"
-
-# 不限制工作区路径，也不触发写/Shell 审批
-PYTHONPATH=src python3 -m minidsh \
-  --sandbox-mode danger-full-access \
-  run "写入 full.txt：hello"
-```
-
-`write` 覆盖已有文件前必须读过它；`edit` 默认要求旧文本恰好出现一次。读取后如果文件被外部修改，也会拒绝继续覆盖。
-
-## 内核沙箱与策略升级
-
-`core.kernel-sandbox` 默认关闭，上述保守策略不变。启用后，macOS Seatbelt 接管一次性 Bash、后台 jobs 和持久 PTY：read-only 允许执行与读取但禁止写入；workspace-write 只允许工作区、受管 jobs 目录和平台临时目录；danger-full-access 不启用隔离。
-
-```bash
-PYTHONPATH=src python3 -m minidsh \
-  --enable core.kernel-sandbox \
-  run "执行 printf denied > blocked.txt"
-```
-
-拒绝来自实际子进程，例如 `/bin/bash: blocked.txt: Operation not permitted`。这不是 ToolRegistry 的路径提示，而是 Seatbelt 的内核执行结果。
-
-会话可通过 `sandbox/mode` 和 `approval/policy` 事件升级或收紧：
-
-```text
-POST /v1/sessions/<id>/sandbox          {"mode": "workspace-write"}
-POST /v1/sessions/<id>/approval-policy  {"policy": "never"}
-GET  /v1/sessions/<id>/sandbox
-```
-
-后续模型 runtime context 和工具/进程边界读取同一覆盖。approval 取消会立即记录 `cancelled`，回答器线程迟到的结果会被丢弃。持久终端打开时禁止切换 sandbox mode，必须先 kill 终端；新终端按新模式创建。当前仅实现 macOS Seatbelt，不包含 Linux Landlock/bwrap 或 Windows 隔离。
-
-## Shell 与后台任务
-
-```bash
-# 前台命令
-PYTHONPATH=src python3 -m minidsh \
-  --sandbox-mode workspace-write \
-  --yes \
-  run "执行 printf 'hello'"
-
-# 后台命令，立即返回 job id
-PYTHONPATH=src python3 -m minidsh \
-  --sandbox-mode workspace-write \
-  --yes \
-  run "执行后台 sleep 10"
-```
-
-每次调用使用新的 `bash -c`；cwd、变量和函数不会跨调用保留。前台命令超时后转为后台任务，而不是直接杀死。后台任务支持独立 stdout/stderr 游标、输出上限、完整输出落盘、任务列表、进程组终止和会话事件。
-
-当前 CLI 是短进程，退出时会回收后台任务；长期运行和跨进程任务恢复使用下面的常驻宿主。
-
-## 持久 Bash 与 PTY
-
-启用持久 profile 后，模型仍看到名为 `bash` 的工具，但 schema 只要求 `command`，描述使用上游持久模式原文：
-
-```bash
-PYTHONPATH=src python3 -m minidsh \
-  --enable tools.bash-persistent \
-  --sandbox-mode workspace-write --yes \
-  run "执行 export DEMO=hello; cd /tmp"
-```
-
-`tools.bash-persistent` 会自动关闭 `tools.bash`，避免同名注册冲突；`core.pty` 提供独立生命周期服务。持久 Shell 使用 Unix PTY 和交互式 `/bin/bash`，同一 session 的命令串行执行，cwd、export 的环境变量、函数和 Shell 状态会保留。每次命令通过随机标记捕获输出，结果以 `[Command finished with exit code N]` 收尾。
-
-命令超时、运行取消、`exit` 或 HTTP 主动 kill 都会重置 Shell；下一次调用从工作区和全新环境开始。默认命令超时 300000ms，模型返回最多保留尾部 16000 字符，可用 `MINIDSH_PERSISTENT_TIMEOUT_MS` 和 `MINIDSH_PERSISTENT_MAX_OUTPUT_CHARS` 调整。PTY 会话事件为 `pty/created` 和 `pty/reset`。
-
-```text
-GET  /v1/terminals
-POST /v1/terminals/<pty-id>/kill
-```
-
-持久模式不提供 `run_in_background`，后台任务仍使用一次性 Bash 的 jobs 管线。状态只在同一常驻 Application 内有效；CLI 每次命令退出都会回收 PTY，resume 只能恢复事件记录，不能恢复已退出进程的实际内存状态。当前仅支持 Unix PTY，不支持 Windows ConPTY 或内核沙箱。
-
-## 会话恢复与压缩
-
-```bash
-PYTHONPATH=src python3 -m minidsh sessions
-PYTHONPATH=src python3 -m minidsh resume <session-id> "继续刚才的任务"
-
-# 可读消息投影
-PYTHONPATH=src python3 -m minidsh transcript <session-id>
-
-# 创建独立分支；可选 --at-seq 指定保留位置
-PYTHONPATH=src python3 -m minidsh fork <session-id>
-
-# 手动创建压缩检查点
-PYTHONPATH=src python3 -m minidsh compact <session-id>
-
-# 缩小学习用上下文容量，观察自动压力压缩
-PYTHONPATH=src python3 -m minidsh --context-window 100 run "测试自动压缩"
-```
-
-resume 会恢复消息、turn 编号和文件观察；runtime context 使用当前配置重新生成。fork 不会改写原会话。压缩只改变发给模型的投影，不删除原始 JSONL 事件。
-
-## 会话版本、迁移与崩溃恢复
-
-新会话使用 MiniDSH v2 不可变代际，事件 seq 仍从 0 开始，版本头不占事件序号。每代位于 `.minidsh/sessions/<id>/generations/NNNNNNNN.jsonl`，包含完整事件快照；`index.json` manifest 记录当前代、相对路径和 SHA-256。代际文件禁止覆盖，manifest 通过临时文件、fsync 和 `os.replace` 原子切换。每次追加、迁移或恢复都发布新代，旧代只读保留。旧的无头 JSONL 和 v1 单文件只读兼容；普通 `session/transcript` 不改文件。
-
-```bash
-# 备份并修复截断末尾、未关闭 step/turn 和缺失工具结果
-PYTHONPATH=src python3 -m minidsh repair <session-id>
-
-# 迁移一个或全部可读取会话
-PYTHONPATH=src python3 -m minidsh migrate <session-id>
-PYTHONPATH=src python3 -m minidsh migrate
-```
-
-- 不完整末尾只有在 `repair` 或 resume 恢复时才截到最后一个完整换行；普通 `load` 失败关闭。
-- 未开始的工具调用补 `TOOL_NOT_STARTED`；已开始但无持久结果的调用补 `TOOL_OUTCOME_UNKNOWN`，并明确警告不要对可能有副作用的操作盲目重试。
-- 随后依次关闭开放的 step 和 turn，原因分别为 `interrupted`；fork 在开放回合截断时为分支补 `forked` 闭环，父会话不变。
-- 每次迁移或恢复先把原始字节保存到 `.minidsh/sessions/backups/<id>.<sha256>.jsonl`，再发布新代际；备份和旧代不会因重复操作被覆盖。读取 manifest 时重新计算代际 SHA-256，任何篡改都会失败关闭。
-- 高于当前版本的格式、身份不一致、非连续 seq、无效 UTF-8/JSON 都会拒绝读取。
-- resume 和手动 compact 持有整个回合的 POSIX `flock` 写锁，锁文件位于 `.minidsh/sessions/.locks`，进程退出后由内核释放；读取不获取写锁。
-- HTTP 对同一 session 的并发回合直接拒绝；同一 Application 的 job watcher 可在存储串行锁下追加审计事件，不会因回合写锁卡住等待者。
-
-对应 HTTP 操作为 `POST /v1/sessions/<id>/repair` 和 `/migrate`。这是学习版 v0/v1/v2 协议，尚不包含官方完整格式目录或 Zstandard 编码。
-
-## Surface replacement 与工具结果裁剪
-
-`surface` 是当前发给模型的事件视图，原始 JSONL 仍是事实来源。普通消息视为追加；replacement 使用 `surfaceOp={op: replace, startSeq, endSeq}` 替换当前视图中的区间，并通过 `sourceEventSeqs` 引用被遮蔽事件。事件本身的 seq 和内容不会被修改。
-
-```bash
-# 查看当前模型视图及替换历史
-PYTHONPATH=src python3 -m minidsh surface <session-id>
-
-# 手动裁剪当前视图里过长的工具结果
-PYTHONPATH=src python3 -m minidsh \
-  --enable core.tool-result-pruner prune <session-id>
-```
-
-`core.tool-result-pruner` 默认关闭，不会自动裁剪。启用后，CLI、HTTP `POST /v1/sessions/<id>/prune` 和 Web“裁剪工具结果”按钮复用同一服务。每个被裁剪节点先追加 `compaction/prune` 计量事件，再追加只修改 `content` 的 `tool/result` replacement。
-
-默认文本超过 8192 个 Unicode 码点时保留头部 4096、尾部 1024，中间换成 `[... tool result middle pruned ...]`。可用 `MINIDSH_PRUNE_THRESHOLD_CHARS`、`MINIDSH_PRUNE_HEAD_CHARS`、`MINIDSH_PRUNE_TAIL_CHARS` 调整，头部+标记+尾部不能超过阈值。非文本块保持原顺序，Python 字符串切片不会拆散 Unicode 码点。
-
-折叠会拒绝不存在的起止节点、逆序区间、非当前节点、重复/未来来源引用，以及修改工具调用身份等非 content 字段。首个系统提示词只能由单个 system replacement 改写。旧事件没有 surfaceOp 时按 append 兼容。
-
-`derive_messages`、resume、fork 和 compact 使用折叠后的模型视图；`transcript` 使用原始追加事件，因此裁剪副本不会抹掉用户已经看到的工具原文。重复 prune 不会重复裁剪已小于阈值的当前节点。
-
-对应只读 API 为 `GET /v1/sessions/<id>/surface`。这是官方 surface 规则的纵向切片，不包含任意插件消息投影或完整官方事件类型系统。
-
-## 图片附件与 Files API
-
-CLI 和 resume 可重复传入 `--image`；HTTP 使用字符串数组，Web 在高级操作中每行填写一个工作区图片路径：
-
-```bash
-PYTHONPATH=src python3 -m minidsh run "描述这张图片" --image images/example.png
-```
-
-```json
-{
-  "prompt": "描述这张图片",
-  "images": ["images/example.png"]
-}
-```
-
-支持 PNG、JPEG、GIF、WebP 文件头识别。单张最大 32MiB，每请求最多 600 张、原始累计 128MiB，内联 base64 累计最大 20MiB。`read-only` 和 `workspace-write` 只允许工作区内路径，`danger-full-access` 才允许外部路径。
-
-JSONL 只保存路径、媒体类型、字节数和 SHA-256，不写 base64。DeepSeek 请求准备时重新读取并核对附件；文件变化、格式不符或路径越界会失败。Mock 只验证新输入的附件元数据，不读取或分析图片内容。
-
-| `DEEPSEEK_IMAGE_MODE` | 行为 |
+| Tool | Limits and behaviour |
 |---|---|
-| `auto`（默认） | 优先 Files 上传；上传失败或文件引用被拒绝时降级为内联 |
-| `inline` | 不上传，直接使用 base64 |
-| `required` | 必须取得文件 id，上传失败直接报错 |
+| `read` | 2000 lines, 2000 chars per line, 50 KiB total, line numbers, `<path>/<type>/<content>` envelope |
+| `glob` | max 100 results, hidden files included, VCS dirs excluded, sorted by modification time |
+| `write` | creates or overwrites, returns `Created file` / `Updated file`, atomic replace |
+| `edit` | literal match, unique by default, `replace_all` option, `$`-free replacement |
 
-上传使用 `<Messages 根>/files`、multipart 和 `files-api-2025-04-14`，默认生命周期 7 天。同一路由、凭据作用域和图片哈希在进程内复用未临近过期的文件 id，并发请求共享上传锁。无效文件引用会清除缓存；Messages 重试不会重复上传。事件流提供 `llm/image-upload` 和 `llm/image-fallback`。
+**Design notes.**
 
-查看远端文件列表：
+- Overwriting or editing requires a **prior read of the same version in the same session**. If the
+  file changed on disk in between, the observation is invalidated and the operation is refused.
+- That rule is the difference between "the model edited a file" and "the model clobbered a file
+  someone else was editing".
+- Paths are resolved against the workspace; `..` and symlink escapes are rejected under
+  `workspace-write`.
 
-```bash
-PYTHONPATH=src python3 -m minidsh \
-  --disable llm.mock --enable llm.deepseek files
-```
+**Boundary.** No patch/diff tool, no binary editing, no multi-file transaction.
 
-`--disable llm.files` 后 `auto` 自动使用内联，`required` 会拒绝图片请求，Files 列表不可用。当前没有持久上传索引、自动配额清理、图片变换或浏览器文件选择器。
+---
 
-## 模型列表、重试与取消
+### 5. Sandbox policy, approval, observations
 
-查看模型不需要运行 Agent。默认 Mock 返回离线条目；查询真实 DeepSeek 列表时显式切换模型插件：
+**What it does.** Three independent controls that compose:
 
-```bash
-PYTHONPATH=src python3 -m minidsh models
-PYTHONPATH=src python3 -m minidsh \
-  --disable llm.mock --enable llm.deepseek models
-```
+| Control | Values | Question it answers |
+|---|---|---|
+| Sandbox policy | `read-only`, `workspace-write`, `danger-full-access` | *Where* may this operation touch? |
+| Approval policy | `ask`, `never` (+ `--yes`) | *Who* authorized this operation? |
+| Observations | per-session file versions | Is this write based on the current content? |
 
-DeepSeek 列表请求使用 Messages 根地址同源 origin 的 `GET /models`，默认超时 5000ms，成功结果缓存 600000ms；设 `DEEPSEEK_MODELS_MAX_AGE_MS=0` 可每次刷新。列表请求不自动重试，重定向不会转发凭据。
-
-Messages 默认对 `EMPTY_RESPONSE/RATE_LIMIT/SERVER/TIMEOUT/TRANSPORT` 最多重试 5 次，首次退避 500ms，指数增长至 10000ms，带 10% 对称抖动，并接受有上限的 `Retry-After`。每次重试发出 `llm/retry` 事件；`--disable llm.retry` 可完全关闭。`DEEPSEEK_RETRY_MODE=always` 会按上游语义持续重试所有错误，只应在配合取消和受控测试时使用。
-
-SSE 的 `turn/start` 返回本次 `run_id`，可据此取消：
-
-```bash
-curl -X POST http://127.0.0.1:3080/v1/runs/<run-id>/cancel -d '{}'
-```
-
-取消会产生 `run/cancelled`，会话记录 `turn/end` 的 `aborted` 原因。模型流、重试等待、工具边界和前台 Shell 使用同一取消令牌；前台 Shell 被终止，而取消 `job_output` 等待不会杀掉被观察的后台任务。Web 的“停止运行”按钮调用同一 API。`--disable core.cancellation` 禁用外部取消入口。
-
-## 增量模型流与 SSE 背压
-
-`core.streaming` 默认启用。DeepSeek 在同一 Messages 响应解析过程中同步发出增量事件，不改变最终 ModelResponse 或 assistant/message：
-
-- `assistant/delta`：text-delta、reasoning-delta、tool-call-delta 和工具 block-start，携带 session_id、run_id、turn、step 与 attempt。
-- `assistant/usage`：模型 usage 快照。
-- 最终 assistant/message、工具调用和 JSONL 投影保持不变；原始流可按下节压缩记录独立保存。
-
-Web 的实时文本区只拼接 text-delta，工具参数仍留在原始事件区。重试时清空失败 attempt 的草稿；新 attempt 的文本重新开始。Mock 和其他未发增量的模型由 Agent 将最终文本补发一次，事件带 `fallback=true` 和固定 `index=0`。禁用 `core.streaming` 后不注册增量回调，也不做该补发。
-
-max-token 截断响应会丢弃工具调用及其对应 replay 块，避免执行不完整或不安全的工具操作；原始流记录仍保留实际收到的内容。
-
-每个 SSE listener 使用固定 256 条事件的非阻塞队列。慢客户端导致队列满时会关闭并移除该流，`dropped_streams` 增加；Agent 不被迫停止，最终会话结果仍正常落盘。断开后的同进程恢复使用下节的历史环。
-
-### 原始流压缩持久化与断线续传
-
-`core.stream-recording` 默认启用。Agent 把原始分片按相邻类型/index 压缩为 `text-chunks`、`reasoning-chunks`、`tool-call-chunks`，保存文本/参数数组、起始毫秒时间和相邻时间差；usage、block-start、finish 保留 raw chunk。压缩 runs 位于 assistant/message payload 的 `stream`，并附 finish/replayState。
+**Try it.**
 
 ```bash
-# 展开所有持久流分片，带原事件 seq、turn、step
-PYTHONPATH=src python3 -m minidsh stream <session-id>
+# Default: refused by policy
+minidsh run "write denied.txt: hello"
 
-# 也可使用 GET /v1/sessions/<id>/stream
+# Widen the policy but refuse everything at the approver
+minidsh --sandbox-mode workspace-write --approval-policy never run "write denied.txt: hello"
+
+# No workspace restriction, no approval prompts
+minidsh --sandbox-mode danger-full-access run "write full.txt: hello"
 ```
 
-读取时展开并校验数组长、时间间隔、调用 id 和记录形状；损坏记录会使会话读取失败。fork 保留压缩记录，关闭 `core.stream-recording` 后新 assistant 事件不再包含 stream。
+**What to observe.** `minidsh session <id>` shows paired `approval/asked` and `approval/decided`
+events with request id, tool name, call id, and outcome (`allowed-once`, `rejected`,
+`unavailable`, `cancelled`).
 
-`core.sse-replay` 默认启用。Broker 为每个事件分配进程内递增 id，并保留最近 2048 条。EventSource 重连或手动请求可通过 `Last-Event-ID` 恢复：
+**Design notes.**
+
+- A non-interactive run with no answerer returns `unavailable` — it does not silently allow.
+- Cancelling an approval records `cancelled` immediately and discards a late answerer result.
+- Observations are persisted with the session and restored on resume, so "read before write"
+  survives restarts.
+- HTTP can escalate or tighten per session: `POST /v1/sessions/<id>/sandbox` and
+  `/approval-policy`. The runtime context and the process boundary read the same override.
+
+**Boundary.** Approval is a human-in-the-loop control, not a security boundary by itself. Pair it
+with the kernel sandbox below when running untrusted content.
+
+---
+
+### 6. Kernel sandbox (macOS Seatbelt)
+
+**What it does.** Enables real OS-level enforcement for bash, background jobs, and the persistent
+PTY. Refusals come from the child process, not from the harness.
+
+**Try it.**
 
 ```bash
-curl -H 'Last-Event-ID: <event-id>' \
-  'http://127.0.0.1:3080/v1/runs/stream?session_id=<session-id>'
+minidsh --enable core.kernel-sandbox run "run printf denied > blocked.txt"
 ```
 
-回放只选择该 session 且 id 大于断点的事件，然后接入实时队列；不会启动重复 Agent。历史太旧、未来 id 或未知 session 会明确报错，run/done 也可回放。该机制只覆盖同一常驻进程，重启后历史环为空，持久化 chunk 不等同于全局 SSE 序号。
-
-## 提问、待办与 Web 工具
-
-四个工具分别由 `tools.ask-user`、`tools.todo`、`tools.web-fetch`、`tools.web-search` 控制，默认全部关闭。可以分别启用，也可一起用于本地学习：
-
-```bash
-PYTHONPATH=src python3 -m minidsh \
-  --enable tools.ask-user --enable tools.todo \
-  --enable tools.web-fetch --enable tools.web-search \
-  run "待办 完成交互测试"
-```
-
-Mock 使用以下显式前缀触发工具，不做通用自然语言理解：
-
-| 输入前缀 | 工具 |
-|---|---|
-| `提问 是否继续？` | `ask_user_question` |
-| `待办 完成测试` | `todo_write` |
-| `获取 http://…` | `web_fetch` |
-| `搜索 关键词` | `web_search` |
-
-### 用户提问
-
-`ask_user_question` 支持稳定问题 id、选项、多选、自定义文本和跳过。CLI 交互可输入选项编号、自由文本或回车跳过；空 `selected` 且没有 `custom` 表示跳过，不代表授权。问题与答案写入 `question/asked`、`question/answered`。
-
-没有交互回答器的常驻宿主使用待答队列：
+**What to observe.** A real kernel error, for example:
 
 ```text
-GET  /v1/questions
-POST /v1/questions/<question-id>/answer
+/bin/bash: blocked.txt: Operation not permitted
+[exit code: 1]
 ```
 
-答案 body 为 `{"answers": [{"id": "question-1", "selected": [], "custom": "回答"}]}`。运行取消或服务关闭会唤醒等待者并清理队列。
+**Design notes.**
 
-启用 `tools.ask-user-timed` 后默认前台等待 120 秒，也可用 `MINIDSH_ASK_TIMEOUT_SECONDS` 调整；工具参数 `timeout=-1` 表示无限等待。超时返回 `pending=true`、callId 和继续提示，待答问题不会删除。之后通过同一 API 或图形表单回答时，会作为 `answer_to_pending_question` 用户消息写回原会话，附 callId 和原问题，resume 可继续使用。
+- `read-only`: execution and reads allowed, writes denied.
+- `workspace-write`: only the workspace, the managed jobs directory, and platform temp dirs.
+- `danger-full-access`: isolation disabled.
+- Sandbox mode cannot change while a persistent terminal is open; kill it first.
 
-Web 图形表单支持选项、多选、自定义文本和留空跳过；超时后表单仍保留，可继续提交。
+**Boundary.** macOS only. No Linux Landlock/bubblewrap, no Windows equivalent. This is a teaching
+slice of OS isolation, not a hardened multi-tenant runtime.
 
-### 会话待办
+---
 
-`todo_write` 每次写入完整列表，追加 `todo/write`，校验非空唯一内容、状态和活跃任务数量。默认最多一个 `in_progress`；设置 `MINIDSH_TODO_ALLOW_PARALLEL=1` 后允许多个。
+### 7. Shell, jobs, and PTY
 
-查询使用 `minidsh todos <session-id>` 或 `GET /v1/sessions/<id>/todos`。最近一次整表写入生效，新的 `turn/start` 清空当前清单，`turn/end` 保留完成后的列表。
+**What it does.** Two shell models:
 
-### Web 获取与搜索
+- **`bash` (default):** a fresh `bash -c` per call. No cwd, variables, or functions persist.
+- **`bash --persistent`:** one interactive `/bin/bash` under a Unix PTY per session, with state
+  preserved across calls.
 
-`web_fetch` 支持 HTTP(S)、最多 5 次重定向、30 秒默认操作超时、1MiB 原始读取上限和 200000 字符默认输出上限。HTML 会移除脚本、样式、隐藏内容，超过 512 层或转换失败时不把原始 active markup 返回模型。文本和页面都带“外部内容不可信”提示与 URL。
+Plus the jobs system: background processes with independent stdout/stderr cursors.
 
-默认拒绝 loopback、私网、链路本地和其他非公网地址；每次重定向都重新检查。本地测试显式使用 `MINIDSH_WEB_ALLOW_PRIVATE=1`。`MINIDSH_WEB_TIMEOUT_MS` 和 `MINIDSH_WEB_FETCH_MAX_OUTPUT_CHARS` 可调整预算。当前 DNS 检查未做连接级地址固定，不是完整 SSRF 防线。
-
-`web_search` 通过可替换 provider 端点工作，设置 `MINIDSH_WEB_SEARCH_URL` 后向其 POST `{"query": "...", "maxResults": 10}`。响应提供 `sources`、`truncated` 和可选 `content`。支持去重、最多 10 个查询、10 条来源、每条摘要 800 字符和 Markdown 引用。未配置 provider 时工具仍可见，执行返回明确错误。
-
-Web 内容不是指令；系统提示词会随工具开关加入上游对应英文提醒。两个工具都支持运行取消。当前 HTML 转换不是完整 Turndown/GFM，搜索 provider 协议是学习版 JSON 接口，不是官方 DeepSeek 搜索凭据或路由实现。
-
-## 本地 Subagent 与协作控制
+**Try it.**
 
 ```bash
-PYTHONPATH=src python3 -m minidsh \
-  --enable core.subagents --enable tools.subagent --enable tools.subagent-control \
-  run "委派 独立分析 | 读取 README.md"
+# One-shot
+minidsh --sandbox-mode workspace-write --yes run "run printf 'hello'"
+
+# Background job
+minidsh --sandbox-mode workspace-write --yes run "run in background sleep 10"
+
+# Persistent shell (replaces tools.bash automatically)
+minidsh --enable tools.bash-persistent --sandbox-mode workspace-write --yes \
+  run "run export DEMO=hello; cd /tmp"
 ```
 
-`subagent` 立即返回 `agent-N`，子级在自己的 Session 中运行，父级后续步骤接收 `subagent-settled` 完成通知。`tools.subagent-fork` 另注册 `subagent_fork`，只继承最近一个完整 `turn/end` 及之前的历史。`send_message` 可唤醒空闲子级或给运行中子级排队输入；`interrupt_agent` 取消当前执行；`list_agents` 和 `wait_agent` 用于发现与等待输入。
+**What to observe.**
 
-`MINIDSH_SUBAGENT_MAX_DEPTH` 默认是 1，设为 0 可禁止委派。每个父级的子级名称唯一，根名称为 `lead`。目录事件写入父 Session 的 `subagent/catalog`；常驻宿主还提供：
+- Foreground timeout does not kill the process; it **moves the same job to the background** and
+  returns `[still running after ...; moved to background job bash-1]`.
+- `job_output` consumes new output via a cursor; it does not re-print what you already read.
+- Each session may have at most 10 running/stopping jobs.
+- The memory ring holds 256 KiB, shrinks to 16 KiB after the first terminal read; full output is
+  written to disk and the path is reported.
+- The persistent shell wraps each command in random start/end markers and ends with
+  `[Command finished with exit code N]`.
+
+**Design notes.**
+
+- Environment scrubbing removes anything matching `*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`,
+  and `DSH_*`, then injects managed `DSH_HOME` and `DSH_SESSION_ID`. Credentials do not leak into
+  child processes by accident.
+- Killing a job kills its **process group**, so a shell script cannot leave orphans behind.
+- PTY resets on timeout, cancellation, `exit`, HTTP kill, or shutdown.
+
+**Boundary.** Unix PTY only (no Windows ConPTY). CLI is a short-lived process, so background jobs
+and PTYs are reclaimed on exit — use `serve` for long-running work.
+
+---
+
+### 8. Sessions: generations, resume, fork, repair
+
+**What it does.** An event-sourced session store with immutable generations.
+
+**Layout:**
 
 ```text
-GET  /v1/sessions/<id>/subagents
-POST /v1/sessions/<id>/subagent-message    {"agent":"agent-1","message":"继续"}
-POST /v1/sessions/<id>/subagent-interrupt  {"agent":"agent-1"}
+.minidsh/sessions/<session-id>/
+├── index.json                       manifest: current generation, path, SHA-256
+└── generations/
+    ├── 00000001.jsonl               full snapshot, never overwritten
+    └── 00000002.jsonl               next snapshot after an append
 ```
 
-当前仅实现进程内 spawn/fork；没有 ACP、Codex、Claude Code、DSH SDK、preset/模型选择和结构化输出。`cwd` 已校验并记录，但文件工具仍使用根工作区；完成通知在学习版 Loop 的后续 step 消费，不是官方完整 inbox 调度器。
-
-## Workflow 脚本编排与后台任务
+**Try it.**
 
 ```bash
-PYTHONPATH=src python3 -m minidsh \
-  --enable core.subagents --enable core.workflow --enable tools.workflow \
-  run "工作流 你好|你好"
-
-# 后台返回 job id，可在常驻宿主中继续使用 job_output/job_kill
-PYTHONPATH=src python3 -m minidsh \
-  --enable core.subagents --enable core.workflow --enable tools.workflow \
-  run "工作流后台 你好|你好"
+minidsh sessions
+minidsh transcript <session-id>       # human-readable projection (append-only view)
+minidsh resume <session-id> "read README.md"
+minidsh fork <session-id>             # independent branch, parent untouched
+minidsh fork <session-id> --at-seq 42 # branch from an earlier point
+minidsh compact <session-id>          # manual compaction checkpoint
+minidsh repair <session-id>           # fix truncated tail, open steps/turns, missing results
+minidsh migrate <session-id>          # upgrade legacy formats
 ```
 
-`workflow` 在独立 Node 进程中执行普通 JavaScript async body，支持 `agent`、`pipeline`、`parallel`、`phase`、`log` 和顶层 `await`。脚本通过 JSON-RPC 请求 Python 宿主启动子 Agent，不能访问 `require/process/fs/net/timer`。每个子级只把结果返回脚本，不额外唤醒父级。
+**What to observe.**
+
+- `resume` restores messages, turn numbering, and file observations. The runtime context is
+  regenerated from **current** config.
+- `fork` copies history up to a boundary and never mutates the parent.
+- `compact` changes the projection, not the event log.
+- `repair` writes a backup first, then closes the loop honestly.
+
+**Design notes.**
+
+- Every event is validated on read: session identity, contiguous `seq`, event type, payload shape,
+  UTF-8.
+- Migration and repair save the original bytes to
+  `.minidsh/sessions/backups/<id>.<sha256>.jsonl` before publishing a new generation.
+- Manifest updates use temp file + `fsync` + `os.replace`; the hash is re-verified on read, so
+  external tampering fails closed.
+- `resume` and `compact` hold a POSIX `flock` write lease for the **whole turn**. Reads take no
+  lock. The lock file has a stable inode and is released by the kernel if the process dies.
+- Crash repair distinguishes *never started* (`TOOL_NOT_STARTED`) from *started, outcome unknown*
+  (`TOOL_OUTCOME_UNKNOWN`), and warns against blindly retrying side effects.
+
+**Boundary.** This is a learning v0/v1/v2 format, not the upstream multi-generation Zstandard
+format. No Windows write lock.
+
+---
+
+### 9. Surface replacement and tool-result pruning
+
+**What it does.** Separates *what happened* (append-only events) from *what the model currently
+sees* (a folded view called the surface).
+
+**Try it.**
+
+```bash
+minidsh surface <session-id>
+minidsh --enable core.tool-result-pruner prune <session-id>
+```
+
+**What to observe.** A `tool/result` replacement event with
+`surfaceOp={op: replace, startSeq, endSeq}` and `sourceEventSeqs` listing the shadowed nodes. The
+original event is still in the log; `transcript` still shows it.
+
+**Design notes.**
+
+- Replacements validate that the range exists, is ordered, contains only current nodes, and that
+  sources are neither duplicated nor from the future.
+- A tool-result replacement may change `content` **only** — never the tool name or call id.
+- The first system prompt can only be rewritten by a single system replacement.
+- The pruner keeps head 4096 + marker + tail 1024 Unicode code points above an 8192 threshold,
+  configurable via `MINIDSH_PRUNE_*`.
+- Pruning is manual and off by default, so nothing changes behind your back.
+
+**Boundary.** Only message-level and tool-result replacements. No arbitrary plugin projections, no
+full upstream event type system.
+
+---
+
+### 10. Compaction
+
+**What it does.** When estimated context exceeds 80% of the window, replace the middle of the
+conversation with a summary while keeping the tail.
+
+**Try it.**
+
+```bash
+minidsh --context-window 100 run "test automatic compaction"
+minidsh compact <session-id>
+```
+
+**What to observe.** `compaction/start` and `compaction/end` events; the summary is wrapped in
+`<compacted-summary>`; the original events are untouched.
+
+**Design notes.**
+
+- Trigger: 80% of `context_window` (default 1,048,576).
+- Retention: roughly 16% of messages, counted from the tail.
+- The compaction prompt is the upstream-style structured summary (primary request, concepts,
+  files, errors, pending jobs, current work, next step, critical context).
+- Token accounting is a heuristic estimate, not a real tokenizer. It is conservative on purpose.
+
+**Boundary.** No exact tokenizer, no image token pricing, no model-switch re-compaction.
+
+---
+
+### 11. Streaming, stream recording, SSE replay
+
+**What it does.** Three separate concerns that are easy to confuse:
+
+| Feature | Flag | Purpose |
+|---|---|---|
+| Live deltas | `core.streaming` | `assistant/delta` events for real-time UI text |
+| Stream recording | `core.stream-recording` | Compress raw chunks into the `assistant/message` payload |
+| SSE replay | `core.sse-replay` | In-process ring + `Last-Event-ID` resume for dropped connections |
+
+**Try it.**
+
+```bash
+minidsh stream <session-id>            # expand recorded chunks with seq/turn/step
+curl -H 'Last-Event-ID: 42' 'http://127.0.0.1:3080/v1/runs/stream?session_id=<id>'
+```
+
+**What to observe.**
+
+- Deltas carry `attempt`; on retry the consumer should clear the failed attempt's draft.
+- Recorded chunks are `text-chunks`, `reasoning-chunks`, `tool-call-chunks` with `time0` and `dt`;
+  usage/block-start/finish stay raw.
+- The SSE broker keeps 2048 events; a slow listener is dropped, not allowed to stall the agent.
+
+**Design notes.**
+
+- Every SSE listener has a bounded 256-event queue. Overflow closes that listener and increments
+  `dropped_streams`; the run continues and still persists its result.
+- Replay selects only events for the same session with a greater id than the breakpoint, then
+  attaches to live. It never starts a duplicate agent.
+- Corrupted recorded chunks make the session read fail — full fidelity or nothing.
+
+**Boundary.** Replay is per-process; restarting the host empties the ring. Recorded chunks are not
+global SSE sequence numbers.
+
+---
+
+### 12. Questions and todos
+
+**What it does.** `ask_user_question` suspends the turn for human input; `todo_write` maintains a
+session-scoped task list.
+
+**Try it.**
+
+```bash
+minidsh --enable tools.ask-user --enable tools.todo run "ask Continue?"
+minidsh --enable tools.todo run "todo Finish the lab"
+minidsh todos <session-id>
+```
+
+**What to observe.**
+
+- An empty `selected` array with no `custom` means **skipped**, not approved.
+- With `tools.ask-user-timed`, the default wait is 120 s; timeout returns `pending=true` and keeps
+  the question in the queue.
+- A late answer is injected as a user message with source kind `answer_to_pending_question`,
+  carrying the original call id.
+- Todos are whole-list replacements with unique non-empty text; only one `in_progress` unless
+  `MINIDSH_TODO_ALLOW_PARALLEL=1`.
+
+**Design notes.** Human input is asynchronous and untrusted. It gets validation, a lifecycle, and
+an audit trail like every other external signal.
+
+---
+
+### 13. Web fetch and search
+
+**What it does.** Bounded web access with prompt-injection awareness.
+
+**Try it.**
+
+```bash
+minidsh --enable tools.web-fetch run "fetch https://example.com"
+MINIDSH_WEB_SEARCH_URL=http://127.0.0.1:9000/search \
+  minidsh --enable tools.web-search run "search agent harness"
+```
+
+**What to observe.**
+
+- Fetched content is wrapped with an explicit "external content is untrusted" note plus the URL.
+- HTML scripts, styles, and hidden nodes are stripped; deeply nested or unconvertible pages do not
+  return raw markup.
+- Private, loopback, and link-local addresses are refused, re-checked on every redirect.
+- Search supports up to 10 queries, 10 sources, 800-character snippets, and Markdown citations.
+
+**Design notes.** The default timeouts and byte caps are part of the tool contract, not a setting
+buried in config. Budgets belong next to the capability.
+
+**Boundary.** Not a complete SSRF defense (DNS is not pinned at connection time), not full
+Turndown/GFM, and the search provider is a small JSON protocol rather than a vendor route.
+
+---
+
+### 14. Subagents
+
+**What it does.** Creates child agents with their own sessions, names, and lifetimes.
+
+**Try it.**
+
+```bash
+minidsh --enable core.subagents --enable tools.subagent --enable tools.subagent-control \
+  run "delegate analysis | read README.md"
+```
+
+**What to observe.**
+
+- `subagent` returns `agent-1` immediately; the child runs in its own session.
+- Completion arrives in the parent as a `subagent-settled` user message.
+- `subagent_fork` additionally inherits the parent's history up to the last complete `turn/end`.
+- `send_message` wakes an idle child or queues input for a running one; `interrupt_agent` cancels
+  the subtree; `list_agents` and `wait_agent` are for discovery and coordination.
+
+**Design notes.**
+
+- Depth limit `MINIDSH_SUBAGENT_MAX_DEPTH` defaults to 1; 0 disables delegation entirely.
+- Names are unique per parent; the root is `lead`.
+- Children inherit the parent's preset, so capability scoping composes.
+
+**Boundary.** In-process only. No ACP, Codex, Claude Code, or remote SDK backend; no per-child model
+selection; child `cwd` is recorded but file tools still use the root workspace.
+
+---
+
+### 15. Workflow engine
+
+**What it does.** Runs a JavaScript orchestration script in an isolated Node process, where each
+`agent()` call becomes a real subagent through JSON-RPC back into Python.
+
+**Try it.**
+
+```bash
+minidsh --enable core.subagents --enable core.workflow --enable tools.workflow \
+  run "workflow hello|world"
+
+minidsh --enable core.subagents --enable core.workflow --enable tools.workflow \
+  run "workflow background hello|world"
+```
 
 ```javascript
 phase('audit')
@@ -528,58 +855,91 @@ const results = await pipeline(args.items,
 return results
 ```
 
-对象根 JSON Schema 支持 `type/properties/required/additionalProperties/items/enum/const/oneOf`。普通子级失败或结构不匹配返回 `null`；参数错误、未知选项和上限违规中止整个运行。`MINIDSH_WORKFLOW_MAX_AGENTS` 默认 1000，`MINIDSH_WORKFLOW_MAX_CONCURRENT` 默认按 CPU 且最多 32，组合器单次最多 4096 项。
+**What to observe.** `workflow/start`, `workflow/phase`, `workflow/log`, `workflow/agent-start`,
+`workflow/agent-end`, `workflow/end` events; a background run returns a job id usable with
+`job_output`.
 
-`run_in_background=true` 返回独立 job id，复用 `job_output/job_list/job_kill`。phase/log 和成员状态写入增量输出游标，完成后的 JSON 结果只投递一次；kill 会取消 Node 及所有子级。HTTP jobs API 可用 `?session_id=<id>` 做会话归属查询。
+**Design notes.**
 
-Application 重启后，已完成 workflow 可从磁盘恢复输出；未上报终态的任务标为 `failed: interrupted: host restarted`，并补记唯一 `cause=recovery` 事件，不会伪造存活进程。CLI 是短进程，应在退出前读取后台结果；长期后台运行使用常驻宿主。
+- No `require`, `process`, `fs`, `net`, or timers in the guest. `meta` and `args` are injected as
+  JSON data, never evaluated.
+- Object-root JSON Schema subset: `type/properties/required/additionalProperties/items/enum/const/oneOf`.
+  A child failure or schema mismatch becomes `null`; a hook misuse aborts the whole run.
+- `MINIDSH_WORKFLOW_MAX_AGENTS` 1000, concurrency defaults to `min(32, cpu_count)`, 4096 items per
+  combinator call.
+- After a host restart, finished workflows can be recovered from disk; unfinished ones are marked
+  `failed: interrupted: host restarted` with a single `cause=recovery` audit event.
 
-运行提供六类 `workflow/*` SSE 事件和四类 `tool-workflow/*` 会话记录；取消会停止 Node 进程并等待所有子级静止。当前不支持任意模型路由；vm 是学习版能力隔离，不是官方完整 PTC/OS 沙箱。
+**Design notes on shape.** "Workflow" is deterministic orchestration — the control graph is known
+before execution. "Agent" is model-driven control flow. Knowing which one a task needs is a core
+architectural skill.
 
-## MCP 客户端、资源与管理器
+**Boundary.** `vm` isolation is a learning boundary, not a hardened PTC/OS sandbox. No per-agent
+model routing.
 
-在 JSON 配置中显式启用并声明服务器：
+---
+
+### 16. MCP client
+
+**What it does.** Speaks MCP to stdio and Streamable HTTP servers, registers their tools under
+`mcp__<server>__<tool>`, and exposes resources.
+
+**Try it.** Add to a JSON config:
 
 ```json
 {
-  "features": {"core.mcp": true, "tools.mcp-resources": true},
+  "features": { "core.mcp": true, "tools.mcp-resources": true },
   "mcp_servers": {
     "local": {
       "transport": "stdio",
       "command": "python3",
       "args": ["-u", "server.py"],
-      "env": {"SERVER_VALUE": "${credential:SERVER_VALUE}"}
+      "env": { "SERVER_VALUE": "${credential:SERVER_VALUE}" }
     },
     "remote": {
       "transport": "streamable-http",
       "url": "http://127.0.0.1:3000/mcp",
-      "headers": {"Authorization": "Bearer ${credential:MCP_TOKEN}"}
+      "headers": { "Authorization": "Bearer ${credential:MCP_TOKEN}" }
     }
   }
 }
 ```
 
-客户端执行真实 JSON-RPC initialize/initialized 和分页工具发现，公开名称为 `mcp__<server>__<tool>`。stdio 使用清洗后的环境；HTTP 支持 JSON/SSE 和 MCP-Session-Id。调用支持超时与取消，服务器 `isError` 明确失败。远程重名或注册冲突会拒绝整个新工具代，旧工具保持可用。
-
-资源共享工具为 `list_mcp_resources`、`list_mcp_resource_templates`、`read_mcp_resource`，都必须显式传入 `server`。blob 仅显示 base64 长度，不把二进制载荷展开到模型历史。服务器指令按字面文本进入系统提示词。
-
-```text
-GET  /v1/mcp
-POST /v1/mcp                        {"name":"local","config":{...}}
-POST /v1/mcp/<name>/<action>        action = enable/disable/remove/restart/probe
+```bash
+minidsh --config mcp.json tools
+curl http://127.0.0.1:3080/v1/mcp
 ```
 
-未配置服务器时没有 MCP 资源工具或提示词。当前尚无自动重连预算、OAuth、完整凭据轮换、资源订阅、MCP prompts 和图片附件持久投影；HTTP 取消需等待传输边界，启动超时尚未覆盖所有版本协商与首次发现的单一总预算。
+**What to observe.**
 
-## Skills 发现、目录与调用
+- Real JSON-RPC `initialize` / `notifications/initialized`, paginated tool discovery.
+- `${credential:NAME}` resolves from the host environment; failures redact the resolved value.
+- A name conflict rejects the entire new tool generation and leaves the old tools intact.
+- Server `isError` becomes an explicit tool failure, not a silent empty result.
+- Resource blobs report only their base64 length — binary payloads never enter model history.
 
-Skills 支持目录 bundle 与平铺 Markdown：
+**Design notes.** The MCP boundary is where trust, naming, credentials, and cancellation meet. Read
+this module with the specification open — that is the point of it existing.
+
+**Boundary.** The implementation follows the classic handshake. The 2026-07-28 MCP revision makes
+the protocol stateless (no `initialize`, no `Mcp-Session-Id`, `server/discover`, MRTR); see
+[how this maps to the 2026 ecosystem](#how-this-maps-to-the-2026-agent-ecosystem) and the parity
+doc. No OAuth, no resource subscriptions, no auto-reconnect budget yet.
+
+---
+
+### 17. Skills
+
+**What it does.** Progressive disclosure for instructions. A skill is a directory with `SKILL.md`
+or a flat Markdown file with frontmatter. Only names and one-line descriptions are advertised; the
+body is loaded on demand.
+
+**Try it.**
 
 ```text
 skills/
-├── review/
-│   └── SKILL.md
-└── hidden.md
+└── review/
+    └── SKILL.md
 ```
 
 ```markdown
@@ -590,509 +950,624 @@ description: Review code carefully
 Read the relevant files before suggesting changes.
 ```
 
-启用方式：
+```bash
+minidsh --enable core.skills --enable tools.skill skills
+minidsh --enable core.skills --enable tools.skill run "skill review"
+```
+
+**What to observe.** A persistent `skill-catalog` user message lists available skills; changes
+append a replacement catalog; removing all skills explicitly retires old names. The `skill` tool
+re-reads the full body every call and wraps it in `<skill_content>`.
+
+**Design notes.**
+
+- Roots, in order: project `.dsh/skills`, `.agents/skills`, configured dirs, `~/.dsh/skills`,
+  `~/.agents/skills`, optional bundled root.
+- `disable-model-invocation: true` hides the catalog entry and tool but still allows an explicit
+  user `/name` gesture; `user-invocable: false` blocks that gesture.
+- Unknown paths and tool results cannot forge a user gesture.
+
+**Boundary.** Frontmatter is a scalar parser, not full YAML. No file watching, no Office skills
+bundled, no upstream working-directory scope chain.
+
+---
+
+### 18. Schedule
+
+**What it does.** Host-level timers that deliver a prompt to a session on a schedule.
+
+**Try it.**
 
 ```bash
-PYTHONPATH=src python3 -m minidsh \
-  --enable core.skills --enable tools.skill \
-  run "使用技能 review"
-
-PYTHONPATH=src python3 -m minidsh \
-  --enable core.skills --enable tools.skill skills
-
-PYTHONPATH=src python3 -m minidsh \
-  --enable core.skills --enable tools.skill skill review
+minidsh --enable core.schedule --enable tools.schedule \
+  run 'schedule create {"title":"Deploy check","prompt":"Check deployment status","rrule":"DTSTART:20990101T090000Z\nRRULE:FREQ=DAILY;COUNT=1","target":"this_session"}'
 ```
 
-`skill_dirs` 添加自定义根，`skill_include_default_roots=false` 可隔离默认项目/用户目录。默认根依次是项目 `.dsh/skills`、`.agents/skills`、自定义目录、`~/.dsh/skills`、`~/.agents/skills` 和可选 bundled 根；运行时注册优先于文件来源。
+**What to observe.**
 
-首次请求前，模型可调用的 skill 以持久 `skill-catalog` 用户消息发布摘要。名称、描述或发现完整性变化会追加替换目录，删除全部时明确停用旧名称。`skill` 工具每次重新读取完整正文，统一返回 `<skill_content>` 和资源基底指引。
+- Tasks belong to the host, not to a session, and can be listed across sessions.
+- Targets: `this_session` (reuse), `new_once` (create once), `new` (fresh session per delivery).
+- Timing forms: `after`, `at`, `every`, `daily`, `weekly`, `cron` (five fields), `rrule` (subset).
+- `schedule/inbox` confirms the message was **persisted**, not that the model finished it.
+- Missed occurrences after downtime deliver only the most recent one.
+- History retains 200 deliveries / 30 days; minimum interval 60 s.
 
-`disable-model-invocation: true` 会隐藏模型目录与工具入口，但直接用户输入 `/name` 仍可加载；`user-invocable: false` 则禁止该手势。未知路径和工具结果不能伪造手势。HTTP 提供 `GET /v1/skills` 和 `GET /v1/skills/<name>[?user=true]`。
+**Design notes.** Scheduling is a durability problem. Idempotency, catch-up policy, and the
+delivered/finished distinction are the whole design.
 
-当前 frontmatter 是学习版标量解析，不是完整 YAML；尚无 Office 内置技能、Chokidar、官方工作目录作用域链或文件系统服务。
+**Boundary.** No RRULE `BYWEEKNO`/`BYYEARDAY`, single-value `BYHOUR`/`BYMINUTE`/`BYSECOND`, one
+storage backend.
 
-## Schedule 宿主定时任务
+---
+
+### 19. Goals and automatic rounds
+
+**What it does.** A persistent objective attached to a session, with optional automatic
+continuation.
+
+**Try it.**
 
 ```bash
-PYTHONPATH=src python3 -m minidsh \
-  --enable core.schedule --enable tools.schedule \
-  run '定时任务 {"title":"部署检查","prompt":"检查部署状态","rrule":"DTSTART:20990101T090000Z\\nRRULE:FREQ=DAILY;COUNT=1","target":"this_session"}'
+minidsh --enable core.goals --enable tools.goal run "goal create finish migration|4"
+minidsh --enable core.goals --enable tools.goal --enable core.goal-rounds run "goal create finish migration|4"
+minidsh --enable core.goals goal <session-id>
+minidsh --enable core.goals goal <session-id> resume
 ```
 
-四个模型工具为 `schedule_create/list/view/edit`。任务属于宿主，可跨 Session 列举；创建和修改必须来自用户明确授权。`this_session` 复用当前会话，`new_once` 首次创建后复用，`new` 每次创建独立会话。委派子 Agent 不能管理或接收计划任务。
+**What to observe.**
 
-支持 `after/at/every/daily/weekly/cron/rrule` 时间记录。Cron 是五字段格式；RRULE 支持主要频率、INTERVAL/COUNT/UNTIL、BYDAY/BYMONTHDAY/BYMONTH/BYSETPOS 等。当前不支持 BYWEEKNO/BYYEARDAY，BYHOUR/BYMINUTE/BYSECOND 各只接受一个值，不是完整 RFC 5545 求值器。
+- At most one current goal per session; `goal/change` stores objective, status, revision, round
+  count, and blocker reason.
+- Every update requires exact `goal_id` + `revision` — optimistic concurrency, not last-write-wins.
+- Restoring, forking, or restarting always leaves the goal **disarmed**; a human must resume it.
+- Autonomous `blocked` requires three consecutive rounds and a concrete reason.
 
-任务原子写入 `.minidsh/schedule.json`（schedule v2）。重启只追赶最近一次发生时点；运行中目标在下一次模型步骤接收消息。`schedule/inbox` 回执只确认消息已持久化，不代表模型执行完成。每个任务保留最近 200 条、30 天投递记录，默认最小投递间隔 60 秒。
+**Design notes.** This is the most subtle module in the repo. Long-horizon autonomy needs explicit
+state, a budget, and a deliberate re-arm step; without them, "keep going until done" is a loop with
+no exit condition.
 
-```text
-GET  /v1/schedule[?active=true&limit=100&offset=0]
-POST /v1/schedule                  {"title":"...","prompt":"...","timing":{...},"target":{...}}
-GET  /v1/schedule/<id>
-GET  /v1/schedule/<id>/history
-POST /v1/schedule/<id>/run
-POST /v1/schedule/<id>/edit        {"action":"update","patch":{...},"expectedUpdatedAt":"..."}
-POST /v1/schedule/delete-inactive
-```
+**Boundary.** No completion evaluator, no subtree idle aggregation, no independent scheduler.
 
-当前没有关联 Agent 变更通知、归档准入、批量 Session 提醒、独立执行槽或其他存储后端。
+---
 
-## Goal 持久目标与自动 Round
+### 20. Programmatic tool calling (PTC)
+
+**What it does.** In PTC mode the model sees only `run_code`; every other tool becomes
+`await tools.name(args)` inside a TypeScript program.
+
+**Try it.**
 
 ```bash
-# 只启用目标状态与模型工具，不自动续行
-PYTHONPATH=src python3 -m minidsh \
-  --enable core.goals --enable tools.goal \
-  run "创建目标 完成全部迁移|4"
-
-# 同时启用自动 Round
-PYTHONPATH=src python3 -m minidsh \
-  --enable core.goals --enable tools.goal --enable core.goal-rounds \
-  run "创建目标 完成全部迁移|4"
-
-# 用户直接查看或控制，不消耗模型 Round
-PYTHONPATH=src python3 -m minidsh --enable core.goals goal <session-id>
-PYTHONPATH=src python3 -m minidsh --enable core.goals goal <session-id> resume
+minidsh --enable core.ptc --enable tools.run-code \
+  run 'run code {"code":"const text: string = await tools.read({file_path: \"README.md\"}); return text.length","description":"Measure README"}'
 ```
 
-每 Session 至多一个当前目标。`goal/change` v1 事件保存 objective、active/paused/blocked/complete、revision、Round 数量和 blocker reason；所有更新要求精确 id+revision，损坏回放失败关闭。已完成目标可以直接替换，clear 保留历史 tombstone。
+**What to observe.**
 
-`create_goal` 等工具区分直接人类与自主 Goal Round 权限。paused 只能由用户恢复；自主 blocked 至少要求连续三个 Goal Round，并记录具体条件。`MINIDSH_GOAL_MAX_ROUNDS` 设置默认上限 256。
+- Calls still go through the same `ToolRegistry`, so approval, cancellation, and events apply.
+- `per-call` executes an async function body in a fresh process; `persistent` keeps a Node REPL
+  with per-session top-level variables.
+- Read-only subcalls run in parallel (default 10); mutating calls are exclusive.
+- Defaults: 120 s timeout, 600 s cap, 64 MiB output, 3000 ms stop grace, 128 pending, 1024
+  subcalls/minute.
+- Error classes: `timeout`, `abort`, `exception`, `protocol`, `worker-exit`, `output-limit`,
+  `invalid-output`.
 
-`core.goal-rounds` 独立控制自动续行。armed 的 active goal 在 Agent 空闲时继续同 Session Round；只有写入 `kind=goal` 用户消息才消耗预算，耗尽记录 `round-limit` 阻塞。恢复、fork 或重启后总是 disarmed，必须显式 resume，异常取消不会隐式重试。完成或阻塞后只注入一次最终总结指令。
+**Design notes.** Code execution collapses multi-step tool churn into one model turn — a large
+latency win — at the cost of quotas, isolation, and harder debugging. Both sides of that tradeoff
+are implemented here.
 
-```text
-GET  /v1/sessions/<id>/goal
-POST /v1/sessions/<id>/goal-create  {"objective":"...","max_goal_rounds":4}
-POST /v1/sessions/<id>/goal-edit    {"goal_id":"...","revision":1,"objective":"..."}
-POST /v1/sessions/<id>/goal-resume  {"goal_id":"...","revision":1}
-POST /v1/sessions/<id>/goal-pause   {"goal_id":"...","revision":1}
-POST /v1/sessions/<id>/goal-complete
-POST /v1/sessions/<id>/goal-blocked {"goal_id":"...","revision":1,"blocked_reason":"..."}
-POST /v1/sessions/<id>/goal-clear   {"goal_id":"...","revision":1}
-```
+**Boundary.** No Acorn source transform, no full cooperative revoke/process-tree cleanup, no PTC
+image projection.
 
-当前没有官方 SessionProjection、完整 AgentRegistry initiator、子树 idle 汇总或独立完成评估器。
+---
 
-## run_code/PTC 执行层
+### 21. Agent presets
 
-```bash
-PYTHONPATH=src python3 -m minidsh \
-  --enable core.ptc --enable tools.run-code \
-  run '运行代码 {"code":"const text: string = await tools.read({file_path: \"README.md\"}); return text.length","description":"Measure README"}'
-```
+**What it does.** Binds a session to a capability profile: which tools exist, and what persona
+prefixes/suffixes the prompt.
 
-PTC 模式下模型只看到 `run_code` 和动态 SDK，其他工具只作为程序内 `await tools.name(args)` 绑定。调用仍在同一 ToolRegistry 中执行，保留审批、取消、互斥与事件记录。
-
-- `per-call`：async TypeScript 函数体，支持 `return` 和 `console.log(...)`，进程执行后回收。
-- `persistent`：Node REPL，支持顶层 `await` 和末尾 JSON 表达式，按 Session 保留顶层变量，重启或失效后清空。
-- 默认只读子调用最多并行 10 个，mutating 独占；pending 默认 128；子调用额度为 timeout 分钟数×1024。
-- 默认 120000ms 超时、600000ms 上限、64MiB 输出、3000ms 停止宽限，可用 `MINIDSH_PTC_*` 环境变量调整。
-- 返回 `status/value/logs/diagnostic`，错误类型包括 timeout、abort、exception、protocol、worker-exit、output-limit 和 invalid-output。
-
-`MINIDSH_PTC_PERSISTENT=1` 设置默认保留模式，单次调用也可传 `persistent`。Seatbelt 启用时按 Session 文件策略执行真实 Node 进程，read-only 下写入会收到内核拒绝。
-
-当前没有官方 Acorn 源码变换、完整协作式 revoke/进程树清理、PTC 图片投影、环境 reset 控件或 `sandbox_permissions` 提权。
-
-## Agent Presets 与 Persona
+**Try it.**
 
 ```json
 {
-  "features": {"core.agent-presets": true},
+  "features": { "core.agent-presets": true },
   "default_preset": "standard",
   "presets": {
-    "standard": {"plugins": ["tools.read", "tools.glob"]},
+    "standard": { "plugins": ["tools.read", "tools.glob"] },
     "minimal": {
       "plugins": [],
-      "persona": {"prefix": "Minimal agent", "complete": true, "includeRuntimeContext": false}
+      "persona": { "prefix": "Minimal agent", "complete": true, "includeRuntimeContext": false }
     },
-    "coder": {
-      "plugins": ["tools.run-code", "tools.read"],
-      "persona": {"prefix": "Coder", "suffix": "End"}
-    }
+    "coder": { "plugins": ["tools.run-code", "tools.read"], "persona": { "prefix": "Coder", "suffix": "End" } }
   }
 }
 ```
 
-每个 Session 的工具注册表和系统提示词独立。`preset/selected` 事件持久化选择；未记录时使用 `default_preset`。默认 standard 继承当前启用的工具，minimal 不暴露工具。缺失的历史 preset 会失败关闭，而不是回退到其他组合。
+```bash
+minidsh --enable core.agent-presets presets
+minidsh --enable core.agent-presets preset <session-id> minimal
+```
 
-空白 Session 可在首个模型回合前切换，重复选择幂等；首回合后拒绝切换。fork 和本地子 Agent 继承父 preset。`complete` 只保留 persona prefix，`includeRuntimeContext=false` 不再追加 runtime-context 快照。
+**What to observe.** `preset/selected` persists the choice. Switching is allowed only before the
+first model turn; after that it is refused. Forks and subagents inherit the parent preset. A
+preset missing from history fails closed rather than falling back.
 
-PTC SDK 与嵌套 RPC 使用同一 scoped ServiceContext，因此从 preset 删除工具也会同时删除其 `run_code` 调用权限。
+**Design notes.** Capability scoping is a product feature, not an optimization. A review agent
+should not carry a shell it will never use, and `run_code` loses access to a tool the moment the
+preset removes it — because PTC uses the same scoped service context.
+
+**Boundary.** A name-to-plugin mapping, not an upstream YAML loader with hot reload.
+
+---
+
+### 22. HTTP host and Web workbench
+
+**What it does.** A local HTTP + SSE host, and a single-file workbench UI.
+
+**Try it.**
 
 ```bash
-PYTHONPATH=src python3 -m minidsh --enable core.agent-presets presets
-PYTHONPATH=src python3 -m minidsh --enable core.agent-presets preset <session-id> minimal
+minidsh serve --port 3080
+open http://127.0.0.1:3080
 ```
 
-HTTP 提供 `GET /v1/presets` 和 `GET/POST /v1/sessions/<id>/preset`。当前插件清单是学习版名称映射，不是官方 Cordis YAML/Loader 代际、激活审计、热重载或完整 AgentPresetInspection。
+**What to observe.**
 
-## HTTP 宿主与 Web 页面
+- `POST /v1/runs/stream` starts a run; the `turn/start` event carries the `run_id` used for
+  cancellation.
+- Concurrent runs are isolated by `run_id`; two identical prompts still get distinct sessions.
+- A session accepts one write turn at a time over HTTP.
+- The UI renders a structured trace (model/tool/job/error categories), streams assistant text live,
+  and shows pending questions as a modal form.
 
-启动本地 HTTP/SSE 宿主：
+**Design notes.**
 
-```bash
-PYTHONPATH=src python3 -m minidsh serve --port 3080
-```
+- Default bind is `127.0.0.1`. Binding a non-loopback address without `MINIDSH_TOKEN` refuses to
+  start; clients then send `Authorization: Bearer <token>`.
+- The workbench has no build step. If the UI needs a private shortcut, the API is missing
+  something — a useful pressure test.
+- English/中文 switch and light/dark theme are persisted in `localStorage`.
 
-然后打开 `http://127.0.0.1:3080`。页面支持运行/resume、fork、compact、会话列表和事件流。
+**Boundary.** A learning API, not a multi-tenant gateway. The browser UI does not send custom
+Authorization headers.
 
-API 摘要：
+---
 
-```text
-GET  /health
-GET  /v1/plugins
-GET  /v1/tools
-GET  /v1/models
-GET  /v1/files
-GET  /v1/prompt
-GET  /v1/questions
-GET  /v1/sessions
-GET  /v1/sessions/<id>
-GET  /v1/sessions/<id>/transcript
-GET  /v1/sessions/<id>/surface
-GET  /v1/sessions/<id>/stream
-GET  /v1/sessions/<id>/todos
-GET  /v1/sessions/<id>/sandbox
-POST /v1/sessions/<id>/sandbox
-POST /v1/sessions/<id>/approval-policy
-GET  /v1/jobs
-GET  /v1/jobs/<id>/output
-GET  /v1/terminals
-POST /v1/runs
-POST /v1/runs/stream
-POST /v1/runs/<run-id>/cancel
-POST /v1/questions/<question-id>/answer
-POST /v1/sessions/<id>/resume
-POST /v1/sessions/<id>/fork
-POST /v1/sessions/<id>/compact
-POST /v1/sessions/<id>/repair
-POST /v1/sessions/<id>/migrate
-POST /v1/sessions/<id>/prune
-POST /v1/jobs/<id>/kill
-POST /v1/terminals/<pty-id>/kill
-```
+### 23. External plugins
 
-默认只绑定 `127.0.0.1`。绑定非回环地址时必须设置 `MINIDSH_TOKEN`，客户端同时携带：
+**What it does.** Discovers plugins through the standard `minidsh.plugins` entry point group.
 
-```text
-Authorization: Bearer <token>
-```
-
-SSE 包含 turn、assistant、重试、工具执行、run result/error/cancelled 和 job 完成通知；内部 run/done 只用于关闭对应当前流。并发运行通过唯一 `run_id` 过滤事件，相同 prompt 也不会串会话或相互提前结束。
-
-## 外部 Python 插件
-
-插件通过标准 `importlib.metadata` entry points 发现，group 固定为 `minidsh.plugins`。项目附带一个独立的时钟工具发行包，它不在核心源码的 `PYTHONPATH` 中：
+**Try it.**
 
 ```bash
 python3 -m pip install -e . -e ./examples/minidsh-clock
-minidsh plugins
-minidsh --enable example.clock plugins
-minidsh --enable example.clock tools
+minidsh plugins                        # example.clock shown as disabled
+minidsh --enable example.clock tools   # now it provides a real tool
 ```
 
-对应声明位于 `examples/minidsh-clock/pyproject.toml`：
+**What to observe.** Disabled plugins expose only distribution metadata — the module is never
+imported. Enabling is a second, explicit trust decision.
 
-```toml
-[project.entry-points."minidsh.plugins"]
-"example.clock" = "minidsh_clock:ClockPlugin"
-```
+**Design notes.** The entry point may export a `Plugin` instance, a subclass, or a factory. The
+entry point name must equal `plugin.name` and must not shadow a built-in feature. Uninstalling a
+package without deleting its config entry fails closed at startup.
 
-entry point 可以导出 `Plugin` 实例、`Plugin` 子类或返回 `Plugin` 的工厂。entry point 名称必须和 `plugin.name` 相同，且不能覆盖内置功能。外部插件沿用同一服务依赖、功能开关、工具注册表和提示词段，不需要修改 `Application` 的核心组装代码。
+**Boundary.** No hot reload, no versioned plugin API, no sandbox for plugin code — enabling a
+plugin gives it the host process's privileges.
 
-所有外部插件**默认禁用**。禁用状态只读取发行包元数据，不导入或执行插件模块；只有配置文件或 `--enable` 显式启用后才加载。安装第三方插件即表示信任其代码，启用后插件拥有当前 Python 进程的权限。插件已安装但未启用时，`plugins` 会显示 `disabled`、发行包、版本和 entry point 来源。
+---
 
-也可以在配置文件中启用，但卸载插件后必须同时删除对应开关，否则配置会按未知功能拒绝启动：
+### 24. Product distributions
 
-```json
-{
-  "features": {
-    "example.clock": true
-  }
-}
-```
+**What it does.** Splits the product shells from the core.
 
-## Headless、Web 与 Desktop 发行包
-
-产品入口和核心组装分离，三个入口最终都复用同一个 `Application`：
-
-| 发行包 | 命令 | 额外运行时依赖 |
+| Package | Command | Extra runtime |
 |---|---|---|
-| `minidsh` / `minidsh-headless` | `minidsh` / `minidsh-headless` | 无，仅 Python 标准库 |
-| `minidsh-web` | `minidsh-web`，默认执行 `serve` | 无，复用核心 HTTP/SSE |
-| `minidsh-desktop` | `minidsh-desktop`，默认执行 `desktop` | `pywebview` |
-
-本地安装示例：
+| `minidsh` / `minidsh-headless` | `minidsh`, `minidsh-headless` | none (stdlib only) |
+| `minidsh-web` | `minidsh-web` (defaults to `serve`) | none |
+| `minidsh-desktop` | `minidsh-desktop` (defaults to `desktop`) | `pywebview` |
 
 ```bash
-# 最小 Headless；核心本身也可直接作为 Headless 使用
-python3 -m pip install -e . -e ./packages/minidsh-headless
-minidsh-headless plugins
-
-# Web：不需要安装 Desktop/GUI 依赖
 python3 -m pip install -e . -e ./packages/minidsh-web
 minidsh-web --port 3080
 
-# Desktop：只有这个 profile 安装 pywebview
 python3 -m pip install -e '.[desktop]' -e ./packages/minidsh-desktop
 minidsh-desktop
 ```
 
-也可以只安装核心后按需添加 GUI 依赖：`python3 -m pip install -e '.[desktop]'`，然后运行 `minidsh desktop`。核心不会在导入 CLI、列出插件或运行 Headless/Web 时导入 `pywebview`；缺少该依赖时只有 Desktop 命令返回明确安装提示。Linux 的 GUI 后端可能还需要操作系统提供的 GTK/Qt 运行库。
+**What to observe.** Importing the CLI, listing plugins, or running headless/Web never imports
+`pywebview`. Only the Desktop command reports a missing GUI dependency, and only when used.
 
-这里借鉴的是上游 `apps/cli`、`apps/web` 和 `apps/desktop` 的产品分层思想；Python entry points、`pywebview` 和这些发行包名称都是学习版设计，不是官方插件格式或官方桌面包的兼容实现。
+**Design notes.** Heavy optional dependencies belong at the product edge. A harness that requires a
+browser toolkit to run a Bash command is a packaging failure.
 
-## 接入真实 DeepSeek
+---
 
-先禁用 Mock，再启用 DeepSeek，避免两个插件同时提供 `llm` 服务：
+### 25. Real DeepSeek adapter
+
+**What it does.** Implements the DeepSeek Messages protocol: SSE streaming, thinking blocks with
+replay signatures, tool calls, images, retries, and model listing.
+
+**Try it.**
 
 ```bash
-export DEEPSEEK_API_KEY='你的 API Key'
-PYTHONPATH=src python3 -m minidsh \
-  --disable llm.mock \
-  --enable llm.deepseek \
-  run "读取 README.md"
+export DEEPSEEK_API_KEY='...'
+minidsh --disable llm.mock --enable llm.deepseek run "read README.md"
+
+minidsh --disable llm.mock --enable llm.deepseek models
+minidsh --disable llm.mock --enable llm.deepseek files
 ```
 
-可选环境变量：
+**What to observe.**
 
-| 变量 | 默认值 |
+- Request path is `/v1/messages` (or `/messages` when the base URL already ends in `/v1`).
+- Headers: `x-api-key`, `anthropic-version: 2023-06-01`.
+- `deepseek-messages` replay envelope and reasoning signatures are preserved; switching providers
+  drops foreign signatures.
+- Retries emit `llm/retry` and back off exponentially with jitter, honouring a bounded
+  `Retry-After`.
+- Images prefer the Files API in `auto` mode and fall back to inline base64; JSONL stores only the
+  path, media type, size, and SHA-256.
+
+**Design notes.** Most "works on the first turn, breaks on resume" bugs live in adapter protocol
+accounting: content block order, signature replay, usage accounting, and error taxonomy. Keeping
+that logic in one module makes it auditable.
+
+**Boundary.** Real online acceptance has not been run in this repository; local Messages/SSE
+end-to-end tests have. The adapter is a learning slice, not a compatibility guarantee. Never expose
+this host to the public internet.
+
+---
+
+## Configuration reference
+
+### File configuration
+
+`config.example.json` contains every flag. File config is merged first; `--enable` / `--disable`
+on the command line are applied afterwards, so the CLI always wins.
+
+```json
+{
+  "session_dir": ".minidsh/sessions",
+  "sandbox_mode": "read-only",
+  "approval_policy": "ask",
+  "approve_all": false,
+  "context_window": 1048576,
+  "mcp_servers": {},
+  "skill_dirs": [],
+  "skill_include_default_roots": true,
+  "presets": {},
+  "default_preset": "standard",
+  "features": { "core.mcp": false, "tools.web-fetch": false }
+}
+```
+
+### Feature flags
+
+**Core services**
+
+| Flag | Default | Function |
+|---|---|---|
+| `core.system-prompt` | on | Identity block, tool guidance sections, runtime context |
+| `core.tools` | on | Tool registry and execution pipeline |
+| `core.sandbox-policy` | on | Workspace boundary and sandbox modes |
+| `core.approval` | on | Approval service and audit events |
+| `core.fs-observation` | on | Per-session file version tracking |
+| `core.jobs` | on | Process lifecycle, output cursors, isolation |
+| `core.compaction` | on | Token estimate, summary, checkpoints |
+| `core.cancellation` | on | Run cancellation propagation |
+| `core.streaming` | on | Incremental model deltas |
+| `core.stream-recording` | on | Compressed raw chunk persistence |
+| `core.sse-replay` | on | In-process SSE history ring |
+| `core.pty` | on | Unix PTY service for persistent shells |
+| `core.kernel-sandbox` | **off** | macOS Seatbelt isolation |
+| `core.tool-result-pruner` | **off** | Manual tool-result pruning |
+| `core.user-questions` | on | Question service and pending queue |
+| `core.web` | on | Web fetch/search service |
+| `core.subagents` | **off** | Local child agents |
+| `core.workflow` | **off** | Node workflow engine |
+| `core.mcp` | **off** | MCP client and manager |
+| `core.skills` | **off** | Skill registry and discovery |
+| `core.schedule` | **off** | Host scheduler |
+| `core.goals` | **off** | Persistent goals |
+| `core.goal-rounds` | **off** | Automatic goal rounds |
+| `core.ptc` | **off** | Programmatic tool calling |
+| `core.agent-presets` | **off** | Per-session capability profiles |
+| `agent.core` | on | The agent loop itself |
+
+**Tools**
+
+| Flag | Default | Tools registered |
+|---|---|---|
+| `tools.read` | on | `read` |
+| `tools.write` | on | `write` |
+| `tools.edit` | on | `edit` |
+| `tools.glob` | on | `glob` |
+| `tools.bash` | on | one-shot `bash` |
+| `tools.bash-persistent` | **off** | persistent `bash` (auto-disables `tools.bash`) |
+| `tools.jobs` | on | `job_output`, `job_list`, `job_kill` |
+| `tools.ask-user` | **off** | `ask_user_question` |
+| `tools.ask-user-timed` | **off** | timed questions with pending answers |
+| `tools.todo` | **off** | `todo_write` |
+| `tools.web-fetch` | **off** | `web_fetch` |
+| `tools.web-search` | **off** | `web_search` |
+| `tools.subagent` | **off** | `subagent` |
+| `tools.subagent-fork` | **off** | `subagent_fork` |
+| `tools.subagent-control` | **off** | `send_message`, `interrupt_agent`, `list_agents`, `wait_agent` |
+| `tools.workflow` | **off** | `workflow` |
+| `tools.mcp-resources` | **off** | `list_mcp_resources`, `list_mcp_resource_templates`, `read_mcp_resource` |
+| `tools.skill` | **off** | `skill` |
+| `tools.schedule` | **off** | `schedule_create/list/view/edit` |
+| `tools.goal` | **off** | `get_goal`, `create_goal`, `update_goal` |
+| `tools.run-code` | **off** | `run_code` |
+
+**Storage and model**
+
+| Flag | Default | Function |
+|---|---|---|
+| `session.jsonl` | on | JSONL generations, migration, recovery, locking |
+| `llm.mock` | on | Deterministic offline model |
+| `llm.deepseek` | **off** | Real Messages adapter |
+| `llm.retry` | on | Bounded retry with backoff |
+| `llm.model-listing` | on | Model list query and cache |
+| `llm.files` | on | Files API upload, reuse, listing |
+
+Disable every model and `agent.core` stays `pending` because its `llm` dependency is missing —
+that is the dependency model working as designed.
+
+### Environment variables
+
+**Model and transport**
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | — | Credential; read from env only, never written to disk |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/anthropic` | Messages root |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | Model id |
+| `DEEPSEEK_REASONING_EFFORT` | `high` | `off` / `low` / `high` / `max` |
+| `DEEPSEEK_MAX_TOKENS` | `256000` | Response cap |
+| `DEEPSEEK_STREAM_IDLE_TIMEOUT_MS` | `300000` | SSE idle timeout |
+| `DEEPSEEK_MODELS_TIMEOUT_MS` | `5000` | Model list timeout |
+| `DEEPSEEK_MODELS_MAX_AGE_MS` | `600000` | List cache TTL (`0` = always refresh) |
+| `DEEPSEEK_RETRY_MODE` | `normal` | `normal` or `always` |
+| `DEEPSEEK_RETRY_MAX` | `5` | Max retries |
+| `DEEPSEEK_RETRY_INITIAL_DELAY_MS` | `500` | First backoff |
+| `DEEPSEEK_RETRY_MAX_DELAY_MS` | `10000` | Backoff ceiling |
+| `DEEPSEEK_RETRY_JITTER_RATIO` | `0.1` | Symmetric jitter |
+| `DEEPSEEK_IMAGE_MODE` | `auto` | `auto` / `inline` / `required` |
+| `DEEPSEEK_FILES_API_TIMEOUT_MS` | `60000` | Files API timeout |
+| `DEEPSEEK_FILE_EXPIRY_SECONDS` | `604800` | Upload lifetime (3600–2592000) |
+
+**Harness behaviour**
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MINIDSH_TOKEN` | — | Required when binding a non-loopback host |
+| `MINIDSH_SUBAGENT_MAX_DEPTH` | `1` | Delegation depth (`0` disables) |
+| `MINIDSH_GOAL_MAX_ROUNDS` | `256` | Default goal round cap |
+| `MINIDSH_ASK_TIMEOUT_SECONDS` | `120` | Timed question wait |
+| `MINIDSH_TODO_ALLOW_PARALLEL` | `0` | Allow multiple `in_progress` todos |
+| `MINIDSH_SCHEDULE_NEW_INTERVAL_SECONDS` | `60` | Minimum schedule interval |
+| `MINIDSH_WEB_TIMEOUT_MS` | `30000` | Fetch timeout |
+| `MINIDSH_WEB_FETCH_MAX_OUTPUT_CHARS` | `200000` | Fetch output cap |
+| `MINIDSH_WEB_SEARCH_URL` | — | Search provider endpoint |
+| `MINIDSH_WEB_ALLOW_PRIVATE` | `0` | Allow private addresses (local testing) |
+| `MINIDSH_PERSISTENT_TIMEOUT_MS` | `300000` | PTY command timeout |
+| `MINIDSH_PERSISTENT_MAX_OUTPUT_CHARS` | `16000` | PTY output tail |
+| `MINIDSH_PRUNE_THRESHOLD_CHARS` | `8192` | Prune trigger |
+| `MINIDSH_PRUNE_HEAD_CHARS` | `4096` | Head kept |
+| `MINIDSH_PRUNE_TAIL_CHARS` | `1024` | Tail kept |
+| `MINIDSH_SKILL_DESCRIPTION_MAX` | `500` | Skill description limit |
+| `MINIDSH_WORKFLOW_MAX_AGENTS` | `1000` | Workflow agent budget |
+| `MINIDSH_WORKFLOW_MAX_CONCURRENT` | `min(32, cpu)` | Workflow concurrency |
+| `MINIDSH_PTC_TIMEOUT_MS` | `120000` | `run_code` timeout |
+| `MINIDSH_PTC_MAX_TIMEOUT_MS` | `600000` | `run_code` timeout cap |
+| `MINIDSH_PTC_MAX_OUTPUT_BYTES` | `67108864` | `run_code` output cap |
+| `MINIDSH_PTC_MAX_PARALLEL` | `10` | Parallel read-only subcalls |
+| `MINIDSH_PTC_MAX_PENDING` | `128` | Pending subcall limit |
+| `MINIDSH_PTC_MAX_SUBCALLS_PER_MINUTE` | `1024` | Rate budget |
+| `MINIDSH_PTC_STOP_GRACE_MS` | `3000` | Grace before hard kill |
+| `MINIDSH_PTC_PERSISTENT` | `0` | Default to persistent REPL |
+
+---
+
+## Event reference
+
+Sessions are event logs. These are the event types this harness writes:
+
+| Group | Events |
 |---|---|
-| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/anthropic` |
-| `DEEPSEEK_MODEL` | `deepseek-flash` |
-| `DEEPSEEK_REASONING_EFFORT` | `high`，可选 `off / low / high / max` |
-| `DEEPSEEK_MAX_TOKENS` | `256000` |
-| `DEEPSEEK_STREAM_IDLE_TIMEOUT_MS` | `300000` |
-| `DEEPSEEK_MODELS_TIMEOUT_MS` | `5000` |
-| `DEEPSEEK_MODELS_MAX_AGE_MS` | `600000`，`0` 表示每次刷新 |
-| `DEEPSEEK_RETRY_MODE` | `normal`，可显式设为 `always` |
-| `DEEPSEEK_RETRY_MAX` | `5` |
-| `DEEPSEEK_RETRY_INITIAL_DELAY_MS` | `500` |
-| `DEEPSEEK_RETRY_MAX_DELAY_MS` | `10000` |
-| `DEEPSEEK_RETRY_JITTER_RATIO` | `0.1` |
-| `DEEPSEEK_IMAGE_MODE` | `auto`，可选 `inline / required` |
-| `DEEPSEEK_FILES_API_TIMEOUT_MS` | `60000` |
-| `DEEPSEEK_FILE_EXPIRY_SECONDS` | `604800`，允许 `3600–2592000` |
-
-真实调用会访问网络并产生费用。密钥只从环境变量读取，不写入配置、会话或 Shell 环境。当前在线验收尚未执行；本地 Messages/SSE 端到端验收已通过。
-
-## 当前架构
-
-```text
-minidsh-headless / minidsh-web / minidsh-desktop
-  └─ CLI / Web UI / HTTP API / pywebview
-      └─ Application：唯一的插件组装入口
-          └─ PluginManager：功能开关、依赖检查、激活与逆序卸载
-              ├─ 内置插件：直接注册
-              ├─ EntryPoint 发现：默认禁用，显式启用后加载
-              ├─ ServiceContext：服务注册与解析
-              ├─ EventBus：工具、回合和任务事件
-              ├─ SystemPrompt：身份段、工具段、runtime context
-          ├─ SandboxPolicy：read-only / workspace-write / danger-full-access
-          ├─ ApprovalService：ask / never / allowed-once / unavailable
-          ├─ ObservationStore：文件版本观察与恢复
-          ├─ JobService：进程、输出环、任务隔离、终止与回收
-          ├─ CompactionService：token 估算、摘要、压缩检查点
-          ├─ ToolRegistry：策略、审批和工具执行管线
-          │   ├─ read / glob / write / edit
-          │   └─ bash / job_output / job_list / job_kill
-          ├─ JsonlSessionStore：事件、历史投影、resume、fork、transcript
-          ├─ MockModel：离线模型适配器
-          ├─ DeepSeekModel：Messages/SSE 模型适配器
-          └─ Agent：turn / step / tool call 循环
-              └─ ApiServer / SseBroker：HTTP、SSE、run_id 关联
-```
-
-## 源码阅读顺序
-
-1. `src/minidsh/config.py`：配置、策略、上下文容量和功能开关。
-2. `src/minidsh/plugins.py`：服务、插件、依赖与生命周期。
-3. `src/minidsh/discovery.py`：entry points 元数据、延迟导入和插件契约。
-4. `src/minidsh/app.py`：唯一的组装入口。
-5. `src/minidsh/system_prompt.py`：官方提示词和 runtime context。
-6. `src/minidsh/sandbox.py`：文件策略和对应文案。
-7. `src/minidsh/approval.py`：审批结果与审计事件。
-8. `src/minidsh/observations.py`：文件观察及恢复。
-9. `src/minidsh/tools.py`：工具 schema、执行链、原子写入和路径边界。
-10. `src/minidsh/jobs.py`：进程、输出环、任务隔离、等待、kill 和回收。
-11. `src/minidsh/shell.py`：Bash 与 jobs 工具及输出渲染。
-12. `src/minidsh/pty_shell.py`：PTY、命令标记、持久状态和终端回收。
-13. `src/minidsh/seatbelt.py`：Seatbelt profile、进程 argv 和内核写边界。
-14. `src/minidsh/questions.py`：问题校验、CLI 回答器、HTTP 待答和取消。
-15. `src/minidsh/todo.py`：整表待办写入与并行策略。
-16. `src/minidsh/web_tools.py`：Web 获取、搜索 provider 和安全边界。
-17. `src/minidsh/llm.py`：模型接口、模型列表和 Mock 工具触发器。
-18. `src/minidsh/stream_codec.py`：原始分片压缩、展开和边界校验。
-19. `src/minidsh/retry.py`：重试模式、瞬时错误和指数退避。
-20. `src/minidsh/cancellation.py`：协作式取消令牌与资源关闭回调。
-21. `src/minidsh/images.py`：图片路径、格式、哈希和请求预算。
-22. `src/minidsh/files.py`：multipart 上传、文件对象校验和 Files CRUD。
-23. `src/minidsh/deepseek.py`：Messages 图片、增量 SSE、重试、列表缓存和原生 replay。
-24. `src/minidsh/generations.py`：不可变代际、内容哈希和 manifest 原子发布。
-25. `src/minidsh/session.py`：版本头、原子迁移、POSIX 写锁、流展开和消息投影。
-26. `src/minidsh/session_recovery.py`：工具结果补偿与开放 step/turn 闭环。
-27. `src/minidsh/surface.py`：surface 折叠、来源引用和 replacement 校验。
-28. `src/minidsh/pruner.py`：Unicode 工具结果裁剪与 replacement 写入。
-29. `src/minidsh/compaction.py`：token 估算、压缩 prompt 和检查点。
-30. `src/minidsh/agent.py`：Agent Loop、增量转发、压缩记录、恢复入口与取消终态。
-31. `src/minidsh/server.py`：HTTP API、有界 SSE、历史回放、待答队列和会话互斥。
-32. `src/minidsh/web/index.html`：Web 工作台、实时文本与裁剪操作。
-33. `src/minidsh/desktop.py`：延迟 GUI 导入和本地窗口宿主。
-34. `examples/minidsh-clock`：可独立安装的外部工具插件。
-35. `packages`：Headless、Web、Desktop 三个产品发行入口。
-36. `src/minidsh/cli.py`：命令行、流展开、交互提问、迁移恢复与常驻宿主入口。
-
-## 观察会话
-
-启用 `session.jsonl` 后，每次运行都会在 `.minidsh/sessions/<session-id>/generations/` 下产生不可变代际，并由 `index.json` 指向当前代。事件包括：
-
-```text
-system/message
-session/start / session/resume / session/fork
-user/message / assistant/message
-step/start / step/end
-approval/asked / approval/decided
-fs/observed
-job/registered / job/settled
-tool/call / tool/result
-compaction/start / compaction/end / compaction/prune
-session/migrated / session/repaired
-pty/created / pty/reset
-question/asked / question/answered
-todo/write
-turn/end
-```
+| Turn and step | `turn/start`, `turn/end`, `step/start`, `step/end` |
+| Messages | `system/message`, `user/message`, `assistant/message`, `assistant/delta`, `assistant/usage` |
+| Tools | `tool/call`, `tool/result`, `tools/pre-execute`, `tools/post-execute` |
+| Approval | `approval/asked`, `approval/decided`, `approval/policy` |
+| Files | `fs/observed` |
+| Session | `session/start`, `session/resume`, `session/fork`, `session/migrated`, `session/repaired` |
+| Process | `job/registered`, `job/settled`, `pty/created`, `pty/reset` |
+| Memory | `compaction/start`, `compaction/end`, `compaction/prune` |
+| Sandbox | `sandbox/mode` |
+| Interaction | `question/asked`, `question/answered`, `todo/write` |
+| Delegation | `subagent/start`, `subagent/end`, `subagent/catalog` |
+| Workflow | `workflow/start`, `workflow/phase`, `workflow/log`, `workflow/agent-start`, `workflow/agent-end`, `workflow/end` |
+| Goals | `goal/change`, `goal/changed`, `goal/activation-changed` |
+| Schedule | `schedule/changed`, `schedule/inbox` |
+| Model transport | `llm/retry`, `llm/image-upload`, `llm/image-fallback` |
+| Presets | `preset/selected` |
+| Runs | `run/result`, `run/error`, `run/cancelled`, `run/done` |
 
 ```bash
-PYTHONPATH=src python3 -m minidsh session <session-id>
+minidsh session <session-id>     # raw events
+minidsh transcript <session-id>  # human-readable projection
+minidsh surface <session-id>     # what the model currently sees
 ```
 
-## 推荐学习路线
+---
 
-### 第 0 层：插件内核
+## How this maps to the 2026 agent ecosystem
 
-理解插件激活、工具执行和事件落盘。
+MiniDSH is deliberately small, but its seams line up with what production agent platforms converged
+on. Each row is a place where you can compare the teaching implementation with the current
+industry answer.
 
-### 第 1 层：真实模型适配器
+| Practice in 2026 | Where it lives here | What the lab teaches |
+|---|---|---|
+| **Harness engineering** as its own discipline ([harness chapter](https://github.com/Xwh630/ai-agent-handbook/blob/3ee41090a6bd12d7bcd851f2ff468e1e3c6991fc/en/chapters/25-harness-engineering.md)) | Entire repo | The harness, not the model, owns ordering, limits, persistence, and failure handling |
+| **AGENTS.md** as the cross-vendor agent instruction file ([agents.md](https://agents.md)) | [`AGENTS.md`](AGENTS.md) | Instructions for coding agents live in a predictable place, separate from the human README |
+| **Agent Skills** with progressive disclosure ([spec](https://agentskills.io/specification)) | `skills.py` | Advertise name + description; load the body only when the task needs it |
+| **MCP** as the tool interop layer ([spec](https://modelcontextprotocol.io/specification/2026-07-28/changelog)) | `mcp.py` | Namespacing, credential redaction, cancellation, fail-closed discovery |
+| **MCP 2026-07-28 statelessness** | Parity doc, boundaries | The classic handshake is implemented; the new stateless model is documented as a gap |
+| **Context engineering** (compaction, observation masking, pruning) | `compaction.py`, `surface.py`, `pruner.py` | Compact the view, never the log |
+| **Event sourcing for agents** | `session.py`, `generations.py` | Replay, audit, fork, and crash repair from one append-only log |
+| **Sandboxing** (Seatbelt / Landlock / bwrap) ([discussion](https://github.com/zeroclaw-labs/zeroclaw/blob/a56c345d51dd8ab562e9351e0d4ab83f6a741db9/docs/book/src/security/sandboxing.md)) | `seatbelt.py` | Policy at the prompt, approval in the loop, enforcement in the kernel |
+| **Kernel-level isolation** vs. prompt-level rules | `sandbox.py` + `seatbelt.py` | "Please don't write" is not a boundary; `Operation not permitted` is |
+| **Subagents as context isolation** | `subagents.py` | Parent receives a summary, not the child transcript |
+| **Deterministic orchestration** vs. agentic control flow | `workflow.py` | Use a script when the graph is known; use an agent when it is not |
+| **Programmatic tool calling** | `ptc.py` | One code turn instead of ten tool turns, with quotas and isolation |
+| **OpenTelemetry GenAI semantic conventions** ([spec](https://opentelemetry.io/docs/specs/semconv/gen-ai/)) | `events.py` + `server.py` | Session/run/turn/step/attempt correlation is already span-shaped; export is the missing edge |
+| **Human-in-the-loop with async answers** | `questions.py` | Late answers, pending states, and "skip is not approval" |
+| **Long-horizon goals with budgets** | `goals.py` | Revision-checked state, disarm-on-restore, explicit blocked conditions |
+| **Durable scheduling** | `schedule.py` | Delivered ≠ completed; catch-up policy matters |
+| **Evaluation** (Terminal-Bench, τ²-bench style) ([leaderboard](https://benchlm.ai/benchmarks/terminal-bench-2)) | `docs/exercises.md` | Deterministic mock trajectories make regressions measurable |
+| **Agent-to-agent interop** (A2A v1.0) ([announcement](https://agent2agent.info/blog/a2a-v1-announcement/)) | Boundary | In-process subagents today; A2A is a documented next edge |
+| **Prompt-injection defense** | `web_tools.py` | External content is data, never instructions; budgets enforced at the tool |
+| **Capability scoping** | `presets.py` | A reviewer agent should not carry a shell |
 
-理解 Messages API、SSE、工具调用和原生思考回放。
+Two honest notes:
 
-### 第 2 层：审批与写操作
+1. The **MCP specification moved in 2026-07-28**. MiniDSH implements the handshake-based protocol
+   that most existing servers still speak; the parity document records the stateless revision as a
+   known gap rather than pretending otherwise.
+2. **Telemetry is span-shaped but not exported.** Events already carry the identity fields needed
+   for OTel GenAI spans; wiring an exporter is a deliberate exercise, not an unfinished feature.
 
-理解文件策略、失败关闭、审批审计、文件观察、原子写入和路径安全。
+---
 
-### 第 3 层：Shell 与后台任务
+## The 27-layer learning path
 
-理解进程组、前后台任务、超时转后台、输出上限、取消和资源回收。
+Stages are numbered 0–26. Read them in order the first time; jump afterwards. Each layer names the module and the
+question it answers.
 
-### 第 4 层：会话恢复与压缩
+| # | Layer | Module | Question it answers |
+|---|---|---|---|
+| 0 | Plugin kernel | `config.py`, `plugins.py` | How do features become services, and why do disabled features disappear cleanly? |
+| 1 | Model adapter | `llm.py`, `deepseek.py` | How does a streaming protocol become content blocks and tool calls? |
+| 2 | Approval and writes | `sandbox.py`, `approval.py`, `observations.py` | Why is "read before write" a correctness rule? |
+| 3 | Shell and jobs | `shell.py`, `jobs.py` | What does a foreground timeout do to a running process? |
+| 4 | Resume and compaction | `session.py`, `compaction.py` | Why does the projection change while history does not? |
+| 5 | HTTP and hosting | `server.py` | How do concurrent runs stay isolated? |
+| 6 | External plugins and products | `discovery.py`, `packages/` | How does a plugin ship without touching core? |
+| 7 | Retry and cancellation | `retry.py`, `cancellation.py` | Which partial output must be discarded after a retry? |
+| 8 | Images and Files API | `images.py`, `files.py` | Why is content addressing the right key for uploads? |
+| 9 | Persistent shell and PTY | `pty_shell.py` | How do you keep shell state without keeping a process forever? |
+| 10 | Migration and crash recovery | `generations.py`, `session_recovery.py` | How do you recover without inventing success? |
+| 11 | Surface and pruning | `surface.py`, `pruner.py` | How can the model view shrink while the audit log does not? |
+| 12 | Questions, todos, web tools | `questions.py`, `todo.py`, `web_tools.py` | How does a human answer arrive late and still be valid? |
+| 13 | Streaming and backpressure | `stream_codec.py`, `server.py` | What happens to a slow SSE client? |
+| 14 | Stream recording and replay | `stream_codec.py` | How do you resume a stream without replaying a whole run? |
+| 15 | Timed questions | `questions.py` | What is the difference between pending, skipped, and approved? |
+| 16 | Immutable generations | `generations.py` | Why is a manifest with a hash better than a mutable file? |
+| 17 | Kernel sandbox | `seatbelt.py` | Where does a real permission denial come from? |
+| 18 | Subagents | `subagents.py` | Why is context isolation the point of delegation? |
+| 19 | Workflow | `workflow.py`, `workflow_guest.js` | When should orchestration be code instead of model turns? |
+| 20 | Workflow jobs and recovery | `jobs.py`, `workflow.py` | How does a background run survive a host restart? |
+| 21 | MCP | `mcp.py` | How do you integrate third-party tools without trusting them blindly? |
+| 22 | Skills | `skills.py` | How much context should be loaded up front? |
+| 23 | Schedule | `schedule.py`, `schedule_time.py` | What is the difference between delivered and done? |
+| 24 | Goals | `goals.py` | What stops an autonomous loop from running forever? |
+| 25 | PTC | `ptc.py`, `ptc_runner.js` | What do you gain and lose by letting the model write code? |
+| 26 | Presets and persona | `presets.py` | How do you scope capability per session? |
 
-理解历史投影、resume、fork、文件观察恢复、token meter，以及“压缩视图但不删除事实”。
+Each layer has a matching exercise in [docs/exercises.md](docs/exercises.md).
 
-### 第 5 层：HTTP 与常驻宿主
+---
 
-理解 HTTP API、SSE、任务通知、run_id 关联、并发会话和最小 Web 页面。
+## Debugging cookbook
 
-### 第 6 层：外部插件与发行包
+| Symptom | First command | What to look for |
+|---|---|---|
+| The model never calls a tool | `minidsh tools` | Is the tool in the schema? Is its flag on? |
+| The prompt mentions a tool that does not exist | `minidsh prompt` | Guidance is registered by the tool plugin — check for a stale section |
+| A write was refused | `minidsh session <id>` | `approval/decided` outcome: `rejected`, `unavailable`, or `cancelled` |
+| A write failed even after approval | `minidsh transcript <id>` | Missing or invalidated `fs/observed` observation |
+| A resumed session behaves differently | `minidsh surface <id>` | A replacement or compaction changed the model view |
+| Context explodes immediately | `minidsh --context-window 100 run ...` | Watch `compaction/start` and the summary shape |
+| A background job seems hung | `minidsh session <id>` | `job/registered` without `job/settled` |
+| A session will not load | `minidsh repair <id>` | Truncated tail, open turn, or hash mismatch |
+| The agent keeps looping | `minidsh goal <id>` | Goal armed? Round budget? `blocked_reason`? |
+| Streaming text is duplicated | `minidsh stream <id>` | Retry attempts; consumers must reset per `attempt` |
 
-通过 entry points 发现独立 Python 插件；提供 Headless、Web、Desktop 发行入口，重依赖按需安装。
+---
 
-### 第 7 层：模型列表、重试与取消
+## Boundaries and non-goals
 
-理解同源模型发现、成功缓存、瞬时错误分类、指数退避、取消令牌和资源回收。
+Honest limits, restated so nobody has to discover them the hard way:
 
-### 第 8 层：图片附件与 Files API
+- **Format.** Session v2 is a learning generation format, not the upstream Zstandard multi-generation
+  format. No Windows write lock.
+- **Sandboxing.** macOS Seatbelt only. No Linux Landlock/bwrap, no Windows isolation.
+- **PTY.** Unix `/bin/bash` only. No ConPTY, no cross-process terminal recovery.
+- **MCP.** Handshake-based protocol; the 2026-07-28 stateless revision is not implemented. No OAuth,
+  no resource subscriptions, no reconnect budget.
+- **Subagents.** In-process only. No ACP/Codex/Claude Code/remote SDK backends.
+- **Telemetry.** Events are span-shaped but no OTel exporter ships.
+- **Tokens.** Heuristic estimation, not a tokenizer; no image token pricing.
+- **Approval.** A human control, not a security boundary; pair it with the kernel sandbox.
+- **Online acceptance.** Real DeepSeek calls have not been validated in CI. Keys are read from the
+  environment only.
+- **Scope.** This is teaching code. Do not expose the HTTP host to the public internet.
 
-理解内容寻址附件、内联与文件引用、multipart 上传、缓存复用、失败降级和无效引用失效。
+The complete, bullet-by-bullet boundary list is in
+[docs/upstream-parity.md](docs/upstream-parity.md).
 
-### 第 9 层：持久 Shell 与 PTY
+---
 
-理解控制终端、owner 隔离、命令串行化、随机完成标记、退出码、超时/取消重置和资源回收。
+## FAQ
 
-### 第 10 层：会话迁移与崩溃恢复
+**Is this a framework I should build a product on?**
+No. It is a reading and experimentation instrument. Copy the patterns, not the process.
 
-理解版本头、连续事件校验、备份与原子发布、工具结果补偿、开放回合闭环和 POSIX 写锁。
+**Why a deterministic mock model?**
+Because agent bugs are trajectory bugs. With a mock you can assert on the exact sequence of events;
+with a real model you can only assert on the ending.
 
-### 第 11 层：Surface replacement 与裁剪
+**Why is everything off by default?**
+Each advanced layer widens the attack surface. Turning features on one at a time is how you learn
+what each one actually costs.
 
-理解追加事实与模型视图的分离、区间替换、来源引用、工具结果裁剪和人类 transcript。
+**Do I need an API key?**
+No. Every default path works offline. The DeepSeek adapter is opt-in.
 
-### 第 12 层：提问、待办与 Web 工具
+**Why Chinese aliases in the mock grammar?**
+The project started in Chinese, and real sessions mix languages. Aliases parse to the *same*
+intents, so nothing downstream changes.
 
-理解用户能力服务、待答队列、会话整表投影、外部不可信内容和 Web 安全边界。
+**How do I add a tool?**
+See [`examples/minidsh-clock`](examples/minidsh-clock) and [docs/modules.md](docs/modules.md). The
+short version: register a `Plugin` with `provides=("tools",)`, declare a schema, and call
+`ctx.require("tools").register(...)`. Approval, policy, and events come for free.
 
-### 第 13 层：增量模型流与 SSE 背压
+**Where do I start if I only have an hour?**
+Layers 0 → 1 → 2 → 3, then run the Web workbench and watch a session end to end.
 
-理解同步增量回调、最终消息组装、attempt 隔离、实时文本展示和有界事件队列。
+---
 
-### 第 14 层：原始流持久化与 SSE 续传
+## Documentation index
 
-理解压缩 runs、时间差、流展开校验、事件历史环和 Last-Event-ID 恢复。
+| Document | Language | Purpose |
+|---|---|---|
+| [README.md](README.md) | English | This guide |
+| [README.zh-CN.md](README.zh-CN.md) | 中文 | Chinese guide |
+| [docs/index.html](docs/index.html) | EN / 中文 | GitHub Pages site with the same structure |
+| [docs/modules.md](docs/modules.md) | English | Per-module role, contracts, traps |
+| [docs/exercises.md](docs/exercises.md) | English | Runnable labs tied to current practice |
+| [docs/mock-model.md](docs/mock-model.md) | English | Deterministic prompt grammar |
+| [docs/upstream-parity.md](docs/upstream-parity.md) | English | What matches upstream and what does not |
+| [docs/upstream-parity.zh-CN.md](docs/upstream-parity.zh-CN.md) | 中文 | Same report in Chinese |
+| [AGENTS.md](AGENTS.md) | English | Instructions for coding agents |
+| [config.example.json](config.example.json) | — | Every flag with defaults |
 
-### 第 15 层：定时提问与迟到交互
+## License
 
-理解前台超时、pending 与 skipped 的区别、待答保留、迟到用户消息和图形答题。
-
-### 第 16 层：不可变代际与格式迁移
-
-理解完整快照代际、内容哈希、manifest 原子切换、旧格式迁移和篡改检测。
-
-### 第 17 层：内核沙箱与策略升级
-
-理解 Seatbelt 进程隔离、会话策略覆盖、审批取消和持久终端切换围栏。对照 `docs/upstream-parity.md` 阅读。
-
-### 第 18 层：本地 Subagent 与协作控制
-
-阅读 `src/minidsh/subagents.py` 的父子树、独立 Session、完成通知、fork 历史前缀、消息、等待、中断和回收，再观察 Agent Loop 的输入注入点。
-
-### 第 19 层：前台 Workflow 脚本编排
-
-对照 `src/minidsh/workflow_guest.js` 的脚本 hooks 和 `src/minidsh/workflow.py` 的宿主 RPC，理解隔离运行时、并发调度、schema、生命周期事件与取消清理。
-
-### 第 20 层：Workflow 后台 Jobs 与恢复
-
-阅读 `src/minidsh/jobs.py` 的 managed-job 发布、输出游标、终态上报和恢复路径，理解后台取消、会话归属与中断审计。
-
-### 第 21 层：MCP 客户端、资源与管理器
-
-阅读 `src/minidsh/mcp.py` 的传输、工具代际、资源路由和状态管理，理解远程命名、取消、凭据脱敏与失败关闭。
-
-### 第 22 层：Skills 发现、目录与调用
-
-阅读 `src/minidsh/skills.py` 的提供方合并、frontmatter、目录 digest、统一渲染与手势入口，再观察 Agent 的持久消息注入。
-
-### 第 23 层：Schedule 宿主定时任务
-
-阅读 `src/minidsh/schedule_time.py` 的时间求值和 `src/minidsh/schedule.py` 的任务存储、目标投递、回执与追赶，理解收件箱确认和模型完成之间的区别。
-
-### 第 24 层：Goal 持久目标与自动 Round
-
-阅读 `src/minidsh/goals.py` 的事件回放、revision、权限、armed 状态和 Round 驱动，理解持久目标与进程内续行授权的分离。
-
-### 第 25 层：run_code/PTC 执行层
-
-对照 `src/minidsh/ptc_runner.js` 的两个求值器与 `src/minidsh/ptc.py` 的宿主调度，理解 SDK RPC、并行限制、持久 worker、超时与清理。
-
-### 第 26 层：Agent Presets 与 Persona（当前）
-
-阅读 `src/minidsh/presets.py` 的 scoped ServiceContext、选择事件和 persona，再观察 Agent 的绑定顺序与子 Agent 继承。
-
-## 当前边界
-
-- 原始流是学习版 JSON runs，不使用官方完整持久化协议；SSE 历史环只覆盖同进程最近 2048 条，不支持跨重启续传。
-
-- 有文件、Bash、提问、待办和 Web 工具切片，仍不是完整官方工具集；尚无官方完整 Client 卡片系统。
-- Web 搜索使用学习版 JSON provider，HTML 不是完整 Turndown/GFM；DNS 检查未做连接级地址固定。
-- HTTP/SSE 是学习 API，不兼容官方 Web Host 的认证、RPC 和多路复用协议。
-- 插件依赖在启动时收敛，尚不支持运行中热重载。
-- surface 只支持学习版消息事件和工具结果裁剪，尚无官方完整事件类型、插件消息投影、Zstandard、Windows 写锁和完整格式目录。
-- token meter 是启发式估算，尚无精确 tokenizer、图片 token 定价和模型切换压缩。
-- 内核隔离仅有 macOS Seatbelt，尚无 Linux Landlock/bwrap 或 Windows 对应实现；PTY 仅支持 Unix `/bin/bash`，不支持 Windows ConPTY。
-- PTY 是进程内学习实现，尚无官方终端行缓冲/OSC 就绪协议和跨进程恢复。
-- 图片上传只有进程内缓存和锁，尚无持久索引、独立等待者取消、配额回收、图片变换和浏览器文件选择器。
-- 模型列表尚未实现官方 badge、客户端版本要求、后台刷新和完整能力目录；列表请求不支持外部取消。
-- 网络连接建立前只能检查取消状态，已建立的响应流可以主动关闭；`always` 重试不会自行设置次数上限。
-- 当前 Web 页面不支持自定义 Authorization 请求头；token 主要用于 API 客户端。
-- 尚未进行真实 DeepSeek 在线验收；这是教学代码，不应直接暴露为公网服务。
+No license file is present yet. Treat the code as **all rights reserved** until the repository owner
+adds one; open an issue if you want to reuse it.

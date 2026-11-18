@@ -28,14 +28,14 @@ class RetryPolicy:
             max_delay = int(os.environ.get("DEEPSEEK_RETRY_MAX_DELAY_MS", str(DEFAULT_MAX_DELAY_MS)))
             jitter = float(os.environ.get("DEEPSEEK_RETRY_JITTER_RATIO", str(DEFAULT_JITTER_RATIO)))
         except ValueError as exc:
-            raise ValueError("DeepSeek 重试数值配置无效") from exc
+            raise ValueError("invalid DeepSeek retry numeric configuration") from exc
         mode = os.environ.get("DEEPSEEK_RETRY_MODE", "normal")
         if mode not in {"normal", "always"}:
-            raise ValueError("DEEPSEEK_RETRY_MODE 必须是 normal 或 always")
+            raise ValueError("DEEPSEEK_RETRY_MODE must be normal or always")
         if max_retries < 0 or initial_delay <= 0 or max_delay <= 0 or initial_delay > max_delay:
-            raise ValueError("DeepSeek 重试次数和退避延迟配置无效")
+            raise ValueError("invalid DeepSeek retry count or backoff delay configuration")
         if not 0 <= jitter <= 1:
-            raise ValueError("DEEPSEEK_RETRY_JITTER_RATIO 必须在 0 和 1 之间")
+            raise ValueError("DEEPSEEK_RETRY_JITTER_RATIO must be between 0 and 1")
         if not enabled:
             max_retries = 0
             mode = "normal"

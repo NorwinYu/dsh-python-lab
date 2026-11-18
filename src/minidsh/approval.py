@@ -31,7 +31,7 @@ class ApprovalService:
             if event["type"] == "approval/policy":
                 override = event["payload"].get("policy")
                 if override not in {"ask", "never"}:
-                    raise ValueError(f"会话包含无效 approval policy: {override}")
+                    raise ValueError(f"session contains invalid approval policy: {override}")
                 policy = override
         return policy
 
@@ -72,8 +72,8 @@ class ApprovalService:
         cancel_token: Optional[CancellationToken] = None,
     ) -> str:
         request_id = uuid.uuid4().hex
-        action = "执行 Shell 命令" if tool_name == "bash" else "修改文件"
-        reason = f"{tool_name} 请求{action}"
+        action = "run a shell command" if tool_name == "bash" else "modify a file"
+        reason = f"{tool_name} requests approval to {action}"
         if session is not None and session_id is not None:
             payload: Dict[str, object] = {"id": request_id, "toolName": tool_name, "reason": reason}
             if call_id is not None:

@@ -1,30 +1,31 @@
-# 上游一致性基线
+[简体中文](upstream-parity.zh-CN.md)
+# Upstream Parity Baseline
 
-## 固定版本
+## Pinned Version
 
-- 上游：`deepseek-ai/deepseek-harness`
-- Commit：`fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159`
-- 对应包版本：`0.2.2-rc.1`
-- 模型协议：`packages/llm/llm-deepseek`
-- 提示词：`packages/core/system-prompt` 与各工具插件
-- 审批与文件策略：`packages/interaction/user-approval`、`packages/sandbox/sandbox-policy`
-- 文件工具：`packages/fs/tool-fs`、`packages/fs/tool-fs-search`
-- Shell 与任务：`packages/shell/tool-bash`、`packages/jobs/{jobs-local,tool-jobs}`
-- 会话与压缩：`packages/core/session`、`packages/session/session-persistence-jsonl`、`packages/compaction/compaction-basic`
-- 产品组装：`apps/cli`、`apps/web`、`apps/desktop`；只借鉴分层边界，不声称协议或包格式兼容
+- Upstream: `deepseek-ai/deepseek-harness`
+- Commit: `fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159`
+- Corresponding package version: `0.2.2-rc.1`
+- Model protocol: `packages/llm/llm-deepseek`
+- Prompts: `packages/core/system-prompt` and the individual tool plugins
+- Approval and file policy: `packages/interaction/user-approval`, `packages/sandbox/sandbox-policy`
+- File tools: `packages/fs/tool-fs`, `packages/fs/tool-fs-search`
+- Shell and jobs: `packages/shell/tool-bash`, `packages/jobs/{jobs-local,tool-jobs}`
+- Sessions and compaction: `packages/core/session`, `packages/session/session-persistence-jsonl`, `packages/compaction/compaction-basic`
+- Product assembly: `apps/cli`, `apps/web`, `apps/desktop`; only their layering boundaries are borrowed, and no protocol or package-format compatibility is claimed
 
-一致性声明只覆盖下文列出的切片，不代表完整 DSH 已移植完成。
+The parity claims cover only the slices listed below; they do not mean that the complete DSH has been ported.
 
-## 当前已对齐
+## Currently Aligned
 
-### 系统提示词与消息
+### System Prompt and Messages
 
-- 固定身份段：`You are an AI agent powered by DeepSeek Harness.`
-- `bash/read/write/edit/glob/jobs` 分别排在 order 1000/1100/1200/1300/1400/1600，使用上游英文原文。
-- `write` 是否附带 `and prefer edit for targeted changes` 随 `edit` 开关变化。
-- 禁用工具会同时移除工具 schema 和对应提示词段；缺少 `jobs` 时 Shell/jobs 插件保持 pending。
-- runtime context 依次包含工作目录、文件策略和审批策略，并作为独立用户快照放在用户指令之后。
-- 助手消息包含有序的 `text / reasoning / tool-call` 内容块，工具结果通过 `toolCallId` 回填。
+- Fixed identity paragraph: `You are an AI agent powered by DeepSeek Harness.`
+- `bash/read/write/edit/glob/jobs` are ordered at 1000/1100/1200/1300/1400/1600 respectively, using the upstream English text verbatim.
+- Whether `write` includes `and prefer edit for targeted changes` varies with the `edit` toggle.
+- Disabling a tool removes both its schema and its prompt section; when `jobs` is missing, the Shell/jobs plugin stays pending.
+- The runtime context contains the working directory, file policy, and approval policy in that order, and is placed after the user instruction as a separate user snapshot.
+- Assistant messages contain ordered `text / reasoning / tool-call` content blocks; tool results are backfilled via `toolCallId`.
 
 ```bash
 PYTHONPATH=src python3 -m minidsh prompt
@@ -32,398 +33,398 @@ PYTHONPATH=src python3 -m minidsh --disable tools.edit prompt
 PYTHONPATH=src python3 -m minidsh --disable core.jobs plugins
 ```
 
-### DeepSeek Messages 协议
+### DeepSeek Messages Protocol
 
-- 默认根地址：`https://api.deepseek.com/anthropic`
-- 请求地址：根地址以 `/v1` 结尾时追加 `/messages`，否则追加 `/v1/messages`
-- 认证：`x-api-key`；协议头：`anthropic-version: 2023-06-01`
-- 默认模型：`deepseek-flash`；默认 thinking：`high`
-- 默认 `max_tokens`：256000；默认流空闲超时：300000ms
-- 支持文本、reasoning、tool_use、tool_result 和工具 JSON Schema
-- SSE 支持 text、thinking、signature、input_json_delta、usage 和 stop reason
-- 保留 `deepseek-messages` replay envelope 与 reasoning signature；跨模型切换丢弃旧签名
-- HTTP 重定向不跟随
+- Default base URL: `https://api.deepseek.com/anthropic`
+- Request URL: append `/messages` when the base URL ends with `/v1`, otherwise append `/v1/messages`
+- Authentication: `x-api-key`; protocol header: `anthropic-version: 2023-06-01`
+- Default model: `deepseek-flash`; default thinking: `high`
+- Default `max_tokens`: 256000; default stream idle timeout: 300000ms
+- Supports text, reasoning, tool_use, tool_result, and tool JSON Schema
+- SSE supports text, thinking, signature, input_json_delta, usage, and stop reason
+- Preserves the `deepseek-messages` replay envelope and reasoning signature; a cross-model switch discards the old signature
+- HTTP redirects are not followed
 
-### 文件工具与审批
+### File Tools and Approval
 
-- 实现官方 `read`、`glob`、`write`、`edit` 的名称、schema、提示词和主要模型输出。
-- `read` 支持 2000 行上限、2000 字符单行上限、50KiB 字节上限、行号及输出信封。
-- `glob` 支持 100 条上限、隐藏文件、VCS 排除和修改时间排序。
-- `write` 返回 `Created file / Updated file` 信封；`edit` 支持唯一匹配和 `replace_all`。
-- 覆盖或编辑前要求同 session 的有效文件版本观察；外部修改会使观察失效。
-- `workspace-write` 限制绝对路径与符号链接；`danger-full-access` 不施加工作区路径限制。
-- 默认 `read-only`；`ask` 无应答者返回 `unavailable`，`never` 返回 `rejected`。
-- `approval/asked`、`approval/decided` 成对记录 request id、toolName、callId 和 outcome。
-- `--yes` 是学习版的进程级显式授权，会允许本次进程内所有写/Shell 操作，应谨慎使用。
+- Implements the official `read`, `glob`, `write`, and `edit` names, schemas, prompts, and primary model output.
+- `read` supports a 2000-line limit, a 2000-character per-line limit, a 50KiB byte limit, line numbers, and the output envelope.
+- `glob` supports a 100-entry limit, hidden files, VCS exclusion, and modification-time ordering.
+- `write` returns the `Created file / Updated file` envelope; `edit` supports unique matching and `replace_all`.
+- Overwriting or editing requires a valid file-version observation in the same session; external modification invalidates the observation.
+- `workspace-write` restricts absolute paths and symlinks; `danger-full-access` imposes no workspace path restrictions.
+- `read-only` by default; `ask` with no responder returns `unavailable`, and `never` returns `rejected`.
+- `approval/asked` and `approval/decided` are recorded in pairs with request id, toolName, callId, and outcome.
+- `--yes` is the teaching edition's process-level explicit authorization: it permits all write/Shell operations in this process and should be used with caution.
 
-### Shell 与后台任务
+### Shell and Background Jobs
 
-- `bash` 使用新 `bash -c` 进程，不保留 cwd、变量或函数；通过 `workdir` 指定目录。
-- 返回 stdout、标记后的 stderr 和 `[exit code: N]`；非零退出是命令结果，不是基础设施异常。
-- 每次 Bash 调用都注册为 job；`run_in_background` 立即返回 `bash-<id>`。
-- 前台等待超时后保留同一 job 并返回 `[still running after ...; moved to background job ...]`。
-- `job_output` 按 stdout/stderr 独立游标消费新增输出，支持有界等待和状态行。
-- `job_list` 列出当前 session 的任务；`job_kill` 终止进程组并记录原因。
-- 每 session 最多 10 个 running/stopping 任务；其他 session 不能读取或终止该任务。
-- 输出内存环为 256KiB，首次终态读取后收缩到 16KiB；完整 stdout/stderr 分别落盘并报告路径。
-- 应用关闭时终止并回收存活任务。
-- 会话记录 `job/registered` 和 `job/settled`。
-- Shell 环境过滤 `KEY/TOKEN/SECRET/PASSWORD` 形态变量和原 `DSH_*`，再注入受管 `DSH_HOME`、`DSH_SESSION_ID`。
+- `bash` uses a fresh `bash -c` process and preserves no cwd, variables, or functions; the directory is specified via `workdir`.
+- Returns stdout, labeled stderr, and `[exit code: N]`; a non-zero exit is a command result, not an infrastructure error.
+- Every Bash call is registered as a job; `run_in_background` immediately returns `bash-<id>`.
+- When the foreground wait times out, the same job is retained and `[still running after ...; moved to background job ...]` is returned.
+- `job_output` consumes new output with independent stdout/stderr cursors and supports bounded waits and status lines.
+- `job_list` lists the current session's jobs; `job_kill` terminates the process group and records a reason.
+- Each session has at most 10 running/stopping jobs; other sessions cannot read or terminate a job.
+- The in-memory output ring is 256KiB and shrinks to 16KiB after the first terminal-state read; full stdout/stderr are spooled to disk separately and their paths are reported.
+- Surviving jobs are terminated and reaped when the application shuts down.
+- The session records `job/registered` and `job/settled`.
+- The Shell environment filters out `KEY/TOKEN/SECRET/PASSWORD`-shaped variables and pre-existing `DSH_*` variables, then injects the managed `DSH_HOME` and `DSH_SESSION_ID`.
 
-### 会话与压缩
+### Sessions and Compaction
 
-- `resume` 从 JSONL 重建用户、助手和工具消息，递增 turn，写入 `session/resume`，并刷新当前提示词和 runtime context。
-- `fs/observed` 随会话持久化，resume 时恢复文件版本观察。
-- `fork` 可复制完整会话或指定事件序号前缀，生成独立 session id。
-- 支持会话列表和 transcript 可读投影。
-- 自动压力阈值为上下文容量的 80%，默认保留 16% 尾部消息。
-- 使用上游 compaction-engine prompt 和 `<compacted-summary>` 标记，写入 `compaction/start/end`。
-- 压缩只影响发给模型的投影，不删除原始事件；压缩后的会话可以继续 resume。
-- token meter 当前是学习版 UTF-8/JSON 启发式估算，不是官方精确 tokenizer。
+- `resume` rebuilds user, assistant, and tool messages from JSONL, increments the turn, writes `session/resume`, and refreshes the current prompt and runtime context.
+- `fs/observed` is persisted with the session, and file-version observations are restored on resume.
+- `fork` can copy the full session or the prefix up to a given event sequence number, producing an independent session id.
+- Supports session listing and a readable transcript projection.
+- The automatic pressure threshold is 80% of the context capacity, retaining the last 16% of messages by default.
+- Uses the upstream compaction-engine prompt and the `<compacted-summary>` marker, and writes `compaction/start/end`.
+- Compaction affects only the projection sent to the model and does not delete original events; a compacted session can still be resumed.
+- The token meter is currently the teaching edition's UTF-8/JSON heuristic estimate, not the official exact tokenizer.
 
-### 会话版本、迁移与崩溃恢复（学习版 v0/v1/v2）
+### Session Versions, Migration, and Crash Recovery (teaching-edition v0/v1/v2)
 
-- 新会话包含 `minidsh-session-header` v2 和完整事件快照；既有无头文件按 v0、单文件头按 v1 只读兼容。
-- 每代位于 `<session-id>/generations/NNNNNNNN.jsonl`，禁止覆盖；`index.json` manifest 记录当前代、路径和 SHA-256。
-- 追加、迁移、恢复和 fork 都发布新代，旧代只读保留；manifest 通过临时文件、fsync 和 os.replace 原子切换。
-- 普通读取不迁移；首次追加、显式 migrate 或 resume 修复时才写当前格式，未来版本直接拒绝。
-- 每个事件校验 session 身份、连续 seq、类型、payload 和 created_at；无效 JSON/UTF-8 失败关闭。
-- 普通 load 拒绝不完整末尾；repair/resume 保留最后换行前的完整前缀，无法恢复任何记录时拒绝。
-- 迁移或恢复前把原始字节保存为内容哈希命名的备份；读取 manifest 时验证代际哈希，外部篡改会失败关闭。
-- 未开始工具调用使用上游 TOOL_NOT_STARTED 文案；已开始无结果调用使用 TOOL_OUTCOME_UNKNOWN 和保守重试警告。
-- 恢复先补 error tool result，再关闭开放 step/turn，原因是 interrupted；fork 使用 forked 文案且不改父会话。
-- 审计事件为 `session/migrated` 和 `session/repaired`；CLI 支持 repair、单个/全部 migrate，HTTP 支持单会话 repair/migrate。
-- resume/compact 使用 POSIX flock 覆盖整个写回合，锁文件保留稳定 inode，进程死亡由内核释放；读取不加写锁。
-- HTTP 拒绝同 session 并发回合；watcher 可在同一 Application 的回合内通过存储串行锁追加 job 审计，条件唤醒位于 finally。
-- 该格式不是官方多代际或 Zstandard 文件格式；surface 仅为下述学习版切片，Windows 写锁尚未实现。
+- New sessions contain a `minidsh-session-header` v2 and a complete event snapshot; existing headerless files are read-only compatible as v0, and single-file headers as v1.
+- Each generation lives at `<session-id>/generations/NNNNNNNN.jsonl` and must never be overwritten; the `index.json` manifest records the current generation, path, and SHA-256.
+- Appends, migrations, repairs, and forks all publish a new generation while old generations are kept read-only; the manifest is switched atomically via a temporary file, fsync, and os.replace.
+- Normal reads do not migrate; the current format is written only on the first append, an explicit migrate, or a repair on resume, and future versions are rejected outright.
+- Every event validates session identity, contiguous seq, type, payload, and created_at; invalid JSON/UTF-8 fails closed.
+- A normal load rejects an incomplete tail; repair/resume keeps the complete prefix before the last newline, and rejects when no record can be recovered.
+- Before migration or repair, the original bytes are saved as a content-hash-named backup; generation hashes are verified when reading the manifest, and external tampering fails closed.
+- Tool calls that never started use the upstream TOOL_NOT_STARTED wording; started calls without a result use TOOL_OUTCOME_UNKNOWN plus a conservative retry warning.
+- Repair first appends an error tool result, then closes open steps/turns with reason interrupted; fork uses the forked wording and does not modify the parent session.
+- Audit events are `session/migrated` and `session/repaired`; the CLI supports repair and single/all migrate, and HTTP supports per-session repair/migrate.
+- resume/compact use a POSIX flock covering the entire write turn; the lock file keeps a stable inode and is released by the kernel on process death; reads take no write lock.
+- HTTP rejects concurrent turns on the same session; a watcher may append job audit records within a turn of the same Application through the storage serialization lock, with the condition wakeup in finally.
+- This format is not the official multi-generation or Zstandard file format; the surface is only the teaching-edition slice described below, and the Windows write lock is not implemented.
 
-### Surface replacement 与工具结果裁剪
+### Surface Replacement and Tool-Result Pruning
 
-- 旧消息事件无 surfaceOp 时按 append 兼容；当前消息事件支持 append 和 `{op: replace, startSeq, endSeq}`。
-- replacement 起止必须更早且仍在当前 surface，区间顺序有效；sourceEventSeqs 必须无重复并覆盖全部被遮蔽节点。
-- 替换节点占据原区间位置而非追加到模型视图尾部；原始 JSONL 事件不改写。
-- tool/result replacement 只能遮蔽一个当前工具结果且只能修改 content；首个系统提示词只能由单个 system replacement 改写。
-- `derive_messages`、resume、fork 和 compact 使用当前 surface；transcript 排除 replacement 副本，保留原始追加内容。
-- pruner 默认关闭，手动执行；阈值 8192、头 4096、尾 1024，使用上游固定 PRUNE_MARKER。
-- 按 Unicode 码点裁剪文本并保留非文本块顺序；结果必须更小且不超过阈值。
-- 每个裁剪先追加 `compaction/prune` 计量事件，再追加带来源引用的工具结果 replacement；重复执行不重复裁剪。
-- 提供 CLI surface/prune、HTTP surface/prune 和 Web 裁剪按钮；配置使用 MINIDSH_PRUNE_* 环境变量。
-- 尚未实现官方任意插件消息投影、完整事件类型系统和精确 token meter。
+- Legacy message events without a surfaceOp are treated as append for compatibility; current message events support append and `{op: replace, startSeq, endSeq}`.
+- A replacement's start and end must be earlier and still on the current surface, with a valid interval order; sourceEventSeqs must be duplicate-free and cover every shadowed node.
+- The replacement node occupies the original interval's position rather than being appended to the end of the model view; the original JSONL events are not rewritten.
+- A tool/result replacement can shadow only one current tool result and modify only content; the first system prompt can be rewritten only by a single system replacement.
+- `derive_messages`, resume, fork, and compact use the current surface; transcript excludes replacement copies and keeps the original appended content.
+- The pruner is off by default and runs manually; thresholds are 8192, head 4096, and tail 1024, using the upstream fixed PRUNE_MARKER.
+- Text is pruned by Unicode code point and non-text block order is preserved; the result must be smaller and must not exceed the threshold.
+- Each prune first appends a `compaction/prune` metering event, then a tool-result replacement with source references; repeated execution does not prune again.
+- Provides CLI surface/prune, HTTP surface/prune, and a Web prune button; configuration uses the MINIDSH_PRUNE_* environment variables.
+- Not yet implemented: the official arbitrary-plugin message projection, the complete event type system, and an exact token meter.
 
-### HTTP、SSE 与并发
+### HTTP, SSE, and Concurrency
 
-- 默认仅绑定 `127.0.0.1`；绑定非回环地址必须配置 `MINIDSH_TOKEN`，否则拒绝启动。
-- 提供健康、插件、工具、提示词、会话列表/事件/transcript、run/resume/fork/compact、jobs/output/kill API。
-- SSE 包含 turn、assistant、`llm/retry`、工具执行、run result/error/cancelled 和 `job/settled`；内部 run/done 用于关闭当前流。
-- 每次运行都有唯一 `run_id`，捕获 session id、等待结果和流事件都按 `run_id` 匹配，其他运行结束不会提前关闭当前 SSE。
-- 相同 prompt 的并发运行也能获得独立 session id；JSONL 追加和读取使用锁避免序号冲突与半行读取。
-- 提供一个使用 EventSource 的 Web 工作台，复用同一 Application，支持停止运行，不复制 Agent 逻辑。
+- Binds only `127.0.0.1` by default; binding a non-loopback address requires `MINIDSH_TOKEN`, otherwise startup is refused.
+- Provides health, plugins, tools, prompt, session list/events/transcript, run/resume/fork/compact, and jobs/output/kill APIs.
+- SSE carries turn, assistant, `llm/retry`, tool execution, run result/error/cancelled, and `job/settled`; an internal run/done closes the current stream.
+- Every run has a unique `run_id`; captured session ids, awaited results, and stream events are all matched by `run_id`, so another run finishing does not close the current SSE early.
+- Concurrent runs with the same prompt still get independent session ids; JSONL appends and reads use locks to avoid sequence collisions and half-line reads.
+- Provides a Web workbench using EventSource that reuses the same Application, supports stopping a run, and does not duplicate Agent logic.
 
-### 模型列表、重试与取消
+### Model Listing, Retry, and Cancellation
 
-- `GET /models` 使用 Messages base URL 的 origin，不继承路径；认证请求不跟随重定向，默认超时 5000ms。
-- 成功列表默认缓存 600000ms，`DEEPSEEK_MODELS_MAX_AGE_MS=0` 时每次刷新；返回深拷贝避免调用方修改缓存。
-- 列表保留有效 id 的顺序，跳过空 id 和重复 id，识别 text/image、上下文容量和 Messages 能力；尚未实现官方 badge 和客户端版本要求。
-- Messages 默认 normal 模式最多重试 5 次，覆盖 `EMPTY_RESPONSE/RATE_LIMIT/SERVER/TIMEOUT/TRANSPORT`；初始退避 500ms、最大 10000ms、抖动 0.1。
-- 支持有界 `Retry-After` 秒数或 HTTP 日期、认证/配额/请求/限流/服务端错误分类、`llm/retry` 事件，以及显式 always 模式。
-- `llm.retry` 和 `llm.model-listing` 可分别关闭；列表请求本身不自动重试。
-- `core.cancellation` 控制 HTTP/Web 取消；令牌传播到模型流、退避等待、压缩、工具和前台 Shell，取消产生 ABORTED 和 `run/cancelled`。
-- 已建立响应流通过关闭 response 取消；前台 Bash 终止对应进程组，取消 `job_output` 等待不会终止后台任务。
-- 网络连接建立前仅能在边界检查取消，尚不是官方 AbortSignal 全生命周期兼容实现。
+- `GET /models` uses the origin of the Messages base URL without inheriting its path; the authenticated request does not follow redirects and has a default 5000ms timeout.
+- A successful list is cached for 600000ms by default and refreshed every time when `DEEPSEEK_MODELS_MAX_AGE_MS=0`; a deep copy is returned so callers cannot modify the cache.
+- The list preserves the order of valid ids, skips empty and duplicate ids, and recognizes text/image, context capacity, and Messages capability; the official badges and client-version requirements are not yet implemented.
+- By default, Messages in normal mode retries at most 5 times, covering `EMPTY_RESPONSE/RATE_LIMIT/SERVER/TIMEOUT/TRANSPORT`; initial backoff 500ms, maximum 10000ms, jitter 0.1.
+- Supports a bounded `Retry-After` in seconds or as an HTTP date, classification of auth/quota/request/rate-limit/server errors, the `llm/retry` event, and an explicit always mode.
+- `llm.retry` and `llm.model-listing` can be disabled independently; listing requests themselves are not retried automatically.
+- `core.cancellation` controls HTTP/Web cancellation; the token propagates to model streams, backoff waits, compaction, tools, and foreground Shell, and cancellation produces ABORTED and `run/cancelled`.
+- An established response stream is cancelled by closing the response; foreground Bash terminates its process group, while cancelling a `job_output` wait does not terminate the background job.
+- Before a network connection is established, cancellation can only be checked at boundaries; this is not yet an implementation compatible with the official AbortSignal full lifecycle.
 
-### 图片附件与 Files API
+### Image Attachments and the Files API
 
-- 支持 PNG/JPEG/GIF/WebP 文件头识别，单张 32MiB、每请求 600 张和原始累计 128MiB；内联 base64 累计上限 20MiB。
-- 内部附件记录路径、media type、大小和 SHA-256，不把 base64 写入 JSONL；DeepSeek 准备时重新读取并拒绝变更。
-- 图片仅允许 user/tool 内容，普通文件策略限制在工作区内，`danger-full-access` 可读取外部路径。
-- Messages 内联格式为 `source.type=base64`，文件引用为 `source.type=file`；后者携带 `files-api-2025-04-14`。
-- Files 根目录复用 Messages `/v1` 规则；multipart 包含 `expires_after[anchor]=created_at`、秒数和文件，默认生命周期 604800 秒。
-- Files 默认操作超时 60000ms；实现上传、列表、读取和删除的对象校验，拒绝重定向并保留错误分类。
-- auto 默认优先上传，Files 失败或 Messages INVALID_REQUEST 时降级内联；required 失败关闭，inline 不上传。
-- 文件缓存按路由、凭据哈希和图片 SHA-256 隔离，提前一小时视为需要刷新；并发上传有锁，Messages 重试复用文件 id。
-- 被拒绝的文件引用会失效并在下次重新上传；提供 `llm/image-upload`、`llm/image-fallback` 和 `llm.files` 开关。
-- 尚未实现官方图片变换、token 定价、持久上传索引、独立共享等待者、配额清理与附件存储协议。
+- Supports PNG/JPEG/GIF/WebP header detection, 32MiB per image, 600 images per request, and 128MiB raw cumulative; the inline base64 cumulative cap is 20MiB.
+- Internal attachments record path, media type, size, and SHA-256, and base64 is never written to JSONL; DeepSeek preparation re-reads them and rejects changes.
+- Images are allowed only in user/tool content; the normal file policy restricts them to the workspace, while `danger-full-access` can read external paths.
+- The Messages inline format is `source.type=base64`, and file references use `source.type=file`; the latter carries `files-api-2025-04-14`.
+- The Files base URL reuses the Messages `/v1` rule; multipart contains `expires_after[anchor]=created_at`, the seconds, and the file, with a default lifetime of 604800 seconds.
+- The default Files operation timeout is 60000ms; upload, list, read, and delete validate objects, reject redirects, and preserve error classification.
+- auto prefers upload by default and downgrades to inline when Files fails or Messages returns INVALID_REQUEST; required fails closed, and inline never uploads.
+- The file cache is isolated by route, credential hash, and image SHA-256, and is treated as needing refresh one hour early; concurrent uploads are locked, and Messages retries reuse the file id.
+- A rejected file reference is invalidated and re-uploaded next time; provides the `llm/image-upload`, `llm/image-fallback`, and `llm.files` toggles.
+- Not yet implemented: the official image transformation, token pricing, persistent upload index, independent shared waiters, quota cleanup, and attachment storage protocol.
 
-### 持久 Bash 与 PTY（学习版纵向切片）
+### Persistent Bash and PTY (teaching-edition vertical slice)
 
-- `tools.bash-persistent` 默认关闭，启用时自动关闭一次性 `tools.bash`，模型工具名仍为 `bash`。
-- 使用上游持久工具描述和仅含 `command` 的 schema；不保留一次性 Bash 的提示词段或后台参数。
-- 每个 session 一个交互式 `/bin/bash` PTY，同 owner 串行执行；cwd、export、函数和 Shell 状态在进程内保留。
-- 使用随机 start/end 标记和 eval 包装捕获退出码，结果以 `[Command finished with exit code N]` 收尾。
-- 默认命令超时 300000ms，模型输出尾部最多 16000 字符；内部 scrollback 为 1MiB。
-- 初始化关闭输入 echo 和历史扩展；环境沿用凭据清理，并注入受管 DSH/PTY 变量。
-- 超时、取消、Shell 退出、HTTP kill 和应用关闭都会终止并重置终端，下一次从工作区新环境开始。
-- 提供 `pty/created`、`pty/reset`、终端列表和 kill API；CLI 短进程退出后不能恢复 PTY 内存状态。
-- 仅支持 Unix PTY；尚未实现官方终端行缓冲、OSC 就绪检测、ConPTY 和跨进程恢复；已支持持久终端打开时的 sandbox mode fence。
+- `tools.bash-persistent` is off by default; when enabled it automatically disables one-shot `tools.bash`, and the model-facing tool name is still `bash`.
+- Uses the upstream persistent-tool description and a schema containing only `command`; it keeps neither the one-shot Bash prompt section nor the background parameters.
+- One interactive `/bin/bash` PTY per session, executed serially per owner; cwd, exports, functions, and Shell state persist within the process.
+- Random start/end markers and an eval wrapper capture the exit code, and the result ends with `[Command finished with exit code N]`.
+- Default command timeout is 300000ms, the model output tail is at most 16000 characters, and the internal scrollback is 1MiB.
+- Initialization disables input echo and history expansion; the environment keeps the credential scrubbing and injects the managed DSH/PTY variables.
+- Timeouts, cancellation, Shell exit, HTTP kill, and application shutdown all terminate and reset the terminal, and the next call starts from a fresh workspace environment.
+- Provides `pty/created`, `pty/reset`, and terminal list/kill APIs; after a short-lived CLI process exits, in-memory PTY state cannot be recovered.
+- Unix PTY only; the official terminal line buffering, OSC readiness detection, ConPTY, and cross-process recovery are not yet implemented; the sandbox mode fence while a persistent terminal is open is supported.
 
-### 内核沙箱与策略升级
+### Kernel Sandbox and Policy Escalation
 
-- `core.kernel-sandbox` 默认关闭；启用后 macOS Seatbelt 接管一次性 Bash、后台 jobs 和持久 PTY，默认行为不变。
-- read-only 允许执行/读取但禁止写入；workspace-write 仅允许工作区、受管 jobs 和平台临时目录；danger-full-access 不启用隔离。
-- 通过实际子进程验证 Operation not permitted，不是 ToolRegistry 模拟错误；`/tmp` 映射和 `subpath` 规则在本机验证。
-- `sandbox/mode` 持久化会话覆盖，工具、运行时上下文和进程后端读取同一策略。
-- `approval/policy` 切换 ask/never，runtime context 同步更新；审批取消记录 cancelled 并丢弃迟到回答。
-- 持久终端打开时禁止 mode 切换，关闭后新终端按新模式创建。
-- 提供 GET sandbox、POST sandbox、POST approval-policy API；尚无 Landlock/bwrap 或 Windows 对应实现。
+- `core.kernel-sandbox` is off by default; when enabled, macOS Seatbelt takes over one-shot Bash, background jobs, and the persistent PTY, with default behavior unchanged.
+- read-only allows execution/reads but forbids writes; workspace-write allows only the workspace, managed jobs, and platform temporary directories; danger-full-access applies no isolation.
+- Operation not permitted is verified with a real subprocess, not a simulated ToolRegistry error; the `/tmp` mapping and `subpath` rules are verified on this machine.
+- `sandbox/mode` persists the session override, and tools, runtime context, and process backends read the same policy.
+- `approval/policy` switches ask/never and updates the runtime context in sync; a cancelled approval records cancelled and discards late answers.
+- Mode switching is forbidden while a persistent terminal is open; after it closes, a new terminal is created under the new mode.
+- Provides GET sandbox, POST sandbox, and POST approval-policy APIs; there is no Landlock/bwrap or Windows equivalent yet.
 
-### 增量模型流与 SSE 背压
+### Incremental Model Streaming and SSE Backpressure
 
-- `core.streaming` 默认启用；DeepSeek 在原解析器中同步发出 text/reasoning/tool-call delta、工具 block-start 和 usage。
-- Agent 添加 session/run/turn/step；每次请求带 attempt，重试后消费者可区分失败草稿与新流。
-- 最终 ModelResponse、assistant/message 和 reasoning replay 与增量来自同一解析器，不改变已有持久消息结构。
-- 无增量能力的模型由 Agent 将最终文本补发一次，标记 fallback=true；关闭 core.streaming 后完全不发送 delta。
-- max-token 响应丢弃工具调用及对应 replay 块，避免执行不完整工具操作。
-- Web 只拼接 text-delta，llm/retry 清空失败 attempt 草稿，原始事件区保留完整事件。
-- 每个 SSE listener 队列上限 256，put_nowait 溢出时关闭并移除慢流，Agent 继续运行并持久化最终结果。
-- 原始 chunk 的学习版压缩持久化和同进程续传见下节；不包含官方完整持久化协议、独立组装器 API 或跨重启 SSE 恢复。
+- `core.streaming` is enabled by default; DeepSeek emits text/reasoning/tool-call deltas, tool block-starts, and usage synchronously from the original parser.
+- The Agent adds session/run/turn/step; each request carries an attempt, so consumers can distinguish a failed draft from a new stream after a retry.
+- The final ModelResponse, assistant/message, and reasoning replay come from the same parser as the deltas, without changing the existing persisted message structure.
+- For models without delta support, the Agent re-emits the final text once marked fallback=true; with core.streaming disabled, no deltas are sent at all.
+- max-token responses discard tool calls and their replay blocks to avoid executing incomplete tool operations.
+- The Web UI concatenates only text-deltas, llm/retry clears the failed attempt's draft, and the raw-event area keeps the complete events.
+- Each SSE listener queue is capped at 256; on put_nowait overflow the slow stream is closed and removed, while the Agent keeps running and persists the final result.
+- Teaching-edition compressed persistence of raw chunks and same-process resumption are covered in the next section; this does not include the official full persistence protocol, a standalone assembler API, or SSE recovery across restarts.
 
-### 原始流持久化与 SSE 续传
+### Raw Stream Persistence and SSE Resumption
 
-- `core.stream-recording` 默认启用；assistant/message payload 可携带压缩 stream 和 finish/replayState。
-- 相邻 text/reasoning 按类型/index 打包为文本数组、time0 和 dt；工具参数按 index/id/name 打包为 args，保留原始分片边界。
-- usage、block-start、finish 保留 raw chunk；Mock fallback 使用 index=0，最终消息和原始流来自同一响应。
-- `stream_codec.expand_stream` 校验记录形状、成员数组、dt 长度和时间；会话读取会展开验证 stream。
-- CLI `stream` 和 HTTP GET `/stream` 展开分片并附 seq/turn/step；fork 保留记录，关闭开关后不再写 stream。
-- Broker 分配进程内递增事件 id，保留最近 2048 条；Last-Event-ID 只回放该 session 的更新事件并接入实时队列。
-- 回放在同一锁内衔接历史与订阅，run/done 可回放，不启动重复 Agent；太旧、未来或未知断点明确失败。
-- `core.sse-replay` 可关闭；历史环不跨进程重启，持久 chunk 没有全局 SSE 序号。
+- `core.stream-recording` is enabled by default; the assistant/message payload may carry the compressed stream and finish/replayState.
+- Adjacent text/reasoning chunks are packed by type/index into a text array with time0 and dt; tool arguments are packed by index/id/name into args, preserving the original fragment boundaries.
+- usage, block-start, and finish keep their raw chunks; Mock fallback uses index=0, and the final message and raw stream come from the same response.
+- `stream_codec.expand_stream` validates the record shape, member arrays, dt length, and timing; session reads expand and validate the stream.
+- CLI `stream` and HTTP GET `/stream` expand the fragments and attach seq/turn/step; fork preserves the recording, and no stream is written once the toggle is off.
+- The broker assigns in-process incrementing event ids and retains the most recent 2048; Last-Event-ID replays only that session's newer events and then joins the live queue.
+- Replay stitches history and subscription under the same lock, run/done is replayable, and no duplicate Agent is started; too-old, future, or unknown resume points fail explicitly.
+- `core.sse-replay` can be disabled; the history ring does not survive process restarts, and persisted chunks have no global SSE sequence number.
 
-### 提问、待办与 Web 工具（学习版纵向切片）
+### Questions, Todos, and Web Tools (teaching-edition vertical slice)
 
-- `tools.ask-user` 注册官方名称 ask_user_question 和 questions/id/question/options/multi_select schema；提示语包含上游跳过语义。
-- 支持 CLI 逐题回答、HTTP 待答列表/回答、自定义文本、选项校验、取消和服务关闭；question/asked/answered 持久化。
-- `tools.todo` 注册 todo_write，整表替换，校验唯一非空内容、pending/in_progress/completed 和活跃数量。
-- 待办事件为 todo/write；最近写入生效，turn/start 清空，turn/end 保留；MINIDSH_TODO_ALLOW_PARALLEL 控制并行活跃任务。
-- `tools.web-fetch`/`tools.web-search` 注册官方名称，使用上游外部不可信提示词段；默认关闭。
-- Web fetch 支持有界读取、30 秒默认超时、200000 字符输出、重定向复核、私网拒绝、HTML 安全降级和取消。
-- Web search 使用 MINIDSH_WEB_SEARCH_URL 的学习版 provider；支持查询去重、10 查询/10 来源、800 字符摘要和 Markdown 引用。
-- `tools.ask-user-timed` 支持官方 timeout 参数、pending/callId/message、默认 120 秒等待和迟到回答；超时问题保留在待答队列。
-- 迟到回答投影为 source.kind=answer_to_pending_question 的 user/message，附 callId 和原问题；Web 图形表单支持选项、多选、自定义和跳过。
-- 当前没有完整官方 Client 卡片系统、Turndown/GFM、DeepSeek 搜索路由或 DNS 连接固定。
+- `tools.ask-user` registers the official name ask_user_question and the questions/id/question/options/multi_select schema; the prompt text includes the upstream skip semantics.
+- Supports CLI per-question answering, HTTP pending-list/answer, custom text, option validation, cancellation, and service shutdown; question/asked/answered are persisted.
+- `tools.todo` registers todo_write with whole-table replacement, validating unique non-empty content, pending/in_progress/completed, and active counts.
+- Todo events are todo/write; the latest write wins, turn/start clears, turn/end retains, and MINIDSH_TODO_ALLOW_PARALLEL controls parallel active tasks.
+- `tools.web-fetch`/`tools.web-search` register the official names and use the upstream external-untrusted prompt section; off by default.
+- Web fetch supports bounded reads, a 30-second default timeout, 200000-character output, re-checking redirects, private-network rejection, safe HTML downgrade, and cancellation.
+- Web search uses the teaching-edition provider at MINIDSH_WEB_SEARCH_URL; it supports query deduplication, 10 queries/10 sources, 800-character summaries, and Markdown citations.
+- `tools.ask-user-timed` supports the official timeout parameter, pending/callId/message, a default 120-second wait, and late answers; a timed-out question stays in the pending queue.
+- A late answer is projected as a user/message with source.kind=answer_to_pending_question, carrying the callId and original question; the Web graphical form supports options, multi-select, custom text, and skip.
+- Currently absent: the full official Client card system, Turndown/GFM, the DeepSeek search route, and DNS connection pinning.
 
-### 本地 Subagent 与协作控制（学习版纵向切片）
+### Local Subagents and Collaboration Control (teaching-edition vertical slice)
 
-- `core.subagents` 默认关闭；启用后提供 spawn/fork 两种本地后端、持久子 Session、父子树、名称和深度限制。
-- `subagent` 启动无父历史的全新子级；`subagent_fork` 对应上游可配置工具名，复制最后一个完整 turn/end 之前的历史，不包含当前开放回合。
-- 工具立即返回 agent-N 或指定名称；子级完成通过 subagent-settled 用户消息进入父级后续步骤，不泄露子级中间上下文。
-- `send_message` 可向运行中子级排队输入或唤醒空闲子级；`interrupt_agent` 校验祖先后代关系并传播取消；`list_agents` 列出根和后代；`wait_agent` 支持官方 10000–3600000ms 边界。
-- 记录父级 subagent/catalog 和进程内 subagent/start/end，提供会话 subagents 查询、subagent-message 和 subagent-interrupt 学习 API。
-- MINIDSH_SUBAGENT_MAX_DEPTH 默认 1，0 禁止委派；Application 关闭按深度回收子级。
-- 当前没有外部 ACP/Codex/Claude Code/DSH SDK 后端、模型/preset 选择、结构化输出、跨重启在线目录恢复；子 cwd 已校验持久化，但文件工具仍使用根工作区。父级完成通知在学习版 Agent Loop 后续 step 消费，不是官方完整 inbox/独立唤醒调度器。
+- `core.subagents` is off by default; when enabled it provides spawn/fork local backends, persistent child Sessions, a parent-child tree, names, and a depth limit.
+- `subagent` starts a fresh child with no parent history; `subagent_fork` corresponds to the upstream configurable tool name and copies history up to the last complete turn/end, excluding the currently open turn.
+- The tool immediately returns agent-N or the given name; child completion reaches later parent steps via a subagent-settled user message without leaking the child's intermediate context.
+- `send_message` can queue input to a running child or wake an idle child; `interrupt_agent` validates the ancestor-descendant relationship and propagates cancellation; `list_agents` lists the root and descendants; `wait_agent` supports the official 10000–3600000ms bounds.
+- Records the parent subagent/catalog and in-process subagent/start/end, and provides session subagents queries plus the teaching APIs subagent-message and subagent-interrupt.
+- MINIDSH_SUBAGENT_MAX_DEPTH defaults to 1, and 0 forbids delegation; Application shutdown reaps children by depth.
+- Currently absent: external ACP/Codex/Claude Code/DSH SDK backends, model/preset selection, structured output, and online catalog recovery across restarts; a child cwd is validated and persisted, but file tools still use the root workspace. Parent completion notifications are consumed in a later step of the teaching-edition Agent Loop, not the official full inbox/independent wakeup scheduler.
 
-### Workflow 脚本编排、后台 Jobs 与恢复（学习版纵向切片）
+### Workflow Script Orchestration, Background Jobs, and Recovery (teaching-edition vertical slice)
 
-- `core.workflow` 和 `tools.workflow` 默认关闭；复用本地 subagent 树，需要 Node.js 可执行文件，不增加 Python 运行时依赖。
-- Node 子进程用 vm 执行普通 JavaScript async body，脚本无 require/process/fs/net/timer；meta/args 作为 JSON 数据注入，不对元数据求值。
-- 支持 agent、pipeline、parallel、phase、log 和顶层 await；每个 agent 使用 delivery=caller，结果返回脚本，不额外唤醒父级。
-- 支持对象根 JSON Schema 子集、普通子级失败/结构不匹配映射 null、fatal hook 错误中止整次运行、非有限数/循环/稀疏数组拒绝。
-- MINIDSH_WORKFLOW_MAX_AGENTS 默认 1000，MINIDSH_WORKFLOW_MAX_CONCURRENT 默认按 CPU 且最多 32；单项组合器最多 4096 条。
-- 提供 workflow/start/phase/log/agent-start/agent-end/end 和父 Session 的 tool-workflow 四类记录；取消停止进程并等待子级终态后配对成员结束。
-- run_in_background 使用独立 workflow job id；managed-job 复用 job_output/job_list/job_kill、输出环、并发上限和会话归属。
-- phase/log/member 生命周期进入增量输出，完成结果只投递一次；kill 同时取消 Node 和子级，job/registered/settled 持久化。
-- Application 重启从 Session 与 jobs 输出文件恢复已完成结果；未结算任务标记 interrupted: host restarted，补记唯一 cause=recovery 审计，不恢复旧进程。
-- HTTP jobs list/output/kill 支持可选 session_id 归属参数；原有无参数行为不变。
-- 当前不支持任意模型路由，vm 是学习版能力隔离而非官方完整 PTC/OS 沙箱；没有跨进程重连正在运行的 Node。
+- `core.workflow` and `tools.workflow` are off by default; they reuse the local subagent tree, require a Node.js executable, and add no Python runtime dependency.
+- The Node child runs an ordinary JavaScript async body in a vm; scripts have no require/process/fs/net/timer, and meta/args are injected as JSON data without evaluating the metadata.
+- Supports agent, pipeline, parallel, phase, log, and top-level await; each agent uses delivery=caller, and results return to the script without additionally waking the parent.
+- Supports an object-rooted JSON Schema subset, mapping ordinary child failures/schema mismatches to null, aborting the whole run on fatal hook errors, and rejecting non-finite numbers/cycles/sparse arrays.
+- MINIDSH_WORKFLOW_MAX_AGENTS defaults to 1000, and MINIDSH_WORKFLOW_MAX_CONCURRENT defaults to the CPU count capped at 32; a single combinator accepts at most 4096 entries.
+- Provides workflow/start/phase/log/agent-start/agent-end/end and the four tool-workflow record types in the parent Session; cancellation stops the process and waits for child terminal states before pairing member ends.
+- run_in_background uses a separate workflow job id; managed-job reuses job_output/job_list/job_kill, the output ring, concurrency caps, and session ownership.
+- phase/log/member lifecycles enter incremental output, and the completion result is delivered exactly once; kill cancels both Node and the children, and job/registered/settled are persisted.
+- Application restart recovers completed results from the Session and jobs output files; unsettled jobs are marked interrupted: host restarted with a single cause=recovery audit record appended, and old processes are not revived.
+- HTTP jobs list/output/kill support an optional session_id ownership parameter; the original no-argument behavior is unchanged.
+- Arbitrary model routing is not supported; the vm is teaching-edition capability isolation rather than the official full PTC/OS sandbox, and there is no cross-process reconnection to a running Node.
 
-### MCP 客户端、资源与管理器（学习版纵向切片）
+### MCP Client, Resources, and Manager (teaching-edition vertical slice)
 
-- `core.mcp` 默认关闭；stdio 和 streamable-http 使用真实 JSON-RPC initialize/initialized，依次协商 2026-07-28 至 2024-11-05。
-- 工具以 mcp__server__raw 注册，保留原始调用名；长/非法名称使用稳定 SHA-256 后缀。分页最多 16 页，远程重名和注册冲突拒绝整代，通知刷新串行。
-- stdio 清洗 KEY/TOKEN/SECRET/PASSWORD/DSH_* 环境并合并显式 env；HTTP 支持 JSON/SSE 响应和 MCP-Session-Id。
-- `${credential:REF}` 从宿主环境解析，失败诊断将解析值及 URL 编码替换为 [redacted]；成功结果保持原文。
-- 工具调用支持超时、取消和 notifications/cancelled；MCP isError 失败关闭，文本/结构化/不支持内容块有明确投影。
-- 共享 list_mcp_resources/list_mcp_resource_templates/read_mcp_resource 要求显式 server；支持游标、无 resources 能力空列表和 blob 长度说明。
-- 服务器指令有 32KiB 默认上限；管理器支持 upsert/remove/enable/disable/restart/probe/list、状态事件和 HTTP API，最后一个服务器移除时撤回共享资源工具。
-- 当前没有自动重连预算、OAuth、完整凭据提供方轮换、资源订阅、MCP prompts、官方 SDK 输出 schema 校验或图片附件持久投影；HTTP 取消等待传输超时，VM/进程隔离不适用于远端服务器。
+- `core.mcp` is off by default; stdio and streamable-http use real JSON-RPC initialize/initialized, negotiating from 2026-07-28 down to 2024-11-05 in order.
+- Tools are registered as mcp__server__raw while preserving the original call name; long/invalid names use a stable SHA-256 suffix. Pagination is at most 16 pages, remote duplicate names and registration conflicts reject the whole generation, and notification refreshes are serialized.
+- stdio scrubs KEY/TOKEN/SECRET/PASSWORD/DSH_* environment variables and merges explicit env; HTTP supports JSON/SSE responses and MCP-Session-Id.
+- `${credential:REF}` is resolved from the host environment; failure diagnostics replace the resolved value and its URL encoding with [redacted]; successful results stay verbatim.
+- Tool calls support timeouts, cancellation, and notifications/cancelled; MCP isError fails closed, and text/structured/unsupported content blocks have explicit projections.
+- The shared list_mcp_resources/list_mcp_resource_templates/read_mcp_resource require an explicit server; they support cursors, an empty list when the resources capability is absent, and a blob length description.
+- Server instructions have a 32KiB default cap; the manager supports upsert/remove/enable/disable/restart/probe/list, state events, and HTTP APIs, and withdraws the shared resource tools when the last server is removed.
+- Currently absent: automatic reconnect budgets, OAuth, full credential-provider rotation, resource subscriptions, MCP prompts, official SDK output-schema validation, and persistent image-attachment projection; HTTP cancellation waits for the transport timeout, and VM/process isolation does not apply to remote servers.
 
-### Skills 注册表、文件发现与调用（学习版纵向切片）
+### Skills Registry, File Discovery, and Invocation (teaching-edition vertical slice)
 
-- `core.skills` 与 `tools.skill` 默认关闭；支持运行时注册、提供方注册和项目/custom/user/bundled 根按 rank 合并，同名高优先级获胜。
-- 文件格式支持根下 `<name>/SKILL.md` 和 `<name>.md`，解析 name/description、disable-model-invocation、user-invocable 和严格布尔词；无效条目跳过。
-- 每次发现重新扫描，frontmatter/成员变化在下一步更新；每次加载重读正文，正文修改不改变目录 digest。
-- 持久 skill-catalog 用户消息按 entries+完整性 digest 去重，支持初始、替换、空目录、发现不完整及恢复；source 保留结构化 entries。
-- `skill` 工具按精确名称加载，disable-model-invocation 从目录和模型加载排除；`/name` 只扫描直接用户 prompt，支持重复去重和 user-invocable=false 拒绝。
-- 统一 `<skill_content>/<skill_resources>/<skill_instructions>` 渲染，提供 directory/url/opaque/provider 资源指引；目录描述规范化并默认最多 500 字符。
-- 提供 CLI skills/skill 和 HTTP 列表/加载；无 skill 或无工具时不发布初始空目录。
-- 当前 frontmatter 是学习版标量解析，不支持完整 YAML/Office 内置包/Chokidar/文件系统服务或官方工作目录作用域链。
+- `core.skills` and `tools.skill` are off by default; they support runtime registration, provider registration, and merging project/custom/user/bundled roots by rank, where the higher-priority entry of the same name wins.
+- File formats support `<name>/SKILL.md` and `<name>.md` under a root, parsing name/description, disable-model-invocation, user-invocable, and strict boolean words; invalid entries are skipped.
+- Every discovery rescans, so frontmatter/member changes take effect on the next step; every load re-reads the body, and body edits do not change the catalog digest.
+- The persistent skill-catalog user message is deduplicated by entries + completeness digest and supports initial, replacement, empty catalog, incomplete discovery, and resume; source keeps the structured entries.
+- The `skill` tool loads by exact name, and disable-model-invocation excludes a skill from the catalog and from model loading; `/name` scans only direct user prompts, supports duplicate deduplication, and rejects user-invocable=false.
+- Uniform `<skill_content>/<skill_resources>/<skill_instructions>` rendering provides directory/url/opaque/provider resource guidance; catalog descriptions are normalized and limited to 500 characters by default.
+- Provides CLI skills/skill and HTTP list/load; when there are no skills or no tool, no initial empty catalog is published.
+- The current frontmatter parsing is the teaching edition's scalar parser and does not support full YAML/Office built-in bundles/Chokidar/filesystem services or the official working-directory scope chain.
 
-### Schedule 宿主定时任务与投递（学习版纵向切片）
+### Host Scheduling and Delivery (teaching-edition vertical slice)
 
-- `core.schedule` 和 `tools.schedule` 默认关闭；支持 after/at/every/daily/weekly/cron/rrule 七种时间记录、UTC 毫秒时刻和本地时区。
-- Cron 支持五字段列表/范围/步长及 Vixie 日期 OR 语义；RRULE 支持 MINUTELY/HOURLY/DAILY/WEEKLY/MONTHLY/YEARLY、INTERVAL/COUNT/UNTIL、BYDAY/BYMONTHDAY/BYMONTH/BYHOUR/BYMINUTE/BYSECOND/BYSETPOS。
-- 当前 RRULE 不支持 BYWEEKNO/BYYEARDAY，BYHOUR/BYMINUTE/BYSECOND 各只接受一个值，DST 使用 zoneinfo 跳过不存在墙钟并选较早 fold。
-- `.minidsh/schedule.json` 使用 schedule v2 原子整单元持久化，打开校验版本、任务 id 和 scheduledAt；损坏输入不发布新文件。
-- schedule_create/list/view/edit 支持目标、活动筛选、分页、暂停恢复、expectedUpdatedAt 冲突和删除；run 不移动原发生时点，history 支持游标，deleteInactive 只清理 ended。
-- this_session 复用现有会话，new_once 预留并复用新会话，new 每次创建；委派调用和委派目标拒绝。
-- 定时器只追赶最近一次，运行中目标在下一边界注入；schedule/inbox 在消息持久化时确认回执，不代表模型完成。历史最多 200 条/30 天，60 秒单任务投递间隔。
-- HTTP 提供 create/list/view/history/edit/run/deleteInactive 和 schedule/changed；管理读取不激活目标 Session。
-- 当前没有完整 RFC 5545 求值器、关联 Agent 变更通知、归档准入、批量 Session 提醒、执行槽或独立存储后端。
+- `core.schedule` and `tools.schedule` are off by default; they support seven schedule kinds (after/at/every/daily/weekly/cron/rrule), UTC millisecond instants, and local time zones.
+- Cron supports five-field lists/ranges/steps and Vixie day-of-month/day-of-week OR semantics; RRULE supports MINUTELY/HOURLY/DAILY/WEEKLY/MONTHLY/YEARLY, INTERVAL/COUNT/UNTIL, and BYDAY/BYMONTHDAY/BYMONTH/BYHOUR/BYMINUTE/BYSECOND/BYSETPOS.
+- The current RRULE does not support BYWEEKNO/BYYEARDAY; BYHOUR/BYMINUTE/BYSECOND each accept only one value; DST handling uses zoneinfo to skip nonexistent wall-clock times and chooses the earlier fold.
+- `.minidsh/schedule.json` uses schedule v2 atomic whole-unit persistence; opening validates the version, task ids, and scheduledAt; corrupt input publishes no new file.
+- schedule_create/list/view/edit support targets, active filtering, pagination, pause/resume, expectedUpdatedAt conflicts, and deletion; run does not move the original occurrence, history supports cursors, and deleteInactive cleans up only ended tasks.
+- this_session reuses the existing session, new_once reserves and reuses a new session, and new creates one each time; delegated calls and delegation targets are rejected.
+- Timers catch up only the most recent occurrence, and a running target injects at the next boundary; schedule/inbox acknowledges the receipt when the message is persisted, which does not mean the model has finished. History holds at most 200 entries/30 days, with a 60-second per-task delivery interval.
+- HTTP provides create/list/view/history/edit/run/deleteInactive and schedule/changed; management reads do not activate the target Session.
+- Currently absent: a complete RFC 5545 evaluator, associated Agent change notifications, archival admission, batch Session reminders, execution slots, and an independent storage backend.
 
-### Goal 持久目标与自动 Round（学习版纵向切片）
+### Goals and Automatic Rounds (teaching-edition vertical slice)
 
-- `core.goals`、`tools.goal`、`core.goal-rounds` 分别默认关闭；目标服务和自动调度可独立启用。
-- 每 Session 至多一个当前目标，goal/change v1 事件是唯一权威，支持 create/edit/pause/resume/complete/blocked/clear。
-- 精确 id+revision 比较并设置，拒绝陈旧更新；active/paused/blocked/complete 四态、clear tombstone、替换已完成目标。
-- 严格回放检查 phase、revision、时间单调性和连续 Goal Round；损坏记录失败关闭。
-- 自动续行使用独立 armed/disarmed 进程状态，resume/fork/重启后 disarmed，必须显式 resume；只有持久 kind=goal 用户消息消耗 Round。
-- get_goal/create_goal/update_goal 使用直接人类与 Goal Round 来源权限，paused 只能由用户控制恢复；blocked 自主路径至少连续 3 Round。
-- 驱动空闲后调度同 Session Round，round-limit 自动阻塞，完成/阻塞后仅一次 goal-wrapup 最终总结；异常取消不自动重启。
-- 提供 goal CLI、HTTP 用户控制和 goal/changed/activation-changed SSE。
-- 当前没有官方 SessionProjection 单元、精确 AgentRegistry initiator、子树 idle 汇总、持久性 flush 前置条件或独立完成评估器。
+- `core.goals`, `tools.goal`, and `core.goal-rounds` are each off by default; the goal service and automatic scheduling can be enabled independently.
+- Each Session has at most one current goal, the goal/change v1 event is the sole authority, and create/edit/pause/resume/complete/blocked/clear are supported.
+- Updates compare and set on exact id+revision and reject stale updates; there are four states active/paused/blocked/complete, a clear tombstone, and replacement of a completed goal.
+- Strict replay validates phase, revision, time monotonicity, and contiguous Goal Rounds; corrupt records fail closed.
+- Automatic continuation uses a separate armed/disarmed process state; after resume/fork/restart it is disarmed and must be explicitly resumed; only persistent kind=goal user messages consume a Round.
+- get_goal/create_goal/update_goal use direct-human and Goal Round source permissions; paused can be resumed only under user control; the blocked autonomous path requires at least 3 consecutive Rounds.
+- After the driver goes idle, it schedules a Round on the same Session; round-limit blocks automatically, completion/blocking yields exactly one goal-wrapup final summary, and an abnormal cancellation does not restart automatically.
+- Provides the goal CLI, HTTP user control, and goal/changed/activation-changed SSE.
+- Currently absent: the official SessionProjection unit, an exact AgentRegistry initiator, subtree idle aggregation, durability flush preconditions, and an independent completion evaluator.
 
-### run_code/PTC 执行层（学习版纵向切片）
+### run_code/PTC Execution Layer (teaching-edition vertical slice)
 
-- `core.ptc` 与 `tools.run-code` 默认关闭；per-call 使用 async TypeScript 函数，persistent 使用 Node REPL 按 Session 保留变量。
-- 模型只看到 run_code 和动态 SDK；原生工具继续在宿主注册表供 RPC 调用，保留审批、取消、互斥和事件语义。
-- Node 原生 stripTypeScriptTypes 支持可擦除 TypeScript；REPL 支持顶层 await 与末尾表达式。独立 stdout/stderr 读取者与 Session 队列复用 worker。
-- 嵌套只读调用最多并行 10，mutating 调用独占；pending 默认 128，子调用额度为 timeout 分钟数×1024，独占 run_code。
-- 默认 120000ms 超时、600000ms 上限、64MiB 输出和 3000ms 停止宽限；支持 timeout/abort/exception/protocol/worker-exit/output-limit/invalid-output。
-- 返回 status/value/logs/diagnostic，字符串日志原样输出，顶层 undefined 按求值器映射为 null 或字符串。
-- 支持 process group 清理、持久进程释放、重启内存清空、Seatbelt 的 read-only/workspace-write/danger-full-access 执行策略。
-- 当前没有官方 Acorn 源码变换、完整协作式 revoke/进程树清理、PTC 图片投影、环境 reset 控件、sandbox_permissions 提权或独立 TypeScript 类型检查。
+- `core.ptc` and `tools.run-code` are off by default; per-call uses an async TypeScript function, and persistent uses a Node REPL that retains variables per Session.
+- The model sees only run_code and the dynamic SDK; native tools remain in the host registry for RPC invocation, preserving approval, cancellation, mutual exclusion, and event semantics.
+- Node's native stripTypeScriptTypes supports erasable TypeScript; the REPL supports top-level await and trailing expressions. Independent stdout/stderr readers and the Session queue reuse the worker.
+- Nested read-only calls run at most 10 in parallel, and mutating calls are exclusive; the pending default is 128, the child-call quota is timeout minutes × 1024, and run_code is exclusive.
+- Default 120000ms timeout, 600000ms cap, 64MiB output, and 3000ms stop grace; supports timeout/abort/exception/protocol/worker-exit/output-limit/invalid-output.
+- Returns status/value/logs/diagnostic; string logs are output verbatim, and a top-level undefined is mapped by the evaluator to null or a string.
+- Supports process-group cleanup, persistent-process release, memory clearing on restart, and Seatbelt read-only/workspace-write/danger-full-access execution policies.
+- Currently absent: the official Acorn source transform, full cooperative revoke/process-tree cleanup, PTC image projection, an environment reset control, sandbox_permissions escalation, and standalone TypeScript type checking.
 
-### Agent Presets 与 Persona（学习版纵向切片）
+### Agent Presets and Persona (teaching-edition vertical slice)
 
-- `core.agent-presets` 默认关闭；preset/selected 事件按 Session 持久化选择，默认 standard 继承启用工具，minimal 不暴露工具。
-- 自定义 plugins 列表决定 scoped ToolRegistry 与提示词段；每次运行按 Session 绑定，互不影响并发会话，缺失历史 preset 失败关闭。
-- 空白 Session 可在首个模型回合前切换，重复选择幂等，首回合后拒绝；fork 和本地子 Agent 继承父 preset。
-- persona 支持 prefix/suffix、complete 和 includeRuntimeContext；complete 仅保留 prefix，关闭 runtime 时不再追加快照。
-- scoped ServiceContext 同时约束 PTC SDK 与嵌套 RPC，提示词被裁剪的工具不能经 run_code 越权调用。
-- 提供 CLI presets/preset 和 HTTP 列表、Session 查询与选择。
-- 当前插件清单是学习版名称映射，不是官方 Cordis YAML/Loader 代际、运行时热重载、激活审计或完整 AgentPresetInspection。
+- `core.agent-presets` is off by default; the preset/selected event persists the choice per Session, the default standard inherits the enabled tools, and minimal exposes no tools.
+- A custom plugins list determines the scoped ToolRegistry and prompt sections; each run binds per Session, concurrent sessions do not affect each other, and a missing historical preset fails closed.
+- A blank Session can switch before its first model turn, repeated selection is idempotent, and switching after the first turn is rejected; fork and local child Agents inherit the parent preset.
+- Persona supports prefix/suffix, complete, and includeRuntimeContext; complete keeps only the prefix, and disabling runtime no longer appends the snapshot.
+- The scoped ServiceContext constrains both the PTC SDK and nested RPC, so a tool removed from the prompt cannot be called through run_code to bypass permissions.
+- Provides CLI presets/preset and HTTP listing, Session query, and selection.
+- The current plugin manifest is a teaching-edition name mapping, not the official Cordis YAML/Loader generation, runtime hot reload, activation audit, or full AgentPresetInspection.
 
-### 外部插件与产品组装（学习版等价分层）
+### External Plugins and Product Assembly (teaching-edition equivalent layering)
 
-- 使用 Python 标准 `minidsh.plugins` entry points 发现独立发行包；外部功能默认禁用，只有显式启用才导入插件代码。
-- 外部插件复用 `Plugin`、服务依赖、工具注册表和功能开关，不能覆盖内置插件名称。
-- Headless、Web、Desktop 是独立 Python 发行入口，复用同一 Application；核心和 Web 不依赖 GUI 包。
-- Desktop 的 `pywebview` 通过可选依赖安装，仅在 Desktop 启动路径延迟导入。
-- 这些是学习版设计，不对齐官方 Cordis profile/bundle、npm 插件加载器、Electron 壳、安装器或自动更新协议。
+- Independent distributions are discovered via Python standard `minidsh.plugins` entry points; external functionality is disabled by default, and plugin code is imported only when explicitly enabled.
+- External plugins reuse `Plugin`, service dependencies, the tool registry, and feature toggles, and cannot override built-in plugin names.
+- Headless, Web, and Desktop are separate Python distribution entry points that reuse the same Application; the core and Web do not depend on the GUI package.
+- Desktop's `pywebview` is installed as an optional dependency and lazily imported only on the Desktop startup path.
+- These are teaching-edition designs and do not align with the official Cordis profile/bundle, npm plugin loader, Electron shell, installer, or auto-update protocol.
 
-## 尚未对齐
+## Not Yet Aligned
 
-- 官方完整工具集、profile/bundle 格式、运行时热重载和外部 npm 插件。
-- 官方 Web Host 的认证、鉴权、页面、RPC 与多路复用协议；当前 HTTP/SSE 是学习 API，不是官方兼容实现。
-- Linux Landlock/bwrap 和 Windows 隔离；当前仅 macOS Seatbelt，未启用时 `read-only` 保守拒绝 Shell。
-- 官方 `sandbox_permissions` 升级协议和审批取消通知的完整 Client 集成；当前仅支持会话 API 与审批取消结果。
-- 官方完整终端行缓冲、OSC 就绪协议、PTY 跨进程恢复和 Windows ConPTY；当前持久后端仅支持 Unix `/bin/bash`。
-- 任务完成后的 Agent 自动唤醒、跨进程任务恢复和长期常驻宿主。
-- 完整附件存储、图片变换/定价、持久上传索引和配额恢复、扩展请求头及遥测；完整模型目录元数据、后台 listing 刷新及官方通用 LLM 重试插件仍未移植。
-- 官方完整事件类型、任意插件消息投影、格式目录、Zstandard 和 Windows 写锁；学习版仅自定义 v0/v1/v2 JSONL 代际和 surface 切片。
-- 官方压缩区间选择、token 校准、模型切换压缩、重试和取消；pruner 使用学习版计量事件。
-- `read` 尚未实现大文件流式扫描；`glob` 尚未完全复刻 ripgrep 语义和 spill 行为。
-- 匿名用户 ID 只在进程内稳定，尚未持久化。
-- 尚未对真实 DeepSeek 服务做带凭据的在线验收；当前 Web 页面不支持自定义 Authorization 请求头，token 主要用于 API 客户端。
+- The official complete tool set, profile/bundle format, runtime hot reload, and external npm plugins.
+- The official Web Host's authentication, authorization, pages, RPC, and multiplexing protocol; the current HTTP/SSE is a teaching API, not an officially compatible implementation.
+- Linux Landlock/bwrap and Windows isolation; currently only macOS Seatbelt exists, and without it enabled `read-only` conservatively rejects Shell.
+- The official `sandbox_permissions` escalation protocol and full Client integration of approval-cancellation notifications; currently only the session API and the approval-cancel result are supported.
+- The official complete terminal line buffering, OSC readiness protocol, PTY cross-process recovery, and Windows ConPTY; the current persistent backend supports only Unix `/bin/bash`.
+- Automatic Agent wakeup on job completion, cross-process job recovery, and a long-lived resident host.
+- Full attachment storage, image transformation/pricing, persistent upload indexes and quota recovery, extended request headers, and telemetry; the full model catalog metadata, background listing refresh, and the official generic LLM retry plugin are still unported.
+- The official complete event types, arbitrary-plugin message projection, format catalog, Zstandard, and Windows write lock; the teaching edition has only custom v0/v1/v2 JSONL generations and the surface slice.
+- The official compaction interval selection, token calibration, model-switch compaction, retry, and cancellation; the pruner uses teaching-edition metering events.
+- `read` has not yet implemented streaming scans of large files; `glob` has not yet fully replicated ripgrep semantics and spill behavior.
+- The anonymous user ID is stable only within the process and is not yet persisted.
+- No credentialed online acceptance run against the real DeepSeek service has been performed yet; the current Web page does not support custom Authorization headers, and the token is mainly used for API clients.
 
-## 已执行验证
+## Verification Performed
 
-- Mock Agent 的 `glob/read` 回归、功能开关和提示词组合。
-- 本地 Messages/SSE 两轮请求、reasoning signature 回放、工具结果回填和 JSONL 持久化。
-- 交错 SSE 内容块保持顺序、跨模型签名丢弃、HTTP 302 拒绝跟随。
-- 文件策略的允许、拒绝、无应答者失败关闭和审批审计。
-- 未读覆盖、读取后外部修改、多次匹配、`replace_all`、路径穿越和符号链接检查。
-- Mock CLI 的写入及先读后编辑流程。
-- Shell 前台/后台、超时转后台、增量读取、kill、并发上限和应用退出回收。
-- 大输出裁剪和落盘、环境凭据清理、任务会话事件。
-- 跨进程 resume、turn 递增、观察恢复、transcript、fork 及分支独立性。
-- 手动压缩保留原始事件并支持 resume；自动压力压缩、token meter 和功能开关。
-- 无效 context window 被拒绝；Shell 接入后的 write/edit 回归。
-- HTTP 健康、HTML、工具、run/resume/fork/compact 和会话 API。
-- SSE turn、assistant、run result 和 job 完成通知。
-- Bearer token 接受/拒绝；相同 prompt 的 10 个并发请求生成独立 session 且 JSONL 完整。
-- Python 3.9 editable 安装中同一发行包元数据重复时去重，不同发行包或导出发生同名冲突时拒绝。
-- 外部时钟插件默认 disabled 且不导入模块；配置文件和 CLI 启用后 active，工具真实执行并进入提示词。
-- Headless 实际运行 Mock 读取；Web 实际启动后健康、工具和外部插件元数据 API 正常，并完成浏览器端 SSE 运行。
-- 核心、Headless、Web、Desktop、外部插件均完成 wheel 构建；离线 wheel 安装的轻量包不含 pywebview，Web 静态资源完整。
-- Desktop wheel 安装 pywebview 后真实创建 macOS 窗口、加载新版页面、请求健康 API 并正常关闭；未验证官方 Electron 打包、签名或安装器。
-- 本地 Messages 服务模拟 429→500→成功，产生 RATE_LIMIT/SERVER 两次重试且成功；401 不重试，禁用重试后 429 立即失败。
-- `/models` 同源路由、认证、默认缓存、零缓存刷新、无效能力条目保留和返回值深拷贝隔离；列表超时归类 TIMEOUT。
-- 慢速 SSE 响应在取消后关闭 socket 并返回 ABORTED；重试等待也能取消且不会发起下一次请求。
-- 完整 HTTP 运行取消使 Bash 进程组 killed、JSONL 记录 aborted；并发 SSE 在其他运行完成后仍保持当前流。
-- 浏览器实际点击“停止运行”收到 `run/cancelled`；新开关和原有 Mock 文件读取回归通过。
-- 最终 wheel 包含取消、重试和 Web 资源，离线安装后实际执行 Mock `models` 成功。
-- 本地 Files/Messages 服务验证 multipart 字段、图片字节、beta header、文件引用和 base64 内联格式。
-- 上传缓存复用、Messages 重试不重复上传、auto 上传失败/无效文件 id 降级、required 失败关闭均通过。
-- 无效文件 id 缓存被清除，下一次重新上传；5 个并发请求只上传一次。
-- Files 列表、读取、删除及模型列表命令在本地服务上通过；CLI/HTTP 图片会话不含 base64，支持 transcript 和 resume。
-- 非图片内容、路径越界和附件哈希变化均被拒绝。
-- 本阶段最终 wheel 包含图片、Files 和更新后的 Web 资源，离线安装及 Mock `models` 命令通过。
-- 真实 Unix PTY 验证 cwd/export 跨调用保持、非零退出码、超时重置、exit 重置和应用回收。
-- Agent/Mock 持久工具验证插件替换、schema、HTTP 终端列表/kill、运行取消和 JSONL 重置事件。
-- 默认一次性 Bash 的 active 状态、工具描述和系统提示词保持不变。
-- 最终 wheel 包含 PTY 和终端事件资源；离线安装后实际执行持久 Bash，输出及退出码 0 均正确。
-- v0+截断尾部经 CLI repair 后保留原始字节备份、迁移 v1、补 TOOL_OUTCOME_UNKNOWN、关闭 step/turn 并可 resume。
-- 未开始工具调用补 TOOL_NOT_STARTED；fork 开放回合补 forked 且父会话原始字节不变。
-- 未来版本、seq 缺口和普通 load 截断均失败关闭；只有版本头加半行事件的恢复也通过。
-- 两个真实进程验证 flock 互斥及释放后的后继追加；HTTP repair 和 CLI migrate 通过。
-- resume 持锁时 job watcher 审计正常且条件等待及时唤醒；同 session HTTP 并发回合被拒绝，取消后释放。
-- 最终 wheel 包含版本迁移和恢复模块；离线安装后实际 run、resume、repair 成功，正常会话 repair 返回 changed=false。
-- 真实超长 Shell 工具结果从 9011 码点裁剪到 5159；原事件不变，模型投影含 PRUNE_MARKER 且保留头尾。
-- surface replacement 遮蔽原节点并保留替换位置；resume/fork 继承裁剪视图，重复 prune 为空。
-- transcript 保留原始工具全文；HTTP prune/surface 和 CLI surface/prune 均通过。
-- 修改工具调用身份和非消息事件的 replacement 在写入前被拒绝；Unicode 与图片块顺序测试通过。
-- 最终 wheel 包含 surface/pruner 和 Web 裁剪资源；离线安装后真实 Shell 长输出经 CLI prune 成功，surface 可读取 replacement。
-- 提问回答器、HTTP 待答列表/回答、运行取消和队列清理通过；question/answered 持久化。
-- todo_write 整表投影、turn/start 清空、单活跃拒绝、并行策略和 CLI todos 查询通过。
-- 本地 Web 重定向、HTML 脚本/隐藏内容移除、外链提示、搜索摘要 800 字上限和提示词段通过。
-- Web 深度 512 防护、输出上限、运行取消、私网/file scheme 拒绝和未配置 provider 错误均通过；未访问公网。
-- 四个新工具默认 disabled，不改变默认系统提示词。
-- 最终 wheel 包含 questions/todo/web_tools；离线安装后提问、待办、Web fetch/search 四条本地真实流程全部通过。
-- 本地 DeepSeek SSE 验证 text/reasoning 分片、usage、工具参数和最终响应一致；500 后重试事件的 attempt=2。
-- max-token 响应的工具调用和 replay 块被丢弃；真实 Agent 工具调用的 delta 带正确 run_id。
-- Mock fallback 和 core.streaming 禁用通过；300 条事件写入 256 队列后慢 listener 被移除，dropped_streams=1。
-- 浏览器实际运行后实时文本区显示 Mock 正文，原始事件区仍保留完整事件。
-- 最终 wheel 离线安装后，本地 DeepSeek 的真实 text delta 与 run_id 正确，慢 listener 溢出断开通过。
-- text/reasoning/tool/usage/finish 编解码往返保持顺序、字段和时间，非法 dt 被拒绝。
-- 真实 HTTP 断开后 Last-Event-ID 重连收到后续 assistant/result/done，不创建重复会话；未来 id 和历史截断被拒绝。
-- 压缩流随 assistant 事件保存，CLI/HTTP 展开读取通过；修复 Mock fallback 缺少 index 的问题。
-- core.stream-recording/core.sse-replay 禁用行为及既有背压回归通过。
-- 最终 wheel 离线安装后，本地 DeepSeek 分片可压缩保存、展开恢复文本，broker 历史可回放 assistant/message 和 turn/end。
-- 真实 50ms 超时后 pending 保留，HTTP 迟到回答投影为 answer_to_pending_question 并可 resume；取消后队列清空。
-- 浏览器在超时后通过图形表单提交自定义回答，待答面板正常关闭。
-- 最终 wheel 离线安装后，50ms 超时返回 pending，迟到回答写回原会话并可 resume，图形表单资源已打包。
-- 新会话产生不可变代际和 manifest；resume 后首代字节不变，fork 当前代为 2，repair/migrate 正常会话返回 unchanged。
-- v0/v1 迁移原文件不变，migrated 审计进入第 1 代，后续事件进入下一代，原始备份字节一致。
-- 外部修改当前代际后 SHA-256 校验失败；v0 截断尾部迁移、interrupted 恢复和 resume 通过。
-- 最终 wheel 包含 generations 模块；离线安装后新会话、resume 和 v1→v2 迁移通过，首代字节不变。
-- Seatbelt 实测 read-only 写入被内核拒绝，workspace-write 成功且 /var/tmp 越界写入被拒绝，/tmp 子路径规则通过。
-- sandbox/mode 与 approval/policy 切换、runtime context 更新、审批 cancelled 和迟到回答丢弃通过。
-- 持久 PTY 打开时 mode 切换被拒绝，kill 后新模式下写入被内核拒绝；默认非内核行为不变。
-- 最终 wheel 包含 seatbelt 后端；离线安装后工作区写入成功，越界写入和 read-only 写入均被内核拒绝。
-- 真实 Mock 委派启动子级读取 README，父级收到 subagent-settled；spawn 不含父指令，fork 包含已完成父历史。
-- 子级后续消息产生第二个 turn/end，最大深度拒绝、等待唤醒与非法 timeout、根级中断 aborted、HTTP 查询/消息和应用关闭回收通过。
-- 修复预留子 session id 丢失、继续会话误新建和根级中断权限遗漏；默认 subagent 功能全部 disabled，不改变原提示词。
-- 最终 wheel 包含 subagents 模块；离线安装后在独立工作区真实 spawn、读取文件和完成通知通过，父子两个 Session 均持久化。
-- 真实 JavaScript parallel 启动两个子 Agent 并返回文本数组；pipeline 两阶段无全局屏障，结构化对象及 index 正确。
-- process/require 不可见，未知 hook 选项、循环返回值和超过两个 Agent 的上限均失败关闭；普通 schema 结果可回到脚本。
-- 主动取消报告 cancelled，子级静止后 agent-end outcome=cancelled，Application 关闭同样回收运行；成功和失败均无悬挂控制进程。
-- 模型 workflow 工具前台结果、六类 SSE 生命周期和四类持久记录通过；修复跨 realm 对象、Node pending Promise 退出和控制管道竞态。
-- 最终 wheel 包含 Python 引擎和 workflow_guest.js；离线安装后真实运行两个子 Agent 并持久化三个独立 Session。
-- 后台发布生成独立 run/job id；增量 phase/log、最终结果单次投递、跨 owner 拒绝和 job 审计通过。
-- job_kill 映射 killed/cancelled 并等待子级静止；模型后台工具、job_output 和 HTTP session_id 列表/输出通过。
-- 重启后已完成结果可重读，未结算 managed job 标为 interrupted: host restarted；恢复审计 cause=recovery 且重复重启不重复补记。
-- 一次性 Bash 非零退出码和前台 workflow 回归通过；最终 wheel 离线安装后前台、后台及完成结果重启恢复通过。
-- 独立 stdio fixture 验证 initialize、分页发现、真实 echo、资源列表/读取、服务器指令和独立 probe；二进制只显示长度。
-- Streamable HTTP 验证 JSON/SSE 响应、MCP-Session-Id、凭据模板及结构化结果；未使用真实凭据。
-- 通知新增工具、远程重名保留旧代、恢复清除错误、RunCancelled 与 notifications/cancelled、管理启停/probe 和资源清理通过。
-- 最终 wheel 离线安装后真实 stdio MCP 工具与资源调用通过，关闭后子进程退出。
-- 真实 skill 文件验证初始目录、模型加载、隐藏模型的用户手势、描述更新、正文重读和空目录替换。
-- 项目/custom/runtime 优先级、严格布尔、发现不完整与恢复、user-invocable=false 拒绝、HTTP 和 CLI 加载通过。
-- 最终 wheel 离线安装后 skill 工具、/name 注入和目录替换通过；默认配置不产生 skill 工具或目录。
-- Cron 工作时刻、月末最后一个工作日 BYSETPOS=-1、DAILY COUNT=2 耗尽和 DTSTART 默认值通过；修复 aware/naive 比较与负索引。
-- 创建/暂停/恢复/冲突、真实一秒定时回执、new_once 新会话、历史、pending 和 v2 存储通过。
-- 重启只投递一次并推进未来时点，运行中目标队列注入、委派拒绝、HTTP 管理和默认不可见通过。
-- 最终 wheel 离线安装后真实定时投递、回执和重启追赶通过。
-- Goal 创建/编辑/陈旧 revision/暂停恢复/完成替换/clear 通过；恢复与 fork 后 active 但 disarmed，显式 resume 后 armed。
-- 两个真实 Goal Round 耗尽后产生 round-limit，模型第二轮完成后只产生一次 goal-wrapup 和最终总结。
-- 非人类创建、提前阻塞、HTTP/CLI 控制、损坏 revision 回放失败关闭和默认不可见通过。
-- 最终 wheel 离线安装后连续 Round、round-limit、恢复 disarmed 和显式 resume 通过。
-- 真实 TypeScript 嵌套 read、console 日志、ToolCallError、并行只读和 PTC 模型/schema 投影通过；修复顶层 return 的擦除包装。
-- REPL 两次调用保留变量，per-call 隔离和重启清空通过；修复 REPL stdout 混流、重复读取者与持久管道误关闭。
-- 同步死循环 timeout、取消 abort、子调用额度、输出上限、invalid-output、exception 和进程回收通过。
-- Seatbelt 下 Node 读取成功且 read-only 写入被内核拒绝，模型 run_code 返回结构化结果；最终 wheel 的两种执行模式通过。
-- standard 的 read/glob、minimal 完整 persona 和无 runtime context、空白重复选择幂等、首回合后拒绝与子 Agent 继承通过。
-- scoped PTC SDK 可读取允许文件，删除的 write 经 RPC 仍报工具不存在；HTTP 与 CLI 的列表/选择通过。
-- 最终 wheel 离线安装后 preset 隔离、完整 persona 和 scoped PTC 权限通过。
+- Mock Agent `glob/read` regression, feature toggles, and prompt composition.
+- Two-round local Messages/SSE requests, reasoning signature replay, tool-result backfill, and JSONL persistence.
+- Interleaved SSE content blocks keep their order, cross-model signatures are discarded, and HTTP 302 following is refused.
+- File-policy allow, deny, no-responder fail-closed, and approval audit.
+- Unread overwrite, external modification after a read, multiple matches, `replace_all`, path traversal, and symlink checks.
+- Mock CLI write and read-before-edit flows.
+- Shell foreground/background, timeout-to-background, incremental reads, kill, concurrency caps, and application-exit reaping.
+- Large-output pruning and spooling, environment credential scrubbing, and job session events.
+- Cross-process resume, turn increments, observation restoration, transcript, fork, and branch independence.
+- Manual compaction preserves original events and supports resume; automatic pressure compaction, token meter, and feature toggles.
+- An invalid context window is rejected; write/edit regression after Shell integration.
+- HTTP health, HTML, tools, run/resume/fork/compact, and session APIs.
+- SSE turn, assistant, run result, and job completion notifications.
+- Bearer token acceptance/rejection; 10 concurrent requests with the same prompt generate independent sessions with intact JSONL.
+- In a Python 3.9 editable install, duplicate metadata from the same distribution is deduplicated, and same-name conflicts from different distributions or exports are rejected.
+- The external clock plugin is disabled by default and its module is not imported; after enabling via the config file and CLI it is active, its tool really executes, and it enters the prompt.
+- Headless actually runs a Mock read; after Web actually starts, the health, tools, and external-plugin metadata APIs work, and a browser-side SSE run completes.
+- The core, Headless, Web, Desktop, and external plugin all build wheels; the lightweight package from an offline wheel install contains no pywebview, and the Web static assets are complete.
+- After installing pywebview into the Desktop wheel, it really creates a macOS window, loads the new page, calls the health API, and closes cleanly; official Electron packaging, signing, and installers are not verified.
+- A local Messages service simulates 429→500→success, producing two RATE_LIMIT/SERVER retries and then success; 401 is not retried, and 429 fails immediately when retries are disabled.
+- `/models` same-origin routing, authentication, default caching, zero-cache refresh, retention of entries with invalid capabilities, and deep-copy isolation of return values; a listing timeout is classified as TIMEOUT.
+- A slow SSE response closes the socket and returns ABORTED after cancellation; a retry wait is also cancellable and does not issue the next request.
+- Cancelling a full HTTP run kills the Bash process group and records aborted in JSONL; a concurrent SSE keeps its current stream after other runs finish.
+- Clicking "Stop run" in the browser actually receives `run/cancelled`; the new toggles and the existing Mock file-read regression pass.
+- The final wheel contains cancellation, retry, and Web assets; after offline installation, a real Mock `models` execution succeeds.
+- A local Files/Messages service verifies multipart fields, image bytes, the beta header, file references, and the base64 inline format.
+- Upload-cache reuse, Messages retries without re-uploading, auto downgrade on upload failure/invalid file id, and required fail-closed all pass.
+- An invalid file id's cache entry is cleared and the next attempt re-uploads; 5 concurrent requests upload only once.
+- Files list, read, delete, and model-listing commands pass against the local service; CLI/HTTP image sessions contain no base64 and support transcript and resume.
+- Non-image content, out-of-bounds paths, and attachment hash changes are all rejected.
+- This stage's final wheel contains images, Files, and updated Web assets; offline installation and the Mock `models` command pass.
+- A real Unix PTY verifies cwd/export persistence across calls, non-zero exit codes, timeout reset, exit reset, and application reaping.
+- Agent/Mock persistent-tool tests verify plugin replacement, schema, HTTP terminal list/kill, run cancellation, and JSONL reset events.
+- The default one-shot Bash's active state, tool description, and system prompt remain unchanged.
+- The final wheel contains PTY and terminal-event assets; after offline installation, a real persistent Bash execution produces correct output and exit code 0.
+- After CLI repair of a v0 file with a truncated tail, the original bytes are backed up, it migrates to v1, TOOL_OUTCOME_UNKNOWN is appended, the step/turn is closed, and it can resume.
+- A never-started tool call gets TOOL_NOT_STARTED; fork patches an open turn with forked while the parent session's original bytes stay unchanged.
+- Future versions, seq gaps, and truncated normal loads all fail closed; recovery of only a version header plus a half-line event also passes.
+- Two real processes verify flock mutual exclusion and subsequent appends after release; HTTP repair and CLI migrate pass.
+- While resume holds the lock, job watcher auditing works and the conditional wait wakes promptly; concurrent HTTP turns on the same session are rejected and released after cancellation.
+- The final wheel contains the version-migration and recovery modules; after offline installation, real run, resume, and repair succeed, and repairing a healthy session returns changed=false.
+- A real over-long Shell tool result is pruned from 9011 to 5159 code points; the original events are unchanged, and the model projection contains PRUNE_MARKER while keeping the head and tail.
+- Surface replacement shadows the original node while keeping the replacement position; resume/fork inherit the pruned view, and a repeated prune is empty.
+- Transcript keeps the original full tool output; HTTP prune/surface and CLI surface/prune both pass.
+- Replacements that change tool-call identity and those on non-message events are rejected before writing; Unicode and image-block ordering tests pass.
+- The final wheel contains surface/pruner and Web prune assets; after offline installation, a real long Shell output is pruned via the CLI, and the surface can read the replacement.
+- The question answerer, HTTP pending-list/answer, run cancellation, and queue cleanup pass; question/answered are persisted.
+- todo_write whole-table projection, turn/start clearing, single-active rejection, the parallel policy, and CLI todos queries pass.
+- Local Web redirect, HTML script/hidden-content removal, external-link notice, the 800-character search-summary cap, and the prompt section pass.
+- Web depth-512 protection, the output cap, run cancellation, private-network/file-scheme rejection, and the unconfigured-provider error all pass; the public internet was not accessed.
+- The four new tools are disabled by default and do not change the default system prompt.
+- The final wheel contains questions/todo/web_tools; after offline installation, all four local real flows for questions, todos, Web fetch, and search pass.
+- A local DeepSeek SSE verifies text/reasoning fragments, usage, tool arguments, and consistency with the final response; the retry event after a 500 has attempt=2.
+- Tool calls and replay blocks in a max-token response are discarded; deltas from a real Agent tool call carry the correct run_id.
+- Mock fallback and disabling core.streaming pass; after 300 events are written to a 256 queue, the slow listener is removed with dropped_streams=1.
+- After a real browser run, the live text area shows the Mock body while the raw-event area still keeps the complete events.
+- After offline installation of the final wheel, real text deltas from a local DeepSeek have correct run_ids, and slow-listener overflow disconnection passes.
+- text/reasoning/tool/usage/finish codec round-trips preserve order, fields, and timing, and an invalid dt is rejected.
+- After a real HTTP disconnect, a Last-Event-ID reconnect receives the subsequent assistant/result/done without creating a duplicate session; future ids and history truncation are rejected.
+- The compressed stream is saved with the assistant event, and CLI/HTTP expanded reads pass; a missing index in Mock fallback was fixed.
+- Disabling core.stream-recording/core.sse-replay and the existing backpressure regression pass.
+- After offline installation of the final wheel, local DeepSeek fragments are compressed, saved, and expanded back to text, and the broker history replays assistant/message and turn/end.
+- After a real 50ms timeout the pending question is retained, a late HTTP answer is projected as answer_to_pending_question and can resume, and the queue is cleared after cancellation.
+- After the timeout, the browser submits a custom answer through the graphical form, and the pending panel closes normally.
+- After offline installation of the final wheel, a 50ms timeout returns pending, a late answer is written back to the original session and can resume, and the graphical-form assets are bundled.
+- A new session produces immutable generations and a manifest; after resume the first generation's bytes are unchanged, fork's current generation is 2, and repair/migrate on a healthy session returns unchanged.
+- v0/v1 migration leaves the original file unchanged, the migrated audit goes into generation 1, subsequent events go into the next generation, and the original backup bytes match.
+- Externally modifying the current generation makes the SHA-256 check fail; v0 truncated-tail migration, interrupted recovery, and resume pass.
+- The final wheel contains the generations module; after offline installation, new sessions, resume, and v1→v2 migration pass, with the first generation's bytes unchanged.
+- Seatbelt testing shows read-only writes rejected by the kernel, workspace-write succeeding while out-of-bounds /var/tmp writes are rejected, and the /tmp subpath rule passing.
+- sandbox/mode and approval/policy switching, runtime-context updates, the cancelled approval, and late-answer discarding pass.
+- Mode switching is rejected while a persistent PTY is open; after kill, a write under the new mode is rejected by the kernel; the default non-kernel behavior is unchanged.
+- The final wheel contains the seatbelt backend; after offline installation, workspace writes succeed while out-of-bounds writes and read-only writes are rejected by the kernel.
+- A real Mock delegation starts a child that reads README, and the parent receives subagent-settled; spawn excludes the parent instructions, and fork includes the completed parent history.
+- A later child message produces a second turn/end; max-depth rejection, wait wakeup and invalid timeout, root-level interrupt aborted, HTTP query/message, and application-shutdown reaping pass.
+- Fixed the lost reserved child session id, session continuation wrongly creating a new session, and the missing root-level interrupt permission; all subagent features are disabled by default and do not change the original prompt.
+- The final wheel contains the subagents module; after offline installation, real spawn, file reading, and completion notification pass in a separate workspace, and both parent and child Sessions are persisted.
+- Real JavaScript parallel starts two child Agents and returns a text array; a two-stage pipeline has no global barrier, and the structured objects and index are correct.
+- process/require are invisible; unknown hook options, cyclic return values, and exceeding the two-Agent cap all fail closed; ordinary schema results can return to the script.
+- Active cancellation reports cancelled, agent-end has outcome=cancelled after the children go idle, and Application shutdown reaps runs likewise; neither success nor failure leaves stray control processes.
+- The model workflow tool's foreground result, the six SSE lifecycle types, and the four persistent record types pass; cross-realm objects, Node pending-Promise exit, and control-pipe races were fixed.
+- The final wheel contains the Python engine and workflow_guest.js; after offline installation, a real run of two child Agents persists three independent Sessions.
+- Background publication generates separate run/job ids; incremental phase/log, single final-result delivery, cross-owner rejection, and job auditing pass.
+- job_kill maps killed/cancelled and waits for children to go idle; the model background tool, job_output, and HTTP session_id list/output pass.
+- After restart, completed results are re-readable, and an unsettled managed job is marked interrupted: host restarted; the recovery audit has cause=recovery, and repeated restarts do not append it again.
+- One-shot Bash non-zero exit codes and the foreground workflow regression pass; after offline installation of the final wheel, foreground, background, and completed-result recovery across restart pass.
+- A standalone stdio fixture verifies initialize, paginated discovery, a real echo, resource list/read, server instructions, and standalone probe; binaries show only their length.
+- Streamable HTTP verifies JSON/SSE responses, MCP-Session-Id, credential templates, and structured results; no real credentials were used.
+- Notification-driven tool addition, remote duplicates keeping the old generation, recovery clearing errors, RunCancelled with notifications/cancelled, management enable/disable/probe, and resource cleanup pass.
+- After offline installation of the final wheel, real stdio MCP tool and resource calls pass, and the child process exits after shutdown.
+- Real skill files verify the initial catalog, model loading, user-triggered loading of skills hidden from the model, description updates, body re-reads, and empty-catalog replacement.
+- project/custom/runtime priority, strict booleans, incomplete discovery and recovery, user-invocable=false rejection, and HTTP and CLI loading pass.
+- After offline installation of the final wheel, the skill tool, /name injection, and catalog replacement pass; the default configuration produces no skill tool or catalog.
+- Cron working-time instants, last weekday of the month with BYSETPOS=-1, DAILY COUNT=2 exhaustion, and the DTSTART default pass; aware/naive comparison and negative indexing were fixed.
+- Create/pause/resume/conflict, a real one-second scheduled receipt, new_once's new session, history, pending, and v2 storage pass.
+- Restart delivers once and advances future instants, and queue injection for a running target, delegation rejection, HTTP management, and default invisibility pass.
+- After offline installation of the final wheel, real scheduled delivery, receipts, and restart catch-up pass.
+- Goal create/edit/stale revision/pause-resume/complete-replacement/clear pass; after recovery and fork it is active but disarmed, and armed after an explicit resume.
+- Two real Goal Rounds exhausting produce round-limit, and after the model finishes the second round there is exactly one goal-wrapup and final summary.
+- Non-human creation, early blocking, HTTP/CLI control, corrupt-revision replay fail-closed, and default invisibility pass.
+- After offline installation of the final wheel, consecutive Rounds, round-limit, disarmed-after-recovery, and explicit resume pass.
+- Real TypeScript nested read, console logs, ToolCallError, parallel read-only calls, and PTC model/schema projection pass; the stripping wrapper for a top-level return was fixed.
+- Two REPL calls retain variables, and per-call isolation and clearing on restart pass; REPL stdout interleaving, duplicate readers, and persistent-pipe false closes were fixed.
+- Synchronous infinite-loop timeout, cancel abort, child-call quota, output cap, invalid-output, exception, and process reaping pass.
+- Under Seatbelt, Node reads succeed while read-only writes are rejected by the kernel, and the model's run_code returns a structured result; both execution modes pass in the final wheel.
+- standard's read/glob, minimal's complete persona and absence of runtime context, idempotent repeated selection on a blank session, rejection after the first turn, and child-Agent inheritance pass.
+- The scoped PTC SDK can read allowed files, and a removed write still reports tool-not-found via RPC; HTTP and CLI listing/selection pass.
+- After offline installation of the final wheel, preset isolation, the complete persona, and scoped PTC permissions pass.
 
-后续修改如果改变上述已对齐行为，必须在 Git 变更中同时修改本文件并说明原因；升级上游 commit 时必须重新核对，不得静默替换提示词或协议。
+If a later change alters any of the aligned behavior above, this file must be updated in the same Git change with an explanation; when upgrading the upstream commit, the claims must be re-verified, and prompts or protocols must never be silently replaced.

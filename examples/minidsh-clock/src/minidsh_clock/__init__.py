@@ -6,7 +6,7 @@ from minidsh.tools import Execution, SingleToolPlugin, Tool
 
 def current_time(arguments: Dict[str, object], execution: Execution) -> str:
     if arguments:
-        raise ValueError("current_time 不接受参数")
+        raise ValueError("current_time does not accept arguments")
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 

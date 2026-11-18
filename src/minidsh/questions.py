@@ -34,46 +34,46 @@ class PendingQuestion:
 
 def validate_questions(value: object) -> List[Dict[str, object]]:
     if not isinstance(value, list) or not value:
-        raise ToolError("questions 必须是非空数组")
+        raise ToolError("questions must be a non-empty array")
     questions: List[Dict[str, object]] = []
     ids = set()
     for raw in value:
         if not isinstance(raw, dict):
-            raise ToolError("question 必须是对象")
+            raise ToolError("question must be an object")
         question_id = raw.get("id")
         text = raw.get("question")
         if not isinstance(question_id, str) or not question_id or question_id in ids:
-            raise ToolError("question id 必须非空且在本次调用中唯一")
+            raise ToolError("question id must be non-empty and unique within this call")
         if not isinstance(text, str) or not text.strip():
-            raise ToolError("question 必须是非空字符串")
+            raise ToolError("question must be a non-empty string")
         ids.add(question_id)
         question: Dict[str, object] = {"id": question_id, "question": text}
         if raw.get("header") is not None:
             if not isinstance(raw["header"], str):
-                raise ToolError("header 必须是字符串")
+                raise ToolError("header must be a string")
             question["header"] = raw["header"]
         options = raw.get("options", [])
         if not isinstance(options, list):
-            raise ToolError("options 必须是数组")
+            raise ToolError("options must be an array")
         normalized_options = []
         labels = set()
         for option in options:
             if not isinstance(option, dict) or not isinstance(option.get("label"), str) or not option["label"]:
-                raise ToolError("option label 必须是非空字符串")
+                raise ToolError("option label must be a non-empty string")
             if option["label"] in labels:
-                raise ToolError("option label 不能重复")
+                raise ToolError("option labels must not be duplicated")
             labels.add(option["label"])
             normalized = {"label": option["label"]}
             if option.get("description") is not None:
                 if not isinstance(option["description"], str):
-                    raise ToolError("option description 必须是字符串")
+                    raise ToolError("option description must be a string")
                 normalized["description"] = option["description"]
             normalized_options.append(normalized)
         if normalized_options:
             question["options"] = normalized_options
         multi_select = raw.get("multi_select", False)
         if not isinstance(multi_select, bool):
-            raise ToolError("multi_select 必须是布尔值")
+            raise ToolError("multi_select must be a boolean")
         question["multi_select"] = multi_select
         questions.append(question)
     return questions
@@ -81,31 +81,31 @@ def validate_questions(value: object) -> List[Dict[str, object]]:
 
 def validate_answers(questions: List[Dict[str, object]], value: object) -> Dict[str, object]:
     if not isinstance(value, dict) or not isinstance(value.get("answers"), list):
-        raise ToolError("answers 必须是数组")
+        raise ToolError("answers must be an array")
     by_id = {str(question["id"]): question for question in questions}
     answers: List[Dict[str, object]] = []
     seen = set()
     for raw in value["answers"]:
         if not isinstance(raw, dict) or raw.get("id") not in by_id or raw["id"] in seen:
-            raise ToolError("answer id 必须匹配且不能重复")
+            raise ToolError("answer id must match a question and must not be repeated")
         question = by_id[raw["id"]]
         seen.add(raw["id"])
         selected = raw.get("selected", [])
         if not isinstance(selected, list) or any(not isinstance(item, str) for item in selected):
-            raise ToolError("selected 必须是字符串数组")
+            raise ToolError("selected must be an array of strings")
         labels = {option["label"] for option in question.get("options", [])}
         if any(item not in labels for item in selected):
-            raise ToolError("selected 包含未知选项")
+            raise ToolError("selected contains an unknown option")
         if not question.get("multi_select") and len(selected) > 1:
-            raise ToolError("单选问题不能选择多个选项")
+            raise ToolError("a single-select question cannot have multiple selected options")
         answer: Dict[str, object] = {"id": raw["id"], "selected": selected}
         if raw.get("custom") is not None:
             if not isinstance(raw["custom"], str):
-                raise ToolError("custom 必须是字符串")
+                raise ToolError("custom must be a string")
             answer["custom"] = raw["custom"]
         answers.append(answer)
     if seen != set(by_id):
-        raise ToolError("每个问题都必须有 answer；跳过时使用空 selected")
+        raise ToolError("every question must have an answer; use an empty selected array to skip")
     return {"answers": answers}
 
 
@@ -133,7 +133,7 @@ class UserQuestionService:
             except RunCancelled:
                 raise
             except Exception as exc:
-                raise ToolError(f"用户提问不可用: {exc}") from exc
+                raise ToolError(f"user questions are unavailable: {exc}") from exc
         else:
             result = self._wait(payload, execution, timeout)
         if "answers" in result and session is not None and execution.session_id is not None:
@@ -176,7 +176,7 @@ class UserQuestionService:
                             return {"pending": True, "callId": execution.call_id, "message": PENDING_NOTICE}
                         pending.condition.wait(remaining)
                 if pending.cancelled:
-                    raise RunCancelled("用户提问服务已关闭")
+                    raise RunCancelled("user question service is closed")
                 if token is not None:
                     token.throw_if_cancelled()
                 return pending.answers
@@ -208,7 +208,7 @@ class UserQuestionService:
         result = validate_answers(pending.questions, value)
         with pending.condition:
             if pending.answers is not None or pending.cancelled:
-                raise ValueError("问题已经结束")
+                raise ValueError("question is already closed")
             pending.answers = result
             pending.condition.notify_all()
         if pending.returned:
@@ -264,7 +264,7 @@ class AskUserPlugin(Plugin):
         self.timed = timed
         self.default_timeout = float(os.environ.get("MINIDSH_ASK_TIMEOUT_SECONDS", "120")) if timed else None
         if self.default_timeout is not None and self.default_timeout != -1 and self.default_timeout <= 0:
-            raise ValueError("MINIDSH_ASK_TIMEOUT_SECONDS 必须是 -1 或正数")
+            raise ValueError("MINIDSH_ASK_TIMEOUT_SECONDS must be -1 or positive")
 
     def activate(self, ctx: ServiceContext) -> None:
         registry = ctx.require("tools")
@@ -313,7 +313,7 @@ class AskUserPlugin(Plugin):
             if self.timed and "timeout" in arguments:
                 timeout = arguments["timeout"]
                 if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or (timeout != -1 and timeout <= 0):
-                    raise ToolError("timeout 必须是 -1 或正数")
+                    raise ToolError("timeout must be -1 or positive")
             return json.dumps(questions.ask(normalized, execution, timeout), ensure_ascii=False)
 
         registry.register(

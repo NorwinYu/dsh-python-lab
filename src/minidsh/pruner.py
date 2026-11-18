@@ -18,9 +18,9 @@ class PruneConfig:
 
     def __post_init__(self) -> None:
         if self.threshold_chars <= 0 or self.head_chars < 0 or self.tail_chars < 0:
-            raise ValueError("pruner 阈值必须为正整数，头尾长度不能为负数")
+            raise ValueError("pruner threshold must be a positive integer; head and tail lengths must not be negative")
         if self.head_chars + len(PRUNE_MARKER) + self.tail_chars > self.threshold_chars:
-            raise ValueError("pruner 头部、标记和尾部总长度不能超过阈值")
+            raise ValueError("the combined pruner head, marker, and tail length must not exceed the threshold")
 
     @classmethod
     def from_env(cls) -> "PruneConfig":
@@ -31,7 +31,7 @@ class PruneConfig:
                 int(os.environ.get("MINIDSH_PRUNE_TAIL_CHARS", "1024")),
             )
         except ValueError as exc:
-            raise ValueError("pruner 数值配置无效") from exc
+            raise ValueError("invalid pruner numeric configuration") from exc
 
 
 def measure_content(blocks: List[Dict[str, object]]) -> int:
@@ -69,9 +69,9 @@ class ToolResultPruner:
                 result.append({**block, "text": replacement})
             consumed = block_end
         if not marker_inserted:
-            raise RuntimeError("tool-result prune 无法定位裁剪区间")
+            raise RuntimeError("tool-result prune could not locate the trim range")
         if measure_content(result) >= total or measure_content(result) > self.config.threshold_chars:
-            raise RuntimeError("tool-result prune 结果必须更小且在阈值内")
+            raise RuntimeError("tool-result prune result must be smaller and within the threshold")
         return result
 
     def prune(self, session_id: str) -> Dict[str, object]:
@@ -85,7 +85,7 @@ class ToolResultPruner:
                 original = event["payload"]
                 content = original.get("content", [])
                 if not isinstance(content, list):
-                    raise ValueError("tool result content 必须是数组")
+                    raise ValueError("tool result content must be an array")
                 replacement_content = self.prune_content(content)
                 if replacement_content is None:
                     continue

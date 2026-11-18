@@ -101,13 +101,13 @@ class SessionStore(ABC):
         return nullcontext()
 
     def repair(self, session_id: str) -> Dict[str, object]:
-        raise RuntimeError("当前会话存储不支持恢复")
+        raise RuntimeError("the current session store does not support repair")
 
     def migrate(self, session_id: str) -> Dict[str, object]:
-        raise RuntimeError("当前会话存储不支持迁移")
+        raise RuntimeError("the current session store does not support migration")
 
     def migrate_all(self) -> List[Dict[str, object]]:
-        raise RuntimeError("当前会话存储不支持迁移")
+        raise RuntimeError("the current session store does not support migration")
 
 
 @dataclass
@@ -144,7 +144,7 @@ class JsonlSessionStore(SessionStore):
 
     def _path(self, session_id: str) -> Path:
         if not SESSION_ID.fullmatch(session_id):
-            raise ValueError("无效 session id")
+            raise ValueError("invalid session id")
         return self.root / f"{session_id}.jsonl"
 
     def _session_ids(self) -> List[str]:
@@ -165,7 +165,7 @@ class JsonlSessionStore(SessionStore):
             held = self._leases.get(session_id)
             if held is not None:
                 if held["thread"] != thread_id:
-                    raise SessionAlreadyOwnedError(f"会话正在被另一个写入者使用: {session_id}")
+                    raise SessionAlreadyOwnedError(f"session is in use by another writer: {session_id}")
                 held["depth"] = int(held["depth"]) + 1
                 return
             path = self._lock_path(session_id)
@@ -176,14 +176,14 @@ class JsonlSessionStore(SessionStore):
             except OSError as exc:
                 handle.close()
                 if exc.errno in {errno.EAGAIN, errno.EWOULDBLOCK}:
-                    raise SessionAlreadyOwnedError(f"会话已被其他进程锁定: {session_id}") from exc
+                    raise SessionAlreadyOwnedError(f"session is locked by another process: {session_id}") from exc
                 raise
             held_stat = os.fstat(handle.fileno())
             current_stat = path.stat()
             if (held_stat.st_dev, held_stat.st_ino) != (current_stat.st_dev, current_stat.st_ino):
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
                 handle.close()
-                raise SessionAlreadyOwnedError(f"会话锁路径发生变化，请重试: {session_id}")
+                raise SessionAlreadyOwnedError(f"session lock path changed; try again: {session_id}")
             self._leases[session_id] = {"thread": thread_id, "depth": 1, "handle": handle}
 
     def _release(self, session_id: str) -> None:
@@ -191,7 +191,7 @@ class JsonlSessionStore(SessionStore):
         with self._lock:
             held = self._leases.get(session_id)
             if held is None or held["thread"] != thread_id:
-                raise RuntimeError("会话写锁不属于当前线程")
+                raise RuntimeError("session write lock is not held by the current thread")
             depth = int(held["depth"]) - 1
             if depth > 0:
                 held["depth"] = depth
@@ -208,47 +208,47 @@ class JsonlSessionStore(SessionStore):
             return ReadResult([], SESSION_FORMAT_VERSION, False, b"")
         raw = generated[0] if generated is not None else path.read_bytes()
         if not raw:
-            raise SessionCorruptionError(f"会话文件为空: {session_id}")
+            raise SessionCorruptionError(f"session file is empty: {session_id}")
         torn = not raw.endswith(b"\n")
         if torn and not allow_torn:
-            raise SessionCorruptionError(f"会话末尾存在不完整记录，请先 repair: {session_id}")
+            raise SessionCorruptionError(f"incomplete record at the end of the session; run repair first: {session_id}")
         committed = raw
         if torn:
             last_newline = raw.rfind(b"\n")
             if last_newline < 0:
-                raise SessionCorruptionError(f"会话没有可恢复的完整记录: {session_id}")
+                raise SessionCorruptionError(f"session has no complete record that can be recovered: {session_id}")
             committed = raw[: last_newline + 1]
         try:
             lines = committed.decode("utf-8").splitlines()
         except UnicodeDecodeError as exc:
-            raise SessionCorruptionError(f"会话不是有效 UTF-8: {session_id}") from exc
+            raise SessionCorruptionError(f"session is not valid UTF-8: {session_id}") from exc
         if not lines:
-            raise SessionCorruptionError(f"会话没有版本头或事件: {session_id}")
+            raise SessionCorruptionError(f"session has no version header or events: {session_id}")
         try:
             first = json.loads(lines[0])
         except json.JSONDecodeError as exc:
-            raise SessionCorruptionError(f"会话首行无效: {session_id}") from exc
+            raise SessionCorruptionError(f"invalid first line in session: {session_id}") from exc
         version = 0
         event_lines = lines
         if generated is not None and first.get("record") != HEADER_RECORD:
-            raise SessionCorruptionError("代际缺少版本头")
+            raise SessionCorruptionError("generation is missing its version header")
         if isinstance(first, dict) and first.get("record") == HEADER_RECORD:
             version = first.get("format")
             if not isinstance(version, int) or isinstance(version, bool):
-                raise SessionCorruptionError("会话版本头格式无效")
+                raise SessionCorruptionError("invalid session version header format")
             if version > SESSION_FORMAT_VERSION:
-                raise SessionFormatUnsupportedError(f"不支持的未来会话格式: v{version}")
+                raise SessionFormatUnsupportedError(f"unsupported future session format: v{version}")
             if version not in {1, SESSION_FORMAT_VERSION}:
-                raise SessionFormatUnsupportedError(f"不支持的会话版本头: v{version}")
+                raise SessionFormatUnsupportedError(f"unsupported session version header: v{version}")
             if first.get("session_id") != session_id:
-                raise SessionCorruptionError("会话版本头与文件名不一致")
+                raise SessionCorruptionError("session version header does not match the file name")
             event_lines = lines[1:]
         events: List[Dict[str, object]] = []
         for index, line in enumerate(event_lines):
             try:
                 event = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise SessionCorruptionError(f"会话第 {index + 1} 个事件 JSON 无效") from exc
+                raise SessionCorruptionError(f"invalid JSON in session event {index + 1}") from exc
             self._validate_event(event, session_id, index)
             events.append(event)
         fold_surface(events)
@@ -257,22 +257,22 @@ class JsonlSessionStore(SessionStore):
     @staticmethod
     def _validate_event(event: object, session_id: str, sequence: int) -> None:
         if not isinstance(event, dict):
-            raise SessionCorruptionError("会话事件必须是对象")
+            raise SessionCorruptionError("session event must be an object")
         if event.get("session_id") != session_id:
-            raise SessionCorruptionError("会话事件身份不一致")
+            raise SessionCorruptionError("session event identity mismatch")
         if event.get("seq") != sequence or isinstance(event.get("seq"), bool):
-            raise SessionCorruptionError(f"会话事件 seq 不连续: 预期 {sequence}")
+            raise SessionCorruptionError(f"session event seq is not contiguous: expected {sequence}")
         if not isinstance(event.get("type"), str) or not event["type"]:
-            raise SessionCorruptionError("会话事件类型无效")
+            raise SessionCorruptionError("invalid session event type")
         if not isinstance(event.get("payload"), dict):
-            raise SessionCorruptionError("会话事件 payload 必须是对象")
+            raise SessionCorruptionError("session event payload must be an object")
         if not isinstance(event.get("created_at"), str):
-            raise SessionCorruptionError("会话事件时间无效")
+            raise SessionCorruptionError("invalid session event timestamp")
         if event["type"] == "assistant/message" and "stream" in event["payload"]:
             try:
                 expand_stream(event["payload"]["stream"])
             except ValueError as exc:
-                raise SessionCorruptionError(f"assistant 压缩流无效: {exc}") from exc
+                raise SessionCorruptionError(f"invalid assistant compaction stream: {exc}") from exc
 
     def load(self, session_id: str) -> List[Dict[str, object]]:
         with self._lock:
@@ -336,7 +336,7 @@ class JsonlSessionStore(SessionStore):
         if path.exists():
             stored = self._read(session_id)
             if stored.torn:
-                raise SessionCorruptionError("写入前必须先修复不完整末尾")
+                raise SessionCorruptionError("repair the incomplete tail before writing")
             if stored.version < 2:
                 backup = backup_original(self.root, session_id, stored.raw)
                 self._publish_migration(session_id, stored, backup)
@@ -407,10 +407,10 @@ class JsonlSessionStore(SessionStore):
                 raise ValueError(f"unknown session {session_id}")
             if at_seq is not None:
                 if not isinstance(at_seq, int) or isinstance(at_seq, bool) or at_seq < 0:
-                    raise ValueError("at_seq 必须是非负整数")
+                    raise ValueError("at_seq must be a non-negative integer")
                 events = [event for event in events if event["seq"] <= at_seq]
                 if not events:
-                    raise ValueError("fork 位置没有可保留事件")
+                    raise ValueError("the fork position has no events to retain")
             closers = open_turn_closers(events, "forked")
             fork_id = uuid.uuid4().hex
             copied_events = []
@@ -430,7 +430,7 @@ class JsonlSessionStore(SessionStore):
                     }
                 )
             if self._path(fork_id).exists() or read_current(self.root, fork_id) is not None:
-                raise ValueError("fork 会话 ID 冲突")
+                raise ValueError("fork session ID conflict")
             publish(self.root, fork_id, copied_events)
             self.append(fork_id, "session/fork", {"source_session_id": session_id, "at_seq": at_seq})
             return fork_id

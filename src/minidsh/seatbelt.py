@@ -11,7 +11,7 @@ class SeatbeltUnavailableError(RuntimeError):
 def _subpath(path: Path) -> str:
     value = str(path.resolve())
     if "\0" in value:
-        raise ValueError("路径不能包含 NUL")
+        raise ValueError("path must not contain NUL")
     return value
 
 

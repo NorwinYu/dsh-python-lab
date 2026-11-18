@@ -117,23 +117,23 @@ class SseBroker:
 
     def replay(self, session_id: str, last_event_id: object) -> EventListener:
         if not self.replay_enabled:
-            raise RuntimeError("core.sse-replay 当前被禁用")
+            raise RuntimeError("core.sse-replay is currently disabled")
         if isinstance(last_event_id, bool):
-            raise ValueError("Last-Event-ID 必须是整数")
+            raise ValueError("Last-Event-ID must be an integer")
         try:
             last_id = int(last_event_id)
         except (TypeError, ValueError) as exc:
-            raise ValueError("Last-Event-ID 必须是整数") from exc
+            raise ValueError("Last-Event-ID must be an integer") from exc
         if last_id < 0:
-            raise ValueError("Last-Event-ID 不能为负数")
+            raise ValueError("Last-Event-ID must not be negative")
         if last_id > self._event_sequence:
-            raise ValueError("Last-Event-ID 不能指向未来事件")
+            raise ValueError("Last-Event-ID must not point to a future event")
         with self._history_lock:
             known = [message for message in self._history if self._belongs(message, session_id)]
             if not known:
-                raise ValueError(f"没有该 session 的可恢复事件: {session_id}")
+                raise ValueError(f"no recoverable events for session: {session_id}")
             if self._history and last_id < int(self._history[0]["id"]) - 1:
-                raise ValueError("Last-Event-ID 已超出历史环，无法完整恢复")
+                raise ValueError("Last-Event-ID is outside the history ring; full replay is not possible")
             listener = self.subscribe()
             listener.replay = True
             listener.session_id = session_id
@@ -150,7 +150,7 @@ class SseBroker:
 
     def cancel(self, run_id: str) -> bool:
         if not self.cancellation_enabled:
-            raise RuntimeError("core.cancellation 当前被禁用")
+            raise RuntimeError("core.cancellation is currently disabled")
         with self._cancellation_lock:
             token = self._cancellations.get(run_id)
         return token.cancel() if token is not None else False
@@ -162,7 +162,7 @@ class SseBroker:
         if session_id is not None:
             with self._cancellation_lock:
                 if session_id in self._session_runs:
-                    raise RuntimeError(f"会话已有正在运行的回合: {session_id}")
+                    raise RuntimeError(f"session already has a running turn: {session_id}")
                 self._session_runs[session_id] = operation_id
         listener = self.subscribe()
         listener.session_id = session_id
@@ -214,7 +214,7 @@ class SseBroker:
                 if message["event"] == "run/error":
                     raise RuntimeError(str(message["payload"]["error"]))
                 if message["event"] == "run/cancelled":
-                    raise RunCancelled("运行已取消")
+                    raise RunCancelled("Run cancelled")
                 if message["event"] == "run/done":
                     raise RuntimeError("run finished without a result")
         finally:
@@ -284,11 +284,11 @@ class ApiServer:
                         self._send_json(manager.list())
                     elif path == "/v1/models":
                         if not app.config.features["llm.model-listing"]:
-                            raise RuntimeError("llm.model-listing 当前被禁用")
+                            raise RuntimeError("llm.model-listing is currently disabled")
                         self._send_json(app.model.list_models())
                     elif path == "/v1/files":
                         if not app.config.features["llm.files"]:
-                            raise RuntimeError("llm.files 当前被禁用")
+                            raise RuntimeError("llm.files is currently disabled")
                         self._send_json(app.model.list_files())
                     elif path == "/v1/prompt":
                         self._send_json({"system": app.system_prompt.render(), "runtime_context": app.runtime_context})
@@ -415,7 +415,7 @@ class ApiServer:
                         name = body.get("name")
                         config = body.get("config")
                         if not isinstance(name, str) or not isinstance(config, dict):
-                            raise ValueError("name 和 config 必填")
+                            raise ValueError("name and config are required")
                         manager.upsert(name, config)
                         self._send_json(manager.list())
                     elif path.startswith("/v1/mcp/"):
@@ -451,7 +451,7 @@ class ApiServer:
                             assert isinstance(presets, PresetService)
                             preset_id = body.get("id")
                             if not isinstance(preset_id, str):
-                                raise ValueError("preset id 必须是字符串")
+                                raise ValueError("preset id must be a string")
                             self._send_json(presets.select(session_id, preset_id))
                         elif action == "goal-create":
                             goals = app.ctx.require("goals")
@@ -476,12 +476,12 @@ class ApiServer:
                             self._send_json({"result": app.agent.compact(session_id)})
                         elif action == "prune":
                             if not app.config.features["core.tool-result-pruner"]:
-                                raise RuntimeError("core.tool-result-pruner 当前被禁用")
+                                raise RuntimeError("core.tool-result-pruner is currently disabled")
                             pruner = app.ctx.require("toolResultPruner")
                             self._send_json(pruner.prune(session_id))
                         elif action in {"repair", "migrate"}:
                             if app.session is None:
-                                raise RuntimeError("session.jsonl 当前被禁用")
+                                raise RuntimeError("session.jsonl is currently disabled")
                             operation = app.session.repair if action == "repair" else app.session.migrate
                             self._send_json(operation(session_id))
                         elif action == "sandbox":
@@ -497,13 +497,13 @@ class ApiServer:
                             assert isinstance(subagents, SubagentService)
                             agent = body.get("agent")
                             if not isinstance(agent, str) or not agent:
-                                raise ValueError("agent 必须是非空字符串")
+                                raise ValueError("agent must be a non-empty string")
                             if action == "subagent-interrupt":
                                 self._send_json({"accepted": subagents.interrupt(session_id, agent)})
                             else:
                                 message = body.get("message")
                                 if not isinstance(message, str) or not message:
-                                    raise ValueError("message 必须是非空字符串")
+                                    raise ValueError("message must be a non-empty string")
                                 self._send_json({"messageId": subagents.send(session_id, agent, message)})
                         else:
                             self._send_json({"error": "not found"}, 404)
@@ -514,7 +514,7 @@ class ApiServer:
                             assert isinstance(terminals, PtyService)
                             reason = body.get("reason")
                             if reason is not None and not isinstance(reason, str):
-                                raise ValueError("reason 必须是字符串")
+                                raise ValueError("reason must be a string")
                             self._send_json({"killed": terminals.kill(parts[3], reason)})
                         else:
                             self._send_json({"error": "not found"}, 404)
@@ -563,14 +563,14 @@ class ApiServer:
             def _prompt(body: Dict[str, object]) -> str:
                 prompt = body.get("prompt", "")
                 if not isinstance(prompt, str) or not prompt.strip():
-                    raise ValueError("prompt 必须是非空字符串")
+                    raise ValueError("prompt must be a non-empty string")
                 return prompt
 
             @staticmethod
             def _images(body: Dict[str, object]) -> List[str]:
                 images = body.get("images", [])
                 if not isinstance(images, list) or any(not isinstance(image, str) or not image.strip() for image in images):
-                    raise ValueError("images 必须是非空图片路径字符串数组")
+                    raise ValueError("images must be an array of non-empty image path strings")
                 return images
 
             def _session_get(self, path: str) -> None:
@@ -613,11 +613,11 @@ class ApiServer:
                 last_event_id = self.headers.get("Last-Event-ID") or query.get("last_event_id", [None])[0]
                 if last_event_id is not None:
                     if session_id is None:
-                        raise ValueError("SSE 断点恢复需要 session_id")
+                        raise ValueError("SSE resume requires session_id")
                     listener = broker.replay(session_id, last_event_id)
                 else:
                     if not prompt.strip():
-                        raise ValueError("prompt 必须是非空字符串")
+                        raise ValueError("prompt must be a non-empty string")
                     listener = broker.start(prompt, session_id, image_paths)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")

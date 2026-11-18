@@ -95,7 +95,7 @@ def make_bash_tool(workspace: Path) -> Tool:
         allow_outside = getattr(sandbox, "mode") == "danger-full-access"
         workdir = workspace_path(workspace, arguments.get("workdir", "."), "workdir", allow_outside=allow_outside)
         if not workdir.is_dir():
-            raise ToolError(f"workdir 不是目录: {workdir}")
+            raise ToolError(f"workdir is not a directory: {workdir}")
         jobs = execution.service("jobs")
         assert isinstance(jobs, JobService)
         try:

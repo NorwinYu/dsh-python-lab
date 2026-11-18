@@ -12,7 +12,7 @@ class ServiceContext:
 
     def provide(self, name: str, service: object, owner: str) -> None:
         if name in self._services:
-            raise ValueError(f"服务已存在: {name}")
+            raise ValueError(f"service already exists: {name}")
         self._services[name] = service
         self._owners[name] = owner
 
@@ -24,7 +24,7 @@ class ServiceContext:
 
     def require(self, name: str) -> object:
         if name not in self._services:
-            raise KeyError(f"缺少服务: {name}")
+            raise KeyError(f"missing service: {name}")
         return self._services[name]
 
     def optional(self, name: str) -> Optional[object]:
@@ -52,7 +52,7 @@ class DisabledExternalPlugin(Plugin):
         self.name = name
 
     def activate(self, ctx: ServiceContext) -> None:
-        raise RuntimeError(f"外部插件未启用: {self.name}")
+        raise RuntimeError(f"external plugin not enabled: {self.name}")
 
 
 class PluginManager:
@@ -73,7 +73,7 @@ class PluginManager:
         value: Optional[str] = None,
     ) -> None:
         if plugin.name in self._plugins:
-            raise ValueError(f"插件已注册: {plugin.name}")
+            raise ValueError(f"plugin already registered: {plugin.name}")
         self._plugins[plugin.name] = plugin
         self._states[plugin.name] = "pending" if self.features[plugin.name] else "disabled"
         metadata = {"origin": origin}

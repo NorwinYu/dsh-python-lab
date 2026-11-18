@@ -12,29 +12,29 @@ from .server import ApiServer
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="minidsh", description="分层学习版 Agent Harness")
-    parser.add_argument("--workspace", type=Path, default=Path.cwd(), help="工作区，默认是当前目录")
-    parser.add_argument("--config", type=Path, help="JSON 配置文件")
-    parser.add_argument("--enable", action="append", default=[], metavar="FEATURE", help="启用功能，可重复")
-    parser.add_argument("--disable", action="append", default=[], metavar="FEATURE", help="禁用功能，可重复")
-    parser.add_argument("--sandbox-mode", choices=sorted(SANDBOX_MODES), help="文件策略")
-    parser.add_argument("--approval-policy", choices=["ask", "never"], help="审批策略")
-    parser.add_argument("--yes", action="store_true", help="允许本次进程中的所有写/Shell 操作审批")
-    parser.add_argument("--context-window", type=int, help="压缩使用的上下文容量")
+    parser = argparse.ArgumentParser(prog="minidsh", description="Layered learning edition of an Agent Harness")
+    parser.add_argument("--workspace", type=Path, default=Path.cwd(), help="workspace; defaults to the current directory")
+    parser.add_argument("--config", type=Path, help="JSON config file")
+    parser.add_argument("--enable", action="append", default=[], metavar="FEATURE", help="enable a feature; may be repeated")
+    parser.add_argument("--disable", action="append", default=[], metavar="FEATURE", help="disable a feature; may be repeated")
+    parser.add_argument("--sandbox-mode", choices=sorted(SANDBOX_MODES), help="sandbox policy")
+    parser.add_argument("--approval-policy", choices=["ask", "never"], help="approval policy")
+    parser.add_argument("--yes", action="store_true", help="approve all write and shell operations for this process")
+    parser.add_argument("--context-window", type=int, help="context capacity used for compaction")
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("config", help="输出合并后的配置")
-    subparsers.add_parser("plugins", help="查看插件及依赖状态")
-    subparsers.add_parser("tools", help="列出当前启用的工具")
-    subparsers.add_parser("models", help="列出当前模型提供方的模型")
-    subparsers.add_parser("files", help="列出 DeepSeek Files API 文件")
-    subparsers.add_parser("prompt", help="输出当前系统提示词与 runtime context")
-    subparsers.add_parser("sessions", help="列出本地会话")
-    subparsers.add_parser("skills", help="列出当前工作区技能")
-    skill_parser = subparsers.add_parser("skill", help="加载一份技能完整指令")
+    subparsers.add_parser("config", help="print the merged config")
+    subparsers.add_parser("plugins", help="show plugins and dependency status")
+    subparsers.add_parser("tools", help="list currently enabled tools")
+    subparsers.add_parser("models", help="list models from the current model provider")
+    subparsers.add_parser("files", help="list DeepSeek Files API files")
+    subparsers.add_parser("prompt", help="print the current system prompt and runtime context")
+    subparsers.add_parser("sessions", help="list local sessions")
+    subparsers.add_parser("skills", help="list skills in the current workspace")
+    skill_parser = subparsers.add_parser("skill", help="load a skill's full instructions")
     skill_parser.add_argument("name")
-    skill_parser.add_argument("--user", action="store_true", help="按用户显式调用策略加载")
-    goal_parser = subparsers.add_parser("goal", help="查看或控制会话目标")
+    skill_parser.add_argument("--user", action="store_true", help="load with the explicit user-invocation policy")
+    goal_parser = subparsers.add_parser("goal", help="view or control the session goal")
     goal_parser.add_argument("session_id")
     goal_parser.add_argument("action", nargs="?", default="get", choices=["get", "create", "edit", "pause", "resume", "complete", "blocked", "clear"])
     goal_parser.add_argument("--objective")
@@ -42,58 +42,58 @@ def build_parser() -> argparse.ArgumentParser:
     goal_parser.add_argument("--reason")
     goal_parser.add_argument("--goal-id")
     goal_parser.add_argument("--revision", type=int)
-    subparsers.add_parser("presets", help="列出 Agent presets")
-    preset_parser = subparsers.add_parser("preset", help="在首个模型回合前选择 Session preset")
+    subparsers.add_parser("presets", help="list Agent presets")
+    preset_parser = subparsers.add_parser("preset", help="select a Session preset before the first model turn")
     preset_parser.add_argument("session_id")
     preset_parser.add_argument("preset_id")
 
-    run_parser = subparsers.add_parser("run", help="新建会话并运行 Agent")
-    run_parser.add_argument("prompt", nargs="+", help="用户提示词")
-    run_parser.add_argument("--image", action="append", default=[], metavar="PATH", help="附加图片，可重复")
-    run_parser.add_argument("--trace", action="store_true", help="输出工具事件轨迹")
+    run_parser = subparsers.add_parser("run", help="create a session and run the Agent")
+    run_parser.add_argument("prompt", nargs="+", help="user prompt")
+    run_parser.add_argument("--image", action="append", default=[], metavar="PATH", help="attach an image; may be repeated")
+    run_parser.add_argument("--trace", action="store_true", help="print the tool event trace")
 
-    resume_parser = subparsers.add_parser("resume", help="恢复会话并继续运行")
+    resume_parser = subparsers.add_parser("resume", help="resume a session and continue running")
     resume_parser.add_argument("session_id")
-    resume_parser.add_argument("prompt", nargs="+", help="新的用户提示词")
-    resume_parser.add_argument("--image", action="append", default=[], metavar="PATH", help="附加图片，可重复")
-    resume_parser.add_argument("--trace", action="store_true", help="输出工具事件轨迹")
+    resume_parser.add_argument("prompt", nargs="+", help="new user prompt")
+    resume_parser.add_argument("--image", action="append", default=[], metavar="PATH", help="attach an image; may be repeated")
+    resume_parser.add_argument("--trace", action="store_true", help="print the tool event trace")
 
-    session_parser = subparsers.add_parser("session", help="读取一份 JSONL 会话")
+    session_parser = subparsers.add_parser("session", help="read a JSONL session")
     session_parser.add_argument("session_id")
 
-    transcript_parser = subparsers.add_parser("transcript", help="输出会话的可读消息投影")
+    transcript_parser = subparsers.add_parser("transcript", help="print the readable message projection of a session")
     transcript_parser.add_argument("session_id")
 
-    todos_parser = subparsers.add_parser("todos", help="查看会话当前的待办清单")
+    todos_parser = subparsers.add_parser("todos", help="show the session's current todo list")
     todos_parser.add_argument("session_id")
 
-    fork_parser = subparsers.add_parser("fork", help="复制会话到新分支")
+    fork_parser = subparsers.add_parser("fork", help="copy a session to a new branch")
     fork_parser.add_argument("session_id")
-    fork_parser.add_argument("--at-seq", type=int, help="只保留到指定事件序号")
+    fork_parser.add_argument("--at-seq", type=int, help="retain events only up to the given event seq")
 
-    compact_parser = subparsers.add_parser("compact", help="手动创建压缩检查点")
+    compact_parser = subparsers.add_parser("compact", help="create a compaction checkpoint manually")
     compact_parser.add_argument("session_id")
 
-    repair_parser = subparsers.add_parser("repair", help="备份并修复会话的不完整末尾或开放回合")
+    repair_parser = subparsers.add_parser("repair", help="back up and repair an incomplete tail or open turn in a session")
     repair_parser.add_argument("session_id")
 
-    migrate_parser = subparsers.add_parser("migrate", help="备份并迁移旧会话；省略 id 时迁移全部")
+    migrate_parser = subparsers.add_parser("migrate", help="back up and migrate legacy sessions; migrate all when id is omitted")
     migrate_parser.add_argument("session_id", nargs="?")
 
-    surface_parser = subparsers.add_parser("surface", help="查看当前模型消息 surface 和 replacement 记录")
+    surface_parser = subparsers.add_parser("surface", help="show the current model message surface and replacement records")
     surface_parser.add_argument("session_id")
 
-    stream_parser = subparsers.add_parser("stream", help="展开会话中压缩保存的原始模型分片")
+    stream_parser = subparsers.add_parser("stream", help="expand raw model chunks stored compactly in a session")
     stream_parser.add_argument("session_id")
 
-    prune_parser = subparsers.add_parser("prune", help="裁剪当前 surface 中过长的工具结果")
+    prune_parser = subparsers.add_parser("prune", help="trim oversized tool results from the current surface")
     prune_parser.add_argument("session_id")
 
-    serve_parser = subparsers.add_parser("serve", help="启动本地 HTTP/SSE 宿主")
+    serve_parser = subparsers.add_parser("serve", help="start the local HTTP/SSE host")
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=3080)
 
-    desktop_parser = subparsers.add_parser("desktop", help="启动可选的 pywebview Desktop 宿主")
+    desktop_parser = subparsers.add_parser("desktop", help="start the optional pywebview Desktop host")
     desktop_parser.add_argument("--width", type=int, default=1100)
     desktop_parser.add_argument("--height", type=int, default=760)
     return parser
@@ -101,14 +101,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def interactive_answerer(reason: str) -> str:
     if not sys.stdin.isatty():
-        raise RuntimeError("无交互式审批者")
-    answer = input(f"{reason}\n允许这一次吗？[y/N] ").strip().lower()
+        raise RuntimeError("no interactive approver available")
+    answer = input(f"{reason}\nAllow this once? [y/N] ").strip().lower()
     return "allowed-once" if answer in {"y", "yes"} else "rejected"
 
 
 def interactive_questions(request: Dict[str, object]) -> Dict[str, object]:
     if not sys.stdin.isatty():
-        raise RuntimeError("无交互式提问者")
+        raise RuntimeError("no interactive questioner available")
     answers = []
     for question in request["questions"]:
         if question.get("header"):
@@ -118,7 +118,7 @@ def interactive_questions(request: Dict[str, object]) -> Dict[str, object]:
         for index, option in enumerate(options, 1):
             description = f" — {option['description']}" if option.get("description") else ""
             print(f"  {index}. {option['label']}{description}")
-        prompt = "选择编号（多选用逗号），其他文本作为自定义回答；回车跳过: " if options else "回答（回车跳过）: "
+        prompt = "Choose a number (comma-separate multiple choices); other text becomes a custom answer; press Enter to skip: " if options else "Answer (press Enter to skip): "
         raw = input(prompt).strip()
         selected = []
         custom = None
@@ -191,7 +191,7 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
             return 0
         if args.command == "serve":
             if args.host not in {"127.0.0.1", "localhost", "::1"} and not os.environ.get("MINIDSH_TOKEN"):
-                raise RuntimeError("绑定非回环地址必须设置 MINIDSH_TOKEN")
+                raise RuntimeError("binding to a non-loopback address requires MINIDSH_TOKEN")
             server = ApiServer(app, args.host, args.port, os.environ.get("MINIDSH_TOKEN"))
             print(f"MiniDSH: {server.url}", flush=True)
             try:
@@ -214,13 +214,13 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
 
         if args.command == "models":
             if not config.features["llm.model-listing"]:
-                raise RuntimeError("llm.model-listing 当前被禁用")
+                raise RuntimeError("llm.model-listing is currently disabled")
             print(json.dumps(app.model.list_models(), ensure_ascii=False, indent=2))
             return 0
 
         if args.command == "files":
             if not config.features["llm.files"]:
-                raise RuntimeError("llm.files 当前被禁用")
+                raise RuntimeError("llm.files is currently disabled")
             print(json.dumps(app.model.list_files(), ensure_ascii=False, indent=2))
             return 0
 
@@ -230,7 +230,7 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
 
         if args.command == "sessions":
             if app.session is None:
-                raise RuntimeError("session.jsonl 当前被禁用")
+                raise RuntimeError("session.jsonl is currently disabled")
             print(json.dumps(app.session.list_sessions(), ensure_ascii=False, indent=2))
             return 0
 
@@ -251,7 +251,7 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
             else:
                 current = goals.get(args.session_id)
                 if current is None:
-                    raise RuntimeError("当前会话没有 goal")
+                    raise RuntimeError("the current session has no goal")
                 reason = {"code": "user-reported", "message": args.reason or ""} if args.action == "blocked" else None
                 result = goals.update(args.session_id, args.goal_id or current["id"], args.revision or current["revision"], args.action, args.objective, args.rounds, reason)
                 if args.action in {"pause", "complete", "blocked", "clear"}:
@@ -270,25 +270,25 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
 
         if args.command == "session":
             if app.session is None:
-                raise RuntimeError("session.jsonl 当前被禁用")
+                raise RuntimeError("session.jsonl is currently disabled")
             print(json.dumps(app.session.load(args.session_id), ensure_ascii=False, indent=2))
             return 0
 
         if args.command == "transcript":
             if app.session is None:
-                raise RuntimeError("session.jsonl 当前被禁用")
+                raise RuntimeError("session.jsonl is currently disabled")
             print(app.session.transcript(args.session_id))
             return 0
 
         if args.command == "todos":
             if app.session is None:
-                raise RuntimeError("session.jsonl 当前被禁用")
+                raise RuntimeError("session.jsonl is currently disabled")
             print(json.dumps(app.session.todos(args.session_id), ensure_ascii=False, indent=2))
             return 0
 
         if args.command == "fork":
             if app.session is None:
-                raise RuntimeError("session.jsonl 当前被禁用")
+                raise RuntimeError("session.jsonl is currently disabled")
             print(app.session.fork(args.session_id, args.at_seq))
             return 0
 
@@ -298,32 +298,32 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
 
         if args.command == "repair":
             if app.session is None:
-                raise RuntimeError("session.jsonl 当前被禁用")
+                raise RuntimeError("session.jsonl is currently disabled")
             print(json.dumps(app.session.repair(args.session_id), ensure_ascii=False, indent=2))
             return 0
 
         if args.command == "migrate":
             if app.session is None:
-                raise RuntimeError("session.jsonl 当前被禁用")
+                raise RuntimeError("session.jsonl is currently disabled")
             result = app.session.migrate(args.session_id) if args.session_id else app.session.migrate_all()
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
 
         if args.command == "surface":
             if app.session is None:
-                raise RuntimeError("session.jsonl 当前被禁用")
+                raise RuntimeError("session.jsonl is currently disabled")
             print(json.dumps(app.session.surface(args.session_id), ensure_ascii=False, indent=2))
             return 0
 
         if args.command == "stream":
             if app.session is None:
-                raise RuntimeError("session.jsonl 当前被禁用")
+                raise RuntimeError("session.jsonl is currently disabled")
             print(json.dumps(app.session.stream_chunks(args.session_id), ensure_ascii=False, indent=2))
             return 0
 
         if args.command == "prune":
             if not config.features["core.tool-result-pruner"]:
-                raise RuntimeError("请使用 --enable core.tool-result-pruner")
+                raise RuntimeError("use --enable core.tool-result-pruner")
             pruner = app.ctx.require("toolResultPruner")
             print(json.dumps(pruner.prune(args.session_id), ensure_ascii=False, indent=2))
             return 0
@@ -343,7 +343,7 @@ def main(argv: Optional[List[str]] = None, default_command: Optional[str] = None
             print(app.agent.run(" ".join(args.prompt), image_paths=args.image))
         return 0
     except (ConfigError, KeyError, RuntimeError, OSError, ValueError) as exc:
-        print(f"错误: {exc}", file=sys.stderr)
+        print(f"error: {exc}", file=sys.stderr)
         return 2
     finally:
         if app is not None:

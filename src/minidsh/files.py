@@ -31,7 +31,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 def parse_file_object(value: object) -> Dict[str, object]:
     if not isinstance(value, dict):
-        raise FilesError("DeepSeek Files API 返回无效文件对象", "INVALID_RESPONSE")
+        raise FilesError("DeepSeek Files API returned an invalid file object", "INVALID_RESPONSE")
     created = value.get("created_at")
     try:
         created_at = int(datetime.fromisoformat(created.replace("Z", "+00:00")).timestamp()) if isinstance(created, str) else -1
@@ -49,7 +49,7 @@ def parse_file_object(value: object) -> Dict[str, object]:
         or not value["filename"]
         or not isinstance(value.get("mime_type"), str)
     ):
-        raise FilesError("DeepSeek Files API 返回无效文件对象", "INVALID_RESPONSE")
+        raise FilesError("DeepSeek Files API returned an invalid file object", "INVALID_RESPONSE")
     return {
         "id": value["id"],
         "bytes": value["size_bytes"],
@@ -83,9 +83,9 @@ class DeepSeekFilesClient:
         cancel_token: Optional[CancellationToken] = None,
     ) -> Dict[str, object]:
         if image.size > MAX_FILE_UPLOAD_BYTES:
-            raise FilesError("Files API 单文件不能超过 128 MiB", "INVALID_REQUEST")
+            raise FilesError("Files API files must not exceed 128 MiB", "INVALID_REQUEST")
         if not 3_600 <= expires_after_seconds <= 2_592_000:
-            raise FilesError("Files API 生命周期必须在 3600 到 2592000 秒之间", "INVALID_REQUEST")
+            raise FilesError("Files API lifetime must be between 3600 and 2592000 seconds", "INVALID_REQUEST")
         boundary = f"minidsh-{uuid.uuid4().hex}"
         filename = f"dsh-{image.sha256[:16]}.{image.extension}"
         fields = {
@@ -109,7 +109,7 @@ class DeepSeekFilesClient:
         )
         file = parse_file_object(result)
         if file["bytes"] != image.size or file["mediaType"] != image.media_type:
-            raise FilesError("Files API 上传响应与图片大小或类型不一致", "INVALID_RESPONSE")
+            raise FilesError("Files API upload response size or type does not match the image", "INVALID_RESPONSE")
         file["expiresAt"] = int(file["createdAt"]) + expires_after_seconds
         return file
 
@@ -119,12 +119,12 @@ class DeepSeekFilesClient:
             query.append(f"after_id={quote(after)}")
         if limit is not None:
             if not 1 <= limit <= 1000:
-                raise FilesError("Files API limit 必须在 1 到 1000 之间", "INVALID_REQUEST")
+                raise FilesError("Files API limit must be between 1 and 1000", "INVALID_REQUEST")
             query.append(f"limit={limit}")
         suffix = "?" + "&".join(query) if query else ""
         result = self._request("GET", self.url + suffix)
         if not isinstance(result, dict) or not isinstance(result.get("data"), list) or not isinstance(result.get("has_more"), bool):
-            raise FilesError("DeepSeek Files API 返回无效列表", "INVALID_RESPONSE")
+            raise FilesError("DeepSeek Files API returned an invalid list", "INVALID_RESPONSE")
         return {
             "data": [parse_file_object(item) for item in result["data"]],
             "firstId": result.get("first_id"),
@@ -138,7 +138,7 @@ class DeepSeekFilesClient:
     def delete(self, file_id: str) -> None:
         result = self._request("DELETE", f"{self.url}/{quote(file_id, safe='')}")
         if not isinstance(result, dict) or result.get("id") != file_id or result.get("type") != "file_deleted":
-            raise FilesError("DeepSeek Files API 返回无效删除结果", "INVALID_RESPONSE")
+            raise FilesError("DeepSeek Files API returned an invalid delete result", "INVALID_RESPONSE")
 
     def _request(
         self,
@@ -170,19 +170,19 @@ class DeepSeekFilesClient:
         except (URLError, TimeoutError, socket.timeout, OSError) as exc:
             token.throw_if_cancelled()
             is_timeout = isinstance(exc, (TimeoutError, socket.timeout)) or isinstance(getattr(exc, "reason", None), socket.timeout)
-            raise FilesError("DeepSeek Files API 请求失败", "TIMEOUT" if is_timeout else "TRANSPORT") from exc
+            raise FilesError("DeepSeek Files API request failed", "TIMEOUT" if is_timeout else "TRANSPORT") from exc
         unregister = token.on_cancel(response.close)
         try:
             with response:
                 raw = response.read(1_000_001)
         except (URLError, TimeoutError, socket.timeout, OSError, ValueError) as exc:
             token.throw_if_cancelled()
-            raise FilesError("DeepSeek Files API 读取失败", "TRANSPORT") from exc
+            raise FilesError("DeepSeek Files API read failed", "TRANSPORT") from exc
         finally:
             unregister()
         if len(raw) > 1_000_000:
-            raise FilesError("DeepSeek Files API 响应过大", "INVALID_RESPONSE")
+            raise FilesError("DeepSeek Files API response is too large", "INVALID_RESPONSE")
         try:
             return json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise FilesError("DeepSeek Files API 返回无效 JSON", "INVALID_RESPONSE") from exc
+            raise FilesError("DeepSeek Files API returned invalid JSON", "INVALID_RESPONSE") from exc

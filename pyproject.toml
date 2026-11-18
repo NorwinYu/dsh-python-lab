@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "minidsh"
 version = "0.1.0"
-description = "A dependency-free, layered learning project inspired by DeepSeek Harness"
+description = "A dependency-free, layered agent harness in Python: plugin kernel, agent loop, tools, permissions, sessions, subagents, MCP, skills, schedule, goals, and PTC"
 requires-python = ">=3.9"
 dependencies = []
 

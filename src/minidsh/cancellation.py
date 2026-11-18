@@ -32,7 +32,7 @@ class CancellationToken:
 
     def throw_if_cancelled(self) -> None:
         if self.cancelled:
-            raise RunCancelled("运行已取消")
+            raise RunCancelled("Run cancelled")
 
     def wait(self, seconds: float) -> bool:
         return self._event.wait(seconds)

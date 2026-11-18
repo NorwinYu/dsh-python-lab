@@ -76,13 +76,13 @@ class CompactionService:
             return messages
         if len(messages) < 2:
             if force:
-                raise RuntimeError("没有足够消息可压缩")
+                raise RuntimeError("not enough messages to compact")
             return messages
 
         retain_count = max(1, int(len(messages) * 0.16))
         if retain_count >= len(messages):
             if force:
-                raise RuntimeError("没有安全且有效的压缩区间")
+                raise RuntimeError("no safe and valid compaction range")
             return messages
         prefix = messages[:-retain_count]
         retained = messages[-retain_count:]
@@ -106,7 +106,7 @@ class CompactionService:
         )
         summary = response.content.strip()
         if not summary:
-            raise RuntimeError("压缩模型返回空摘要")
+            raise RuntimeError("compaction model returned an empty summary")
         summary_message = {
             "role": "user",
             "content": [text_block(f"{SUMMARY_INTRO}\n\n<compacted-summary>\n{summary}\n</compacted-summary>")],

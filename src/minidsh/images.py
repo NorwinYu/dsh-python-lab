@@ -43,13 +43,13 @@ class ImageAttachment:
 
 def resolve_image_path(workspace: Path, value: object, allow_outside: bool = False) -> Path:
     if not isinstance(value, (str, Path)) or not str(value).strip():
-        raise ImageError("图片路径必须是非空字符串")
+        raise ImageError("image path must be a non-empty string")
     path = (workspace / Path(value)).expanduser().resolve()
     if not allow_outside:
         try:
             path.relative_to(workspace.resolve())
         except ValueError as exc:
-            raise ImageError("图片路径不能离开当前工作区") from exc
+            raise ImageError("image path must not leave the current workspace") from exc
     return path
 
 
@@ -62,22 +62,22 @@ def media_type(data: bytes) -> str:
         return "image/gif"
     if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         return "image/webp"
-    raise ImageError("仅支持内容有效的 PNG、JPEG、GIF 和 WebP 图片")
+    raise ImageError("only valid PNG, JPEG, GIF, and WebP images are supported")
 
 
 def load_image(workspace: Path, value: object, allow_outside: bool = False) -> ImageAttachment:
     path = resolve_image_path(workspace, value, allow_outside)
     try:
         if not path.is_file():
-            raise ImageError(f"图片不是普通文件: {path}")
+            raise ImageError(f"image is not a regular file: {path}")
         size = path.stat().st_size
         if size > MAX_IMAGE_BYTES:
-            raise ImageError("单张图片不能超过 32 MiB")
+            raise ImageError("a single image must not exceed 32 MiB")
         data = path.read_bytes()
     except OSError as exc:
-        raise ImageError(f"无法读取图片 {path}: {exc}") from exc
+        raise ImageError(f"cannot read image {path}: {exc}") from exc
     if len(data) != size:
-        raise ImageError(f"图片读取期间发生变化: {path}")
+        raise ImageError(f"image changed while it was being read: {path}")
     return ImageAttachment(path, media_type(data), hashlib.sha256(data).hexdigest(), data)
 
 
@@ -101,20 +101,20 @@ def materialize_images(
             if not isinstance(block, dict) or block.get("type") != "image":
                 continue
             if message.get("role") not in {"user", "tool"}:
-                raise ImageError("DeepSeek Messages 只接受 user 或 tool result 中的图片")
+                raise ImageError("DeepSeek Messages only accepts images from user or tool result messages")
             attachment = block.get("attachment")
             if not isinstance(attachment, dict):
-                raise ImageError("图片内容块缺少 attachment")
+                raise ImageError("image content block is missing attachment")
             image = load_image(workspace, attachment.get("path"), allow_outside)
             if image.sha256 != attachment.get("sha256") or image.size != attachment.get("bytes"):
-                raise ImageError(f"图片自加入会话后已发生变化: {image.path}")
+                raise ImageError(f"image changed since it was added to the session: {image.path}")
             if image.media_type != attachment.get("mediaType"):
-                raise ImageError(f"图片媒体类型发生变化: {image.path}")
+                raise ImageError(f"image media type changed: {image.path}")
             images[image.sha256] = image
             total += image.size
             occurrences += 1
     if occurrences > MAX_IMAGES_PER_REQUEST or total > MAX_REQUEST_IMAGE_BYTES:
-        raise ImageError("图片总数不能超过 600，累计原始大小不能超过 128 MiB")
+        raise ImageError("at most 600 images are allowed, with a combined raw size of at most 128 MiB")
     return images
 
 
@@ -132,4 +132,4 @@ def assert_inline_budget(messages: List[Dict[str, object]], images: Dict[str, Im
                 image = images[str(attachment.get("sha256"))]
                 encoded_size += ((image.size + 2) // 3) * 4
     if encoded_size > MAX_INLINE_IMAGE_BYTES:
-        raise ImageError("内联图片 base64 总大小不能超过 20 MiB")
+        raise ImageError("total inline image base64 size must not exceed 20 MiB")

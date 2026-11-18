@@ -10,28 +10,28 @@ STATUSES = {"pending", "in_progress", "completed"}
 
 def canonical_todos(value: object, allow_parallel: bool) -> List[Dict[str, str]]:
     if not isinstance(value, list):
-        raise ToolError("todos 必须是完整任务数组")
+        raise ToolError("todos must be a complete array of tasks")
     todos: List[Dict[str, str]] = []
     seen = set()
     active = 0
     for raw in value:
         if not isinstance(raw, dict) or set(raw) != {"content", "status"}:
-            raise ToolError("每个 todo 只能包含 content 和 status")
+            raise ToolError("each todo may only contain content and status")
         content = raw.get("content")
         status = raw.get("status")
         if not isinstance(content, str) or not content.strip():
-            raise ToolError("todo content 必须是非空字符串")
+            raise ToolError("todo content must be a non-empty string")
         content = content.strip()
         if content in seen:
-            raise ToolError(f"todo 内容不能重复: {content}")
+            raise ToolError(f"duplicate todo content: {content}")
         seen.add(content)
         if status not in STATUSES:
-            raise ToolError("todo status 必须是 pending、in_progress 或 completed")
+            raise ToolError("todo status must be pending, in_progress, or completed")
         if status == "in_progress":
             active += 1
         todos.append({"content": content, "status": status})
     if not allow_parallel and active > 1:
-        raise ToolError(f"最多只能有一个 in_progress 任务，当前为 {active}")
+        raise ToolError(f"at most one task may be in_progress; currently {active}")
     return todos
 
 

@@ -32,9 +32,9 @@ class ObservationStore:
     def require_current(self, session_id: Optional[str], path: Path) -> None:
         with self._lock:
             if session_id is None or (session_id, str(path)) not in self._versions:
-                raise ValueError(f"修改前必须先读取文件: {path}")
+                raise ValueError(f"file must be read before modifying: {path}")
             if self._versions[(session_id, str(path))] != self.version(path):
-                raise ValueError(f"文件在读取后已变化，请重新读取: {path}")
+                raise ValueError(f"file changed after it was read; read it again: {path}")
 
 
 class ObservationPlugin(Plugin):

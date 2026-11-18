@@ -97,7 +97,7 @@ class Agent:
         resumed = session_id is not None
         if resumed:
             if self.session is None:
-                raise RuntimeError("resume 需要启用 session.jsonl")
+                raise RuntimeError("resume requires session.jsonl to be enabled")
             self.session.repair(session_id)
             events = self.session.load(session_id)
             if not events:
@@ -310,7 +310,7 @@ class Agent:
                         token,
                     )
                 except ToolError as exc:
-                    result = f"工具执行失败: {exc}"
+                    result = f"tool execution failed: {exc}"
                     is_error = True
                 tool_message = {
                     "role": "tool",
@@ -324,17 +324,17 @@ class Agent:
                 self._record(session_id, "tool/result", tool_message)
             self._record(session_id, "step/end", {"turn": turn, "step": step})
 
-        raise RuntimeError(f"Agent 超过最大步数: {self.max_steps}")
+        raise RuntimeError(f"agent exceeded the maximum number of steps: {self.max_steps}")
 
     def compact(self, session_id: str) -> str:
         if self.session is None:
-            raise RuntimeError("压缩需要启用 session.jsonl 和 core.compaction")
+            raise RuntimeError("compaction requires session.jsonl and core.compaction to be enabled")
         with self.session.write_lease(session_id):
             return self._compact(session_id)
 
     def _compact(self, session_id: str) -> str:
         if self.session is None or self.compaction is None:
-            raise RuntimeError("压缩需要启用 session.jsonl 和 core.compaction")
+            raise RuntimeError("compaction requires session.jsonl and core.compaction to be enabled")
         messages = self.session.derive_messages(session_id)
         compacted = self.compaction.compact_if_needed(
             self.system_prompt.render(),
@@ -346,7 +346,7 @@ class Agent:
         first = compacted[0]
         content = first.get("content", [])
         if not isinstance(content, list):
-            raise RuntimeError("压缩结果格式错误")
+            raise RuntimeError("invalid compaction result format")
         return "".join(str(block.get("text", "")) for block in content if isinstance(block, dict))
 
     def _current_runtime_context(self, session_id: str) -> str:

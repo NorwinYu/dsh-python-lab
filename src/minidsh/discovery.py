@@ -45,12 +45,12 @@ class PluginSpec:
             plugin = loaded
         else:
             if not callable(loaded):
-                raise DiscoveryError(f"插件 {self.name} 必须导出 Plugin、Plugin 子类或工厂")
+                raise DiscoveryError(f"plugin {self.name} must export a Plugin, a Plugin subclass, or a factory")
             plugin = loaded()
         if not isinstance(plugin, Plugin):
-            raise DiscoveryError(f"插件 {self.name} 的工厂没有返回 Plugin")
+            raise DiscoveryError(f"factory for plugin {self.name} did not return a Plugin")
         if plugin.name != self.name:
-            raise DiscoveryError(f"插件名不一致: entry point={self.name}, Plugin={plugin.name}")
+            raise DiscoveryError(f"plugin name mismatch: entry point={self.name}, Plugin={plugin.name}")
         return plugin
 
 
@@ -64,14 +64,14 @@ def discover_plugins() -> List[PluginSpec]:
             if entry_point.group != ENTRY_POINT_GROUP:
                 continue
             if not PLUGIN_NAME.fullmatch(entry_point.name):
-                raise DiscoveryError(f"无效外部插件名: {entry_point.name}")
+                raise DiscoveryError(f"invalid external plugin name: {entry_point.name}")
             key = (entry_point.name, entry_point.value, distribution_name, distribution.version)
             if key in seen:
                 continue
             seen.add(key)
             owner = (distribution_name, entry_point.value)
             if entry_point.name in owners:
-                raise DiscoveryError(f"外部插件 entry point 名称冲突: {entry_point.name}")
+                raise DiscoveryError(f"external plugin entry point name conflict: {entry_point.name}")
             owners[entry_point.name] = owner
             specs.append(PluginSpec(entry_point, distribution_name, distribution.version))
     return sorted(specs, key=lambda spec: spec.name)

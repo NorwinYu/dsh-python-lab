@@ -101,7 +101,7 @@ class AppConfig:
         external_names = {spec.name for spec in plugin_specs}
         conflicts = external_names.intersection(DEFAULT_FEATURES)
         if conflicts:
-            raise ConfigError(f"外部插件不能覆盖内置功能: {', '.join(sorted(conflicts))}")
+            raise ConfigError(f"external plugins must not override built-in features: {', '.join(sorted(conflicts))}")
         features = dict(DEFAULT_FEATURES)
         features.update({name: False for name in external_names})
         session_dir = Path(".minidsh/sessions")
@@ -120,19 +120,19 @@ class AppConfig:
             try:
                 data = json.loads(config_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
-                raise ConfigError(f"无法读取配置 {config_path}: {exc}") from exc
+                raise ConfigError(f"cannot read config {config_path}: {exc}") from exc
             if not isinstance(data, dict):
-                raise ConfigError("配置文件顶层必须是 JSON 对象")
+                raise ConfigError("config file top level must be a JSON object")
             allowed = {"session_dir", "features", "sandbox_mode", "approval_policy", "approve_all", "context_window", "mcp_servers", "skill_dirs", "skill_include_default_roots", "presets", "default_preset"}
             unknown_keys = set(data) - allowed
             if unknown_keys:
-                raise ConfigError(f"未知配置项: {', '.join(sorted(unknown_keys))}")
+                raise ConfigError(f"unknown config keys: {', '.join(sorted(unknown_keys))}")
             configured_features = data.get("features", {})
             if not isinstance(configured_features, dict):
-                raise ConfigError("features 必须是 JSON 对象")
+                raise ConfigError("features must be a JSON object")
             for name, value in configured_features.items():
                 if name not in features or not isinstance(value, bool):
-                    raise ConfigError(f"无效功能开关: {name}={value!r}")
+                    raise ConfigError(f"invalid feature flag: {name}={value!r}")
                 features[name] = value
             session_dir = Path(data.get("session_dir", session_dir))
             resolved_sandbox = data.get("sandbox_mode", resolved_sandbox)
@@ -141,22 +141,22 @@ class AppConfig:
             resolved_context_window = data.get("context_window", resolved_context_window)
             configured_mcp = data.get("mcp_servers", {})
             if not isinstance(configured_mcp, dict) or any(not isinstance(value, dict) for value in configured_mcp.values()):
-                raise ConfigError("mcp_servers 必须是服务器配置对象映射")
+                raise ConfigError("mcp_servers must be a mapping of server configuration objects")
             resolved_mcp = configured_mcp
             configured_skill_dirs = data.get("skill_dirs", [])
             if not isinstance(configured_skill_dirs, list) or any(not isinstance(value, str) or not value for value in configured_skill_dirs):
-                raise ConfigError("skill_dirs 必须是非空路径字符串数组")
+                raise ConfigError("skill_dirs must be an array of non-empty path strings")
             resolved_skill_dirs = tuple((workspace / value).expanduser().resolve() if not Path(value).is_absolute() else Path(value).expanduser().resolve() for value in configured_skill_dirs)
             resolved_skill_defaults = data.get("skill_include_default_roots", True)
             if not isinstance(resolved_skill_defaults, bool):
-                raise ConfigError("skill_include_default_roots 必须是布尔值")
+                raise ConfigError("skill_include_default_roots must be a boolean")
             configured_presets = data.get("presets", {})
             if not isinstance(configured_presets, dict) or any(not isinstance(value, dict) for value in configured_presets.values()):
-                raise ConfigError("presets 必须是配置对象映射")
+                raise ConfigError("presets must be a mapping of configuration objects")
             resolved_presets = configured_presets
             resolved_default_preset = data.get("default_preset", "standard")
             if not isinstance(resolved_default_preset, str) or not resolved_default_preset:
-                raise ConfigError("default_preset 必须是非空字符串")
+                raise ConfigError("default_preset must be a non-empty string")
 
         cls._apply_overrides(features, enable, True)
         cls._apply_overrides(features, disable, False)
@@ -168,13 +168,13 @@ class AppConfig:
         resolved_context_window = context_window if context_window is not None else resolved_context_window
 
         if resolved_sandbox not in SANDBOX_MODES:
-            raise ConfigError(f"未知文件策略: {resolved_sandbox}")
+            raise ConfigError(f"unknown sandbox policy: {resolved_sandbox}")
         if resolved_approval not in {None, "ask", "never"}:
-            raise ConfigError(f"未知审批策略: {resolved_approval}")
+            raise ConfigError(f"unknown approval policy: {resolved_approval}")
         if not isinstance(resolved_approve_all, bool):
-            raise ConfigError("approve_all 必须是布尔值")
+            raise ConfigError("approve_all must be a boolean")
         if not isinstance(resolved_context_window, int) or resolved_context_window <= 0:
-            raise ConfigError("context_window 必须是正整数")
+            raise ConfigError("context_window must be a positive integer")
         if not session_dir.is_absolute():
             session_dir = workspace / session_dir
         return cls(
@@ -197,7 +197,7 @@ class AppConfig:
     def _apply_overrides(features: Dict[str, bool], names: Iterable[str], value: bool) -> None:
         for name in names:
             if name not in features:
-                raise ConfigError(f"未知功能: {name}")
+                raise ConfigError(f"unknown feature: {name}")
             features[name] = value
 
     def resolved_approval_policy(self) -> str:

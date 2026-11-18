@@ -340,9 +340,9 @@ class PersistentBashPlugin(Plugin):
             timeout = int(os.environ.get("MINIDSH_PERSISTENT_TIMEOUT_MS", str(DEFAULT_PERSISTENT_TIMEOUT_MS)))
             max_output = int(os.environ.get("MINIDSH_PERSISTENT_MAX_OUTPUT_CHARS", str(DEFAULT_MAX_OUTPUT_CHARS)))
         except ValueError as exc:
-            raise ValueError("持久 Shell 数值配置必须是整数") from exc
+            raise ValueError("persistent shell numeric configuration must be an integer") from exc
         if timeout <= 0 or max_output <= 0:
-            raise ValueError("持久 Shell 超时和输出上限必须大于 0")
+            raise ValueError("persistent shell timeout and output limit must be greater than 0")
 
         def execute(arguments: Dict[str, object], execution: Execution) -> str:
             command = arguments.get("command")

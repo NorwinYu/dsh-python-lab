@@ -72,17 +72,17 @@ class DeepSeekConfig:
     def from_env(cls, retry_enabled: bool = True) -> "DeepSeekConfig":
         api_key = os.environ.get("DEEPSEEK_API_KEY", "")
         if not api_key:
-            raise LlmError("缺少 DEEPSEEK_API_KEY；不会读取或写入其他密钥文件", "MISSING_CREDENTIAL")
+            raise LlmError("missing DEEPSEEK_API_KEY; no other credential files are read or written", "MISSING_CREDENTIAL")
         base_url = os.environ.get("DEEPSEEK_BASE_URL", PUBLIC_BASE_URL).rstrip("/")
         parsed = urlparse(base_url)
         if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise LlmError("DEEPSEEK_BASE_URL 必须是无凭据、查询或片段的 HTTP(S) 根地址", "INVALID_REQUEST")
+            raise LlmError("DEEPSEEK_BASE_URL must be an HTTP(S) root URL without credentials, query, or fragment", "INVALID_REQUEST")
         effort = os.environ.get("DEEPSEEK_REASONING_EFFORT", "high")
         if effort not in {"off", "low", "high", "max"}:
-            raise LlmError(f"不支持的 reasoning effort: {effort}", "UNSUPPORTED_REASONING_EFFORT")
+            raise LlmError(f"unsupported reasoning effort: {effort}", "UNSUPPORTED_REASONING_EFFORT")
         image_mode = os.environ.get("DEEPSEEK_IMAGE_MODE", "auto")
         if image_mode not in {"auto", "inline", "required"}:
-            raise LlmError("DEEPSEEK_IMAGE_MODE 必须是 auto、inline 或 required", "INVALID_REQUEST")
+            raise LlmError("DEEPSEEK_IMAGE_MODE must be auto, inline, or required", "INVALID_REQUEST")
         try:
             max_tokens = int(os.environ.get("DEEPSEEK_MAX_TOKENS", str(DEFAULT_MAX_TOKENS)))
             timeout = int(os.environ.get("DEEPSEEK_STREAM_IDLE_TIMEOUT_MS", str(DEFAULT_STREAM_IDLE_TIMEOUT_MS)))
@@ -92,11 +92,11 @@ class DeepSeekConfig:
             file_expiry = int(os.environ.get("DEEPSEEK_FILE_EXPIRY_SECONDS", str(DEFAULT_FILE_EXPIRY_SECONDS)))
             retry_policy = RetryPolicy.from_env(retry_enabled)
         except ValueError as exc:
-            raise LlmError(f"DeepSeek 数值或重试配置无效: {exc}", "INVALID_REQUEST") from exc
+            raise LlmError(f"invalid DeepSeek numeric or retry configuration: {exc}", "INVALID_REQUEST") from exc
         if max_tokens <= 0 or timeout <= 0 or models_timeout <= 0 or models_max_age < 0 or files_timeout <= 0:
-            raise LlmError("DeepSeek 容量和超时必须大于 0，列表缓存时间不能为负数", "INVALID_REQUEST")
+            raise LlmError("DeepSeek capacity and timeouts must be greater than 0, and the listing cache age must not be negative", "INVALID_REQUEST")
         if not 3_600 <= file_expiry <= 2_592_000:
-            raise LlmError("DeepSeek 文件生命周期必须在 3600 到 2592000 秒之间", "INVALID_REQUEST")
+            raise LlmError("DeepSeek file lifetime must be between 3600 and 2592000 seconds", "INVALID_REQUEST")
         return cls(
             api_key=api_key,
             base_url=base_url,
@@ -126,7 +126,7 @@ def text_content(content: object) -> List[Dict[str, object]]:
     if isinstance(content, str):
         return [{"type": "text", "text": content}] if content else []
     if not isinstance(content, list):
-        raise LlmError("消息 content 必须是字符串或内容块列表", "INVALID_REQUEST")
+        raise LlmError("message content must be a string or a list of content blocks", "INVALID_REQUEST")
     return [dict(block) for block in content if isinstance(block, dict)]
 
 
@@ -166,12 +166,12 @@ def serialize_input_blocks(
         attachment = block.get("attachment", {})
         sha256 = str(attachment.get("sha256", "")) if isinstance(attachment, dict) else ""
         if sha256 not in images:
-            raise LlmError("DeepSeek Messages 请求图片缺失", "INVALID_REQUEST")
+            raise LlmError("DeepSeek Messages request image is missing", "INVALID_REQUEST")
         image = images[sha256]
         content.append({"type": "text", "text": f"[Image: {image.path.name}; sha256={image.sha256[:16]}]"})
         if file_ids is not None:
             if sha256 not in file_ids:
-                raise LlmError("DeepSeek Messages 请求图片 file id 缺失", "INVALID_REQUEST")
+                raise LlmError("DeepSeek Messages request image file id is missing", "INVALID_REQUEST")
             source = {"type": "file", "file_id": file_ids[sha256]}
         else:
             source = {
@@ -234,7 +234,7 @@ def serialize_history(
             content = [item]
             wire_role = "user"
         else:
-            raise LlmError(f"DeepSeek Messages 不支持历史角色: {role}", "INVALID_REQUEST")
+            raise LlmError(f"DeepSeek Messages does not support historical role: {role}", "INVALID_REQUEST")
 
         if not content:
             continue
@@ -293,11 +293,11 @@ def iter_sse(response: object, cancel_token: Optional[CancellationToken] = None)
             try:
                 event = json.loads(data)
             except json.JSONDecodeError as exc:
-                raise LlmError("DeepSeek Messages SSE 包含无效 JSON", "MALFORMED_RESPONSE") from exc
+                raise LlmError("DeepSeek Messages SSE contains invalid JSON", "MALFORMED_RESPONSE") from exc
             if not isinstance(event, dict) or not isinstance(event.get("type"), str):
-                raise LlmError("DeepSeek Messages SSE 事件缺少类型", "MALFORMED_RESPONSE")
+                raise LlmError("DeepSeek Messages SSE event is missing its type", "MALFORMED_RESPONSE")
             if event_name is not None and event_name != event["type"]:
-                raise LlmError("DeepSeek Messages SSE 事件类型不一致", "MALFORMED_RESPONSE")
+                raise LlmError("DeepSeek Messages SSE event type mismatch", "MALFORMED_RESPONSE")
             yield event
             event_name = None
             data_lines = []
@@ -309,12 +309,12 @@ def iter_sse(response: object, cancel_token: Optional[CancellationToken] = None)
         elif line.startswith("data:"):
             data_lines.append(line[5:].lstrip())
     if data_lines:
-        raise LlmError("DeepSeek Messages SSE 以不完整事件结束", "STREAM_CLOSED")
+        raise LlmError("DeepSeek Messages SSE ended with an incomplete event", "STREAM_CLOSED")
 
 
 def require_object(value: object) -> Dict[str, object]:
     if not isinstance(value, dict):
-        raise LlmError("DeepSeek Messages 需要 JSON 对象", "MALFORMED_RESPONSE")
+        raise LlmError("DeepSeek Messages requires a JSON object", "MALFORMED_RESPONSE")
     return value
 
 
@@ -331,7 +331,7 @@ def update_usage(usage: Dict[str, int], raw: object) -> None:
         if value is None:
             continue
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-            raise LlmError(f"DeepSeek Messages usage 字段无效: {wire}", "MALFORMED_RESPONSE")
+            raise LlmError(f"invalid DeepSeek Messages usage field: {wire}", "MALFORMED_RESPONSE")
         usage[local] = value
 
 
@@ -351,7 +351,7 @@ def translate_events(
         event_type = event["type"]
         if event_type == "message_start":
             if started:
-                raise LlmError("DeepSeek Messages 重复 message_start", "MALFORMED_RESPONSE")
+                raise LlmError("duplicate DeepSeek Messages message_start", "MALFORMED_RESPONSE")
             message = require_object(event.get("message"))
             update_usage(usage, message.get("usage", {}))
             if on_event is not None and message.get("usage") is not None:
@@ -361,12 +361,12 @@ def translate_events(
         if event_type not in {"content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}:
             continue
         if not started:
-            raise LlmError("DeepSeek Messages 内容事件早于 message_start", "MALFORMED_RESPONSE")
+            raise LlmError("DeepSeek Messages content event before message_start", "MALFORMED_RESPONSE")
 
         if event_type == "content_block_start":
             wire_index = event.get("index")
             if not isinstance(wire_index, int) or wire_index < 0 or wire_index in open_blocks:
-                raise LlmError("DeepSeek Messages 内容块索引无效", "MALFORMED_RESPONSE")
+                raise LlmError("invalid DeepSeek Messages content block index", "MALFORMED_RESPONSE")
             native = require_object(event.get("content_block"))
             block_type = native.get("type")
             if block_type == "text":
@@ -387,7 +387,7 @@ def translate_events(
                 }
                 replay = {"type": "tool-call"}
             else:
-                raise LlmError(f"DeepSeek Messages 不支持响应块: {block_type}", "UNSUPPORTED_CONTENT")
+                raise LlmError(f"unsupported DeepSeek Messages response block: {block_type}", "UNSUPPORTED_CONTENT")
             block["_json"] = ""
             block["_order"] = len(blocks) + len(open_blocks)
             open_blocks[wire_index] = {"block": block, "replay": replay}
@@ -398,7 +398,7 @@ def translate_events(
         if event_type in {"content_block_delta", "content_block_stop"}:
             wire_index = event.get("index")
             if not isinstance(wire_index, int) or wire_index not in open_blocks:
-                raise LlmError("DeepSeek Messages 内容块 delta/stop 无对应起点", "MALFORMED_RESPONSE")
+                raise LlmError("DeepSeek Messages content block delta/stop has no matching start", "MALFORMED_RESPONSE")
             entry = open_blocks[wire_index]
             block = entry["block"]
             replay = entry["replay"]
@@ -414,7 +414,7 @@ def translate_events(
                 elif delta_type == "input_json_delta" and block.get("type") == "tool-call":
                     block["_json"] = str(block.get("_json", "")) + str(delta.get("partial_json", ""))
                 else:
-                    raise LlmError(f"DeepSeek Messages 不支持 delta: {delta_type}", "MALFORMED_RESPONSE")
+                    raise LlmError(f"unsupported DeepSeek Messages delta: {delta_type}", "MALFORMED_RESPONSE")
                 if on_event is not None:
                     if delta_type == "text_delta":
                         on_event({"type": "text-delta", "index": wire_index, "text": str(delta.get("text", ""))})
@@ -435,7 +435,7 @@ def translate_events(
                     try:
                         block["arguments"] = json.loads(str(block["_json"]))
                     except json.JSONDecodeError as exc:
-                        raise LlmError("DeepSeek Messages 工具参数不是有效 JSON", "MALFORMED_RESPONSE") from exc
+                        raise LlmError("DeepSeek Messages tool arguments are not valid JSON", "MALFORMED_RESPONSE") from exc
                 block.pop("_json", None)
                 blocks.append(block)
                 replay_blocks.append(replay)
@@ -453,7 +453,7 @@ def translate_events(
                     "max_tokens": {"kind": "max-tokens"},
                 }
                 if reason not in reasons:
-                    raise LlmError(f"DeepSeek Messages 不支持 stop reason: {reason}", "MALFORMED_RESPONSE")
+                    raise LlmError(f"unsupported DeepSeek Messages stop reason: {reason}", "MALFORMED_RESPONSE")
                 finish_reason = reasons[reason]
             if "usage" in event:
                 update_usage(usage, event["usage"])
@@ -462,9 +462,9 @@ def translate_events(
             continue
 
         if finish_reason is None or open_blocks:
-            raise LlmError("DeepSeek Messages message_stop 时内容尚未收敛", "MALFORMED_RESPONSE")
+            raise LlmError("DeepSeek Messages content did not converge by message_stop", "MALFORMED_RESPONSE")
         if not blocks and finish_reason["kind"] == "stop":
-            raise LlmError("DeepSeek Messages 返回空内容", "EMPTY_RESPONSE")
+            raise LlmError("DeepSeek Messages returned empty content", "EMPTY_RESPONSE")
         if finish_reason["kind"] == "max-tokens":
             retained = [(block, replay) for block, replay in zip(blocks, replay_blocks) if block.get("type") != "tool-call"]
             blocks = [block for block, _ in retained]
@@ -487,7 +487,7 @@ def translate_events(
             },
         )
 
-    raise LlmError("DeepSeek Messages 在 message_stop 前关闭", "STREAM_CLOSED")
+    raise LlmError("DeepSeek Messages closed before message_stop", "STREAM_CLOSED")
 
 
 def retry_after_ms(value: Optional[str]) -> Optional[int]:
@@ -665,7 +665,7 @@ class DeepSeekModel(Model):
                         },
                     )
                 if token.wait(delay / 1000):
-                    raise RunCancelled("运行已取消")
+                    raise RunCancelled("Run cancelled")
 
     def _prepare_images(
         self,
@@ -681,7 +681,7 @@ class DeepSeekModel(Model):
             return images, None
         if config.image_mode == "inline" or not self.files_enabled:
             if config.image_mode == "required" and not self.files_enabled:
-                raise LlmError("llm.files 被禁用，不能使用 required 图片模式", "INVALID_REQUEST")
+                raise LlmError("llm.files is disabled; required image mode cannot be used", "INVALID_REQUEST")
             assert_inline_budget(messages, images)
             return images, None
         client = self._files_client(config)
@@ -758,7 +758,7 @@ class DeepSeekModel(Model):
 
     def list_files(self) -> Dict[str, object]:
         if not self.files_enabled:
-            raise LlmError("llm.files 当前被禁用", "DISABLED")
+            raise LlmError("llm.files is currently disabled", "DISABLED")
         return self._files_client(DeepSeekConfig.from_env(self.retry_enabled)).list()
 
     def _request_once(
@@ -776,7 +776,7 @@ class DeepSeekModel(Model):
         except (URLError, TimeoutError, socket.timeout, OSError) as exc:
             token.throw_if_cancelled()
             is_timeout = isinstance(exc, (TimeoutError, socket.timeout)) or isinstance(getattr(exc, "reason", None), socket.timeout)
-            raise LlmError("DeepSeek Messages 请求超时" if is_timeout else "DeepSeek Messages 传输失败", "TIMEOUT" if is_timeout else "TRANSPORT") from exc
+            raise LlmError("DeepSeek Messages request timed out" if is_timeout else "DeepSeek Messages transport failed", "TIMEOUT" if is_timeout else "TRANSPORT") from exc
         unregister = token.on_cancel(response.close)
         try:
             with response:
@@ -789,13 +789,13 @@ class DeepSeekModel(Model):
         except (URLError, TimeoutError, socket.timeout, OSError) as exc:
             token.throw_if_cancelled()
             is_timeout = isinstance(exc, (TimeoutError, socket.timeout)) or isinstance(getattr(exc, "reason", None), socket.timeout)
-            raise LlmError("DeepSeek Messages 流空闲超时" if is_timeout else "DeepSeek Messages 流传输失败", "TIMEOUT" if is_timeout else "TRANSPORT") from exc
+            raise LlmError("DeepSeek Messages stream idle timeout" if is_timeout else "DeepSeek Messages stream transport failed", "TIMEOUT" if is_timeout else "TRANSPORT") from exc
         finally:
             unregister()
 
     def list_models(self) -> Dict[str, object]:
         if not self.listing_enabled:
-            raise LlmError("llm.model-listing 当前被禁用", "DISABLED")
+            raise LlmError("llm.model-listing is currently disabled", "DISABLED")
         config = DeepSeekConfig.from_env(self.retry_enabled)
         with self._listing_lock:
             age_ms = (time.monotonic() - self._listing_cached_at) * 1000

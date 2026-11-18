@@ -12,7 +12,7 @@ SANDBOX_MODES = {"read-only", "workspace-write", "danger-full-access"}
 class SandboxPolicy:
     def __init__(self, mode: str, workspace: Path, terminals: Optional[ServiceContext] = None) -> None:
         if mode not in SANDBOX_MODES:
-            raise ValueError(f"未知文件策略: {mode}")
+            raise ValueError(f"unknown sandbox policy: {mode}")
         self.mode = mode
         self.workspace = workspace
         self.terminals = terminals
@@ -23,13 +23,13 @@ class SandboxPolicy:
             if event["type"] == "sandbox/mode":
                 override = event["payload"].get("mode")
                 if override not in SANDBOX_MODES:
-                    raise ValueError(f"会话包含无效 sandbox mode: {override}")
+                    raise ValueError(f"session contains invalid sandbox mode: {override}")
                 mode = override
         return SandboxPolicy(mode, self.workspace, self.terminals)
 
     def set_mode(self, session: SessionStore, session_id: str, mode: str) -> None:
         if mode not in SANDBOX_MODES:
-            raise ValueError(f"未知文件策略: {mode}")
+            raise ValueError(f"unknown sandbox policy: {mode}")
         terminal_service = self.terminals.optional("terminals") if self.terminals is not None else None
         if terminal_service is not None and terminal_service.list():
             raise RuntimeError("cannot change sandbox mode while persistent terminal sessions are open; close them first")
