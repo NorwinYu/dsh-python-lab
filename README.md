@@ -1567,6 +1567,22 @@ Layers 0 → 1 → 2 → 3, then run the Web workbench and watch a session end t
 | [AGENTS.md](AGENTS.md) | English | Instructions for coding agents |
 | [config.example.json](config.example.json) | — | Every flag with defaults |
 
+## Publishing the documentation site
+
+`docs/index.html` is a self-contained bilingual site (no build step, no external assets except the
+two screenshots in `docs/assets/`). The workflow at `.github/workflows/pages.yml` publishes `docs/`
+to GitHub Pages on every push that touches it.
+
+**One-time setup (repository owner):**
+
+1. Open **Settings → Pages**.
+2. Under *Build and deployment*, set **Source** to **GitHub Actions**.
+3. Re-run the `Pages` workflow (or push another change under `docs/`).
+
+Until that switch is flipped, the `Configure Pages` step fails with a 404 — the workflow itself is
+correct, the repository just does not have Pages enabled yet. The site URL will be
+`https://norwinyu.github.io/dsh-python-lab/`.
+
 ## License
 
 No license file is present yet. Treat the code as **all rights reserved** until the repository owner
