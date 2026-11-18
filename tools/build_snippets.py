@@ -98,6 +98,24 @@ SYMBOLS: List[Tuple[str, str, str]] = [
     # Chapter 24 — schedule
     ("schedule.deliver", "src/minidsh/schedule.py", "ScheduleService._deliver"),
     ("schedule.inbox", "src/minidsh/schedule.py", "ScheduleService._inbox"),
+    # Chapter 25 — goals
+    ("goals.update", "src/minidsh/goals.py", "GoalService.update"),
+    ("goals.round", "src/minidsh/goals.py", "GoalRoundDriver._run"),
+    # Chapter 26 — PTC
+    ("ptc.execute", "src/minidsh/ptc.py", "PtcService.execute"),
+    ("ptc.loop", "src/minidsh/ptc.py", "_Execution._loop"),
+    # Chapter 27 — presets
+    ("presets.bind", "src/minidsh/presets.py", "PresetService.bind"),
+    ("presets.compose", "src/minidsh/presets.py", "PresetService._compose"),
+    # Chapter 28 — HTTP host
+    ("server.publish", "src/minidsh/server.py", "SseBroker.publish"),
+    ("server.replay", "src/minidsh/server.py", "SseBroker.replay"),
+    # Chapter 30 — distributions
+    ("discovery.plugins", "src/minidsh/discovery.py", "discover_plugins"),
+    ("discovery.load", "src/minidsh/discovery.py", "PluginSpec.load"),
+    # Chapter 31 — DeepSeek adapter
+    ("deepseek.complete", "src/minidsh/deepseek.py", "DeepSeekModel.complete"),
+    ("deepseek.request", "src/minidsh/deepseek.py", "DeepSeekModel._request_once"),
 ]
 
 # (key, path, (start, end)) — slices inside a larger definition, 1-based inclusive.
@@ -116,6 +134,12 @@ RANGES: List[Tuple[str, str, Tuple[int, int]]] = [
     ("agent.streaming", "src/minidsh/agent.py", (205, 262)),
     # Chapter 19 — expansion checks
     ("codec.expand", "src/minidsh/stream_codec.py", (75, 108)),
+    # Chapter 29 — the workbench client (HTML/JS, extracted by line range)
+    ("web.run", "src/minidsh/web/index.html", (1377, 1440)),
+    ("web.row", "src/minidsh/web/index.html", (1059, 1115)),
+    # Chapter 30 — product shells are one function each
+    ("web.main", "packages/minidsh-web/src/minidsh_web/__init__.py", (1, 7)),
+    ("desktop.main", "packages/minidsh-desktop/src/minidsh_desktop/__init__.py", (1, 7)),
 ]
 
 

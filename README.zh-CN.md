@@ -1507,7 +1507,7 @@ MiniDSH 刻意做得很小，但它的接缝，和生产级智能体平台最终
 |---|---|---|
 | [README.md](README.md) | English | 本指南 |
 | [README.zh-CN.md](README.zh-CN.md) | 中文 | 中文指南 |
-| [docs/index.html](docs/index.html) | EN / 中文 | 教科书式站点：31 章，每章含概念、动机、实现、架构图、代码走读、验证、代价与业界对照 |
+| [docs/index.html](docs/index.html) | EN / 中文 | 教科书式站点：31 章、31 张架构图、76 段代码走读（2296 行源码、291 条逐行注释） |
 | [docs/modules.md](docs/modules.md) | English | 逐模块的职责、契约与陷阱 |
 | [docs/exercises.md](docs/exercises.md) | English | 与当下实践对应的可运行实验 |
 | [docs/mock-model.md](docs/mock-model.md) | English | 确定性的提示词语法 |
@@ -1520,7 +1520,7 @@ MiniDSH 刻意做得很小，但它的接缝，和生产级智能体平台最终
 
 ## 发布文档站点
 
-`docs/index.html` 是一个自包含的中英双语站点（无需构建步骤，除 `docs/assets/` 下两张截图与同目录的 `chapters.js` 外没有外部资源）。
+`docs/index.html` 是一个自包含的中英双语站点（无需构建步骤，除 `docs/assets/` 下两张截图与同目录的 `chapters.js`、`figures.js`、`snippets.js` 外没有外部资源）。站点按教科书组织：31 章每章都有自己的架构图，以及从真实源码裁出的代码走读，并配关键行的逐行注释。
 `.github/workflows/pages.yml` 会在每次改动 `docs/` 的推送后把该目录发布到 GitHub Pages。站点已上线：
 <https://norwinyu.github.io/dsh-python-lab/>。
 

@@ -184,6 +184,10 @@
     .rg b { font-size: 12.5px; font-weight: 650; }
     .rg span { color: var(--muted); font-size: 12px; line-height: 1.65; }
 
+    .curriculum-meta {
+      margin: -12px 0 22px; padding: 0; color: var(--faint);
+      font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .3px;
+    }
     .part { margin: 0 0 14px; }
     .part-head { display: flex; align-items: baseline; gap: 12px; padding: 26px 0 12px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
     .part-n { color: var(--accent); font-family: var(--font-mono); font-size: 11px; letter-spacing: 1.6px; }
@@ -215,7 +219,9 @@
       color: var(--faint); font-family: var(--font-mono); font-size: 9.5px; white-space: nowrap;
     }
     .ch-body { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
-    .blk { padding: 16px 22px; border-top: 1px solid var(--line); }
+    .blk { padding: 16px 22px; border-top: 1px solid var(--line); min-width: 0; }
+    .ch-body > * { min-width: 0; }
+    .blk pre, .blk .listing { max-width: 100%; }
     .ch-body > .blk:nth-child(1), .ch-body > .blk:nth-child(2) { border-top: 0; }
     .blk:nth-child(odd) { border-right: 1px solid var(--line); }
     .blk.wide { grid-column: 1 / -1; border-right: 0; }
@@ -522,6 +528,7 @@
           <div class="rg"><b data-i18n="rg2Title">Run as you read</b><span data-i18n="rg2Body">Every “verify” block is copy-paste runnable offline. Commands are the same ones the CLI uses.</span></div>
           <div class="rg"><b data-i18n="rg3Title">Compare with practice</b><span data-i18n="rg3Body">Each chapter ends with the industry reference it maps to, so the lab and the standard can be read side by side.</span></div>
         </div>
+        <p class="curriculum-meta" id="curriculumMeta"></p>
         <div class="curriculum">
           <div id="chapters"></div>
           <aside class="toc" id="toc" aria-label="Chapter index">
@@ -1006,8 +1013,20 @@ python3 -m pip install -e .
       }
     }
 
+    function renderMeta() {
+      const lines = Object.values(SNIPPETS).reduce((n, item) => n + item.code.split("\n").length, 0)
+      const notes = Object.values(FIGURES).reduce((n, figure) => n + (figure.code || []).reduce((m, entry) => m + (entry.lines || []).length, 0), 0)
+      const diagrams = Object.values(FIGURES).filter((figure) => figure.diagram).length
+      const meta = lang === "zh"
+        ? `${CHAPTERS.length} 章 · ${diagrams} 张架构图 · ${Object.keys(SNIPPETS).length} 个代码片段 / ${lines.toLocaleString()} 行源码 · ${notes} 条逐行注释`
+        : `${CHAPTERS.length} chapters · ${diagrams} diagrams · ${Object.keys(SNIPPETS).length} snippets / ${lines.toLocaleString()} lines of source · ${notes} line notes`
+      const node = document.getElementById("curriculumMeta")
+      if (node) node.textContent = meta
+    }
+
     function renderAll() {
       applyStatic()
+      renderMeta()
       renderChapters()
       renderToc()
       renderBoundaries()
