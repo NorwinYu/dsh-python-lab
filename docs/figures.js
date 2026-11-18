@@ -523,6 +523,76 @@ translate_events()    text / thinking / tool_use / usage / stop_reason
     ],
   },
   "sandbox": {
+    code: [
+        {
+              "key": "sandbox.resolve",
+              "title": {
+                    "en": "Session overrides are replayed, not stored",
+                    "zh": "会话覆盖靠重放，而不是存字段"
+              },
+              "note": {
+                    "en": "The policy object is immutable; a session's effective mode is derived by replaying its sandbox/mode events every time. That is why an override survives resume without being written anywhere else, and why an invalid value fails loudly instead of being ignored.",
+                    "zh": "策略对象不可变；会话的有效模式每次都通过重放 sandbox/mode 事件推导。因此覆盖能跨 resume 存活而无需另存，非法值也会明确失败而不是被忽略。"
+              },
+              "lines": [
+                    {
+                          "at": 22,
+                          "text": {
+                                "en": "Every call replays the whole event list.",
+                                "zh": "每次调用都重放整份事件列表。"
+                          }
+                    },
+                    {
+                          "at": 25,
+                          "text": {
+                                "en": "An unknown mode is corruption, not a fallback.",
+                                "zh": "未知模式视为损坏，而不是回退。"
+                          }
+                    },
+                    {
+                          "at": 28,
+                          "text": {
+                                "en": "A new policy object carries the resolved mode.",
+                                "zh": "新策略对象携带解析后的模式。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "sandbox.context",
+              "title": {
+                    "en": "The prompt sentence is derived from the same enum",
+                    "zh": "提示词句子来自同一个枚举"
+              },
+              "note": {
+                    "en": "Runtime context and enforcement share one source of truth: the mode string. The workspace path is JSON-encoded so a directory name with spaces or quotes cannot break the sentence.",
+                    "zh": "runtime context 与强制执行共享同一个事实来源：模式字符串。工作区路径用 JSON 编码，因此带空格或引号的目录名不会破坏这句话。"
+              },
+              "lines": [
+                    {
+                          "at": 40,
+                          "text": {
+                                "en": "read-only: explain the escalation path rather than a flat no.",
+                                "zh": "read-only：说明升级路径，而不是简单拒绝。"
+                          }
+                    },
+                    {
+                          "at": 47,
+                          "text": {
+                                "en": "Paths are data, so they get encoded.",
+                                "zh": "路径是数据，所以需要编码。"
+                          }
+                    },
+                    {
+                          "at": 52,
+                          "text": {
+                                "en": "Full access still says so explicitly.",
+                                "zh": "完全访问也会被明确说出。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "A path resolver that three different callers share: prompt, tools, processes.", zh: "一个被提示词、工具与进程三方共享的路径解析器。" },
     diagram: `tool call: path
     │
@@ -540,6 +610,83 @@ approval ──► execute ──► real process / file handle
        the prompt cannot promise what the policy forbids`,
   },
   "approval": {
+    code: [
+        {
+              "key": "approval.request",
+              "title": {
+                    "en": "Ask, decide, and record both",
+                    "zh": "询问、决定，并记录两者"
+              },
+              "note": {
+                    "en": "The audit pair is written around the decision: approval/asked before the approver is consulted, approval/decided after. Note the ordering — policy is read after the ask event, so a rejected-by-policy request is still visible in the log.",
+                    "zh": "审计对写于决定前后：询问前写 approval/asked，决定后写 approval/decided。注意顺序——策略在 ask 事件之后读取，因此被策略拒绝的请求同样留痕。"
+              },
+              "lines": [
+                    {
+                          "at": 74,
+                          "text": {
+                                "en": "The request id ties the pair together.",
+                                "zh": "request id 把这对事件绑定在一起。"
+                          }
+                    },
+                    {
+                          "at": 81,
+                          "text": {
+                                "en": "Asked is persisted before the human sees it.",
+                                "zh": "ask 事件在人类看到之前就已持久化。"
+                          }
+                    },
+                    {
+                          "at": 84,
+                          "text": {
+                                "en": "never rejects without prompting.",
+                                "zh": "never 直接拒绝，不弹提示。"
+                          }
+                    },
+                    {
+                          "at": 86,
+                          "text": {
+                                "en": "No answerer is unavailable, not allowed.",
+                                "zh": "没有回答者是 unavailable，而不是允许。"
+                          }
+                    },
+                    {
+                          "at": 91,
+                          "text": {
+                                "en": "Decided closes the pair with the outcome.",
+                                "zh": "decided 用结果闭合这对事件。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "approval.policy",
+              "title": {
+                    "en": "Policy is event-sourced too",
+                    "zh": "策略同样是事件溯源的"
+              },
+              "note": {
+                    "en": "Changing the approval policy mid-session appends approval/policy, and the effective policy is the last one replayed. The same replay pattern appears in the sandbox policy, which keeps both consistent and resumable.",
+                    "zh": "会话中途改审批策略会追加 approval/policy，有效策略就是重放后的最后一个。沙箱策略使用同样的重放模式，因此两者一致且可恢复。"
+              },
+              "lines": [
+                    {
+                          "at": 30,
+                          "text": {
+                                "en": "Replay from scratch on every call.",
+                                "zh": "每次调用都从头重放。"
+                          }
+                    },
+                    {
+                          "at": 33,
+                          "text": {
+                                "en": "Only two legal values.",
+                                "zh": "只有两个合法值。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "Four outcomes and a paired audit event; silence is never consent.", zh: "四种结果与成对审计事件；沉默从不等于同意。" },
     diagram: `mutating tool call
     │
@@ -557,6 +704,69 @@ approval/asked ─────────────► approval/decided
     └─ cancel during the prompt ─► cancelled, late answer discarded`,
   },
   "observations": {
+    code: [
+        {
+              "key": "observations.record",
+              "title": {
+                    "en": "Record in memory and in the log",
+                    "zh": "同时记录到内存与日志"
+              },
+              "note": {
+                    "en": "The version is a content hash, so it survives process restarts and does not depend on filesystem timestamps. Session-scoped keys mean two sessions can hold different observations of the same file.",
+                    "zh": "版本是内容哈希，因此能跨进程重启存活，也不依赖文件系统时间戳。按会话分键意味着两个会话可以对同一文件持有不同的观察。"
+              },
+              "lines": [
+                    {
+                          "at": 20,
+                          "text": {
+                                "en": "No session, no observation: nothing to validate later.",
+                                "zh": "没有会话就没有观察，之后也无从校验。"
+                          }
+                    },
+                    {
+                          "at": 24,
+                          "text": {
+                                "en": "Keyed by (session, path).",
+                                "zh": "以 (session, path) 为键。"
+                          }
+                    },
+                    {
+                          "at": 26,
+                          "text": {
+                                "en": "The event makes it survive resume.",
+                                "zh": "事件让它跨 resume 存活。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "observations.require",
+              "title": {
+                    "en": "Two ways to be wrong",
+                    "zh": "两种出错方式"
+              },
+              "note": {
+                    "en": "A write can fail because the session never read the file, or because the file changed after it was read. The messages are different on purpose: one tells the model to read first, the other tells it to read again.",
+                    "zh": "写入失败有两种原因：会话没读过该文件，或文件在读后被修改。两条报错刻意不同：一条让模型先读，另一条让它重读。"
+              },
+              "lines": [
+                    {
+                          "at": 34,
+                          "text": {
+                                "en": "Never read in this session.",
+                                "zh": "本会话从未读过。"
+                          }
+                    },
+                    {
+                          "at": 36,
+                          "text": {
+                                "en": "Read, but stale.",
+                                "zh": "读过，但已过期。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "A write is valid only against the version this session actually read.", zh: "写入只对「本会话真正读过的版本」有效。" },
     diagram: `read(path)
    │  hash content → version
@@ -576,6 +786,83 @@ require_current(path)
                                         └─ record new version`,
   },
   "seatbelt": {
+    code: [
+        {
+              "key": "seatbelt.profile",
+              "title": {
+                    "en": "A deny-by-default profile",
+                    "zh": "默认拒绝的配置"
+              },
+              "note": {
+                    "en": "The profile starts from deny and adds exactly what a shell needs: reads, process control, pseudo-terminals, outbound network. Write access is granted only under the workspace, the managed jobs directory and /private/tmp.",
+                    "zh": "配置从拒绝开始，只加上 Shell 必需的能力：读取、进程控制、伪终端、出站网络。写权限只授予工作区、受管任务目录与 /private/tmp。"
+              },
+              "lines": [
+                    {
+                          "at": 19,
+                          "text": {
+                                "en": "Full access means no profile at all.",
+                                "zh": "完全访问等于不生成配置。"
+                          }
+                    },
+                    {
+                          "at": 23,
+                          "text": {
+                                "en": "Deny is the default, not the exception.",
+                                "zh": "拒绝是默认，而不是例外。"
+                          }
+                    },
+                    {
+                          "at": 25,
+                          "text": {
+                                "en": "Execution needs this exact set on macOS.",
+                                "zh": "macOS 上执行命令需要这组精确权限。"
+                          }
+                    },
+                    {
+                          "at": 33,
+                          "text": {
+                                "en": "The only write allowlist.",
+                                "zh": "唯一的写白名单。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "seatbelt.argv",
+              "title": {
+                    "en": "Wrap the command, do not rewrite it",
+                    "zh": "包裹命令，而不是改写它"
+              },
+              "note": {
+                    "en": "The command string is passed to bash unchanged; sandbox-exec wraps the process. That keeps the tool's behaviour identical with and without isolation — only the permissions differ.",
+                    "zh": "命令字符串原样交给 bash，由 sandbox-exec 包裹进程。这样工具行为在有无隔离时完全一致，区别只在权限。"
+              },
+              "lines": [
+                    {
+                          "at": 43,
+                          "text": {
+                                "en": "Full access bypasses the wrapper entirely.",
+                                "zh": "完全访问绕过整个包裹层。"
+                          }
+                    },
+                    {
+                          "at": 46,
+                          "text": {
+                                "en": "Same shell flags either way.",
+                                "zh": "两种情况使用同样的 Shell 参数。"
+                          }
+                    },
+                    {
+                          "at": 47,
+                          "text": {
+                                "en": "sandbox-exec -p <profile> <shell>.",
+                                "zh": "sandbox-exec -p <profile> <shell>。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "The policy becomes a kernel profile; refusal arrives as errno, not as prose.", zh: "策略变成内核配置；拒绝以 errno 的形式出现，而不是文案。" },
     diagram: `session sandbox mode
     │
@@ -594,6 +881,90 @@ sandbox-exec -p <profile> /bin/bash -c "<cmd>"
 child: write outside ──► EPERM "Operation not permitted"`,
   },
   "processes": {
+    code: [
+        {
+              "key": "jobs.read",
+              "title": {
+                    "en": "Cursors, then trim",
+                    "zh": "先推游标，再收缩"
+              },
+              "note": {
+                    "en": "Reading advances a cursor per stream, so the next call returns only new output. After the first terminal read the ring shrinks to 16 KiB — the model already has the tail, and the full file is on disk if it needs more.",
+                    "zh": "读取会推进每条流的游标，下一次调用只返回新输出。首次终态读取后环收缩到 16 KiB——模型已经拿到尾部，需要更多时完整文件仍在磁盘上。"
+              },
+              "lines": [
+                    {
+                          "at": 323,
+                          "text": {
+                                "en": "Only bytes after the cursor are returned.",
+                                "zh": "只返回游标之后的字节。"
+                          }
+                    },
+                    {
+                          "at": 325,
+                          "text": {
+                                "en": "The cursor moves immediately, so a retry cannot duplicate output.",
+                                "zh": "游标立即前进，重试不会重复输出。"
+                          }
+                    },
+                    {
+                          "at": 327,
+                          "text": {
+                                "en": "The first terminal read is when trimming is safe.",
+                                "zh": "首次终态读取才是收缩内存的时机。"
+                          }
+                    },
+                    {
+                          "at": 342,
+                          "text": {
+                                "en": "Empty means empty, stated explicitly.",
+                                "zh": "空就明确说空。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "jobs.kill",
+              "title": {
+                    "en": "Kill the group, or hand it to the owner",
+                    "zh": "杀掉进程组，或交给所有者"
+              },
+              "note": {
+                    "en": "A managed job (workflow, PTC) has an on_cancel callback; a plain process is terminated by its process group. Status becomes stopping first, so a concurrent reader sees the transition rather than a vanished job.",
+                    "zh": "受管任务（workflow、PTC）有 on_cancel 回调；普通进程按进程组终止。状态先变成 stopping，并发读取者看到的是状态迁移，而不是任务凭空消失。"
+              },
+              "lines": [
+                    {
+                          "at": 353,
+                          "text": {
+                                "en": "Killing twice is idempotent.",
+                                "zh": "重复终止是幂等的。"
+                          }
+                    },
+                    {
+                          "at": 356,
+                          "text": {
+                                "en": "The transition is visible before the signal.",
+                                "zh": "状态迁移先于信号可见。"
+                          }
+                    },
+                    {
+                          "at": 359,
+                          "text": {
+                                "en": "Plain processes are killed by group.",
+                                "zh": "普通进程按组终止。"
+                          }
+                    },
+                    {
+                          "at": 361,
+                          "text": {
+                                "en": "Managed jobs cancel cooperatively.",
+                                "zh": "受管任务通过回调协作取消。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "Two shell models and one job registry: finite work and long-lived state.", zh: "两种 Shell 模型与一套任务注册表：有限工作与长驻状态。" },
     diagram: `bash tool
   ├─ foreground ──► wait(timeout)
@@ -610,6 +981,83 @@ PTY (persistent bash)
   /bin/bash ── marker ── eval cmd ── marker ── "[Command finished with exit code N]"`,
   },
   "credentials": {
+    code: [
+        {
+              "key": "shell.scrub",
+              "title": {
+                    "en": "Nine lines of environment hygiene",
+                    "zh": "九行环境清洁"
+              },
+              "note": {
+                    "en": "Filtering by name pattern means a new credential variable is covered automatically, without updating an allowlist. Managed variables are injected after filtering, so they cannot be dropped by the scrub.",
+                    "zh": "按名字模式过滤意味着新增凭据变量自动被覆盖，无需更新白名单。受管变量在过滤后注入，因此不会被清洗掉。"
+              },
+              "lines": [
+                    {
+                          "at": 33,
+                          "text": {
+                                "en": "A comprehension, so no variable leaks by accident.",
+                                "zh": "用推导式，变量不会意外泄漏。"
+                          }
+                    },
+                    {
+                          "at": 36,
+                          "text": {
+                                "en": "Case-insensitive pattern, not an exact list.",
+                                "zh": "大小写不敏感的模式，而不是精确清单。"
+                          }
+                    },
+                    {
+                          "at": 38,
+                          "text": {
+                                "en": "Managed values are added afterwards.",
+                                "zh": "受管值在之后加入。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "deepseek.env",
+              "title": {
+                    "en": "Configuration that refuses to guess",
+                    "zh": "拒绝猜测的配置"
+              },
+              "note": {
+                    "en": "Every environment value is validated at construction: the key must exist, the base URL must be a bare HTTP(S) root without credentials, and numeric bounds are checked. A misconfiguration fails before the first network call.",
+                    "zh": "每个环境值都在构造时校验：密钥必须存在，base URL 必须是无凭据的裸 HTTP(S) 根地址，数值边界也逐项检查。配置错误会在第一次网络调用之前失败。"
+              },
+              "lines": [
+                    {
+                          "at": 73,
+                          "text": {
+                                "en": "The only credential source.",
+                                "zh": "唯一的凭据来源。"
+                          }
+                    },
+                    {
+                          "at": 78,
+                          "text": {
+                                "en": "No userinfo, query or fragment in the base URL.",
+                                "zh": "base URL 不允许 userinfo、查询串或片段。"
+                          }
+                    },
+                    {
+                          "at": 96,
+                          "text": {
+                                "en": "Capacity and timeouts must be positive.",
+                                "zh": "容量与超时必须为正。"
+                          }
+                    },
+                    {
+                          "at": 98,
+                          "text": {
+                                "en": "Upload lifetime has a hard range.",
+                                "zh": "上传有效期有硬性范围。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "Filter by name, inject by allowlist, redact in diagnostics.", zh: "按名字过滤、按白名单注入、诊断里脱敏。" },
     diagram: `host environment
    │
@@ -626,6 +1074,145 @@ MCP header "\${credential:NAME}"
 DEEPSEEK_API_KEY ──► request header only (never persisted)`,
   },
   "session": {
+    code: [
+        {
+              "key": "session.append",
+              "title": {
+                    "en": "Append with a validation step in front",
+                    "zh": "追加之前先校验"
+              },
+              "note": {
+                    "en": "Before anything is written, the new event is folded together with the existing list; an invalid surface replacement therefore fails before it can corrupt a generation. Legacy single-file sessions take the publish path, new sessions append.",
+                    "zh": "写入之前，新事件先与现有列表做一次折叠；因此非法的 surface 替换在污染代际之前就会失败。旧的单文件会话走发布路径，新会话直接追加。"
+              },
+              "lines": [
+                    {
+                          "at": 291,
+                          "text": {
+                                "en": "The whole history is loaded to compute the next seq.",
+                                "zh": "为计算下一个 seq 加载全部历史。"
+                          }
+                    },
+                    {
+                          "at": 294,
+                          "text": {
+                                "en": "Sequence numbers are dense and contiguous.",
+                                "zh": "序号稠密且连续。"
+                          }
+                    },
+                    {
+                          "at": 303,
+                          "text": {
+                                "en": "Validate by folding before persisting.",
+                                "zh": "先折叠校验，再持久化。"
+                          }
+                    },
+                    {
+                          "at": 305,
+                          "text": {
+                                "en": "Legacy or migrated sessions publish a generation.",
+                                "zh": "旧格式或已迁移会话发布代际。"
+                          }
+                    },
+                    {
+                          "at": 310,
+                          "text": {
+                                "en": "fsync before returning, so a crash cannot lose the event.",
+                                "zh": "返回前 fsync，崩溃不会丢事件。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "session.lease",
+              "title": {
+                    "en": "A flock, an inode check, and thread reentry",
+                    "zh": "flock、inode 校验与线程重入"
+              },
+              "note": {
+                    "en": "Three details make the lease trustworthy: the same thread can re-enter (so nested helpers do not deadlock), the lock is non-blocking (so contention fails fast instead of hanging), and the inode is compared after locking (so a replaced lock file cannot split two writers).",
+                    "zh": "三个细节让租约可信：同线程可重入（嵌套调用不会死锁）、非阻塞加锁（竞争快速失败而不是挂住）、加锁后比对 inode（被替换的锁文件不会把两个写者分开）。"
+              },
+              "lines": [
+                    {
+                          "at": 166,
+                          "text": {
+                                "en": "Reentrancy is tracked by depth.",
+                                "zh": "通过 depth 跟踪重入。"
+                          }
+                    },
+                    {
+                          "at": 168,
+                          "text": {
+                                "en": "Another thread in this process is a conflict too.",
+                                "zh": "同进程的另一个线程同样算冲突。"
+                          }
+                    },
+                    {
+                          "at": 175,
+                          "text": {
+                                "en": "Non-blocking: fail fast, do not queue.",
+                                "zh": "非阻塞：快速失败，不排队。"
+                          }
+                    },
+                    {
+                          "at": 183,
+                          "text": {
+                                "en": "Inode identity defeats lock-file replacement.",
+                                "zh": "inode 身份可识别锁文件被替换。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "generations.publish",
+              "title": {
+                    "en": "Publish is immutable by construction",
+                    "zh": "发布在构造上就是不可变的"
+              },
+              "note": {
+                    "en": "Generation numbers are read, never reused; an existing target refuses to be overwritten. The manifest carries a SHA-256 of the exact bytes written, so a later read can prove the file was not edited.",
+                    "zh": "代际号只读取、不复用；已存在的目标拒绝覆盖。清单携带所写字节的 SHA-256，之后的读取可以证明文件未被改写。"
+              },
+              "lines": [
+                    {
+                          "at": 86,
+                          "text": {
+                                "en": "Zero-padded names sort lexicographically.",
+                                "zh": "零填充命名可按字典序排序。"
+                          }
+                    },
+                    {
+                          "at": 88,
+                          "text": {
+                                "en": "Immutability is enforced, not promised.",
+                                "zh": "不可变性是强制的，不是口头承诺。"
+                          }
+                    },
+                    {
+                          "at": 107,
+                          "text": {
+                                "en": "rename is the atomic publish step.",
+                                "zh": "rename 才是原子发布步骤。"
+                          }
+                    },
+                    {
+                          "at": 113,
+                          "text": {
+                                "en": "The hash covers exactly what is on disk.",
+                                "zh": "哈希覆盖磁盘上的确切字节。"
+                          }
+                    },
+                    {
+                          "at": 121,
+                          "text": {
+                                "en": "fsync the directory so the rename is durable.",
+                                "zh": "fsync 目录，让重命名持久化。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "Append-only facts behind an atomically swapped manifest.", zh: "只追加的事实，配一份原子切换的清单。" },
     diagram: `.minidsh/sessions/<id>/
   index.json              { generation, path, sha256 }
@@ -644,6 +1231,145 @@ read: validate identity · contiguous seq · shape · utf-8
 write: flock lease for the whole turn`,
   },
   "recovery": {
+    code: [
+{
+        "key": "recovery.closers",
+        "title": {
+              "en": "Recovery is a pure function over events",
+              "zh": "恢复是对事件的一次纯函数计算"
+        },
+        "note": {
+              "en": "Given the event list, the function walks the conversation tracking the open turn, the open step, and tool calls without results. It returns the events that would close the turn honestly — no I/O, no clock, no randomness, which is exactly what makes crash recovery testable.",
+              "zh": "给定事件列表，函数遍历对话，跟踪未闭合的回合、未闭合的步骤，以及没有结果的工具调用。它返回一组能诚实闭合回合的事件——无 I/O、无时钟、无随机，这正是崩溃恢复可测试的原因。"
+        },
+        "lines": [
+              {
+                    "at": 22,
+                    "text": {
+                          "en": "A turn/start opens the turn and clears the pending set.",
+                          "zh": "turn/start 打开回合并清空待定集合。"
+                    }
+              },
+              {
+                    "at": 39,
+                    "text": {
+                          "en": "A tool-call block enters pending, not yet started.",
+                          "zh": "tool-call 块进入待定集，尚未开始。"
+                    }
+              },
+              {
+                    "at": 46,
+                    "text": {
+                          "en": "A tool/call event flips it to started.",
+                          "zh": "tool/call 事件把它标记为已开始。"
+                    }
+              },
+              {
+                    "at": 51,
+                    "text": {
+                          "en": "A durable result removes it from pending.",
+                          "zh": "持久结果把它移出待定集。"
+                    }
+              },
+              {
+                    "at": 57,
+                    "text": {
+                          "en": "Started-but-unknown differs from never-started.",
+                          "zh": "已开始但结果未知，与从未开始不同。"
+                    }
+              },
+              {
+                    "at": 75,
+                    "text": {
+                          "en": "Close the step, then the turn.",
+                          "zh": "先关闭步骤，再关闭回合。"
+                    }
+              }
+        ]
+  },
+        {
+              "key": "session.repair",
+              "title": {
+                    "en": "Repair is a sequence, not a guess",
+                    "zh": "修复是流程，不是猜测"
+              },
+              "note": {
+                    "en": "Repair only acts when something is actually wrong, always writes a backup first, and records what it did in a session/repaired event. The closers come from a pure function, which makes the recovery logic testable without touching the filesystem.",
+                    "zh": "只在确实有问题时才动手，永远先写备份，并把做了什么记录进 session/repaired 事件。收尾动作来自一个纯函数，因此恢复逻辑无需触碰文件系统即可测试。"
+              },
+              "lines": [
+                    {
+                          "at": 361,
+                          "text": {
+                                "en": "Healthy session: do nothing, report nothing changed.",
+                                "zh": "健康会话：什么都不做，报告未改变。"
+                          }
+                    },
+                    {
+                          "at": 363,
+                          "text": {
+                                "en": "Backup precedes every mutation.",
+                                "zh": "任何修改之前先备份。"
+                          }
+                    },
+                    {
+                          "at": 368,
+                          "text": {
+                                "en": "Closers are appended in order.",
+                                "zh": "收尾事件按序追加。"
+                          }
+                    },
+                    {
+                          "at": 370,
+                          "text": {
+                                "en": "The session records that it was repaired.",
+                                "zh": "会话记录自己曾被修复。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "session.fork",
+              "title": {
+                    "en": "Fork copies, then closes open work",
+                    "zh": "分支先复制，再收尾未完成的工作"
+              },
+              "note": {
+                    "en": "Fork never mutates the parent. It slices events, rewrites session ids, appends forked closers so the branch is not left mid-turn, and publishes a brand-new session id after checking for a conflict.",
+                    "zh": "分支永不动父会话。它切出事件、重写 session id、追加 forked 收尾以免分支停在半回合，并在检查冲突后发布全新的会话 id。"
+              },
+              "lines": [
+                    {
+                          "at": 411,
+                          "text": {
+                                "en": "The slice is inclusive of the chosen seq.",
+                                "zh": "切片包含指定的 seq。"
+                          }
+                    },
+                    {
+                          "at": 414,
+                          "text": {
+                                "en": "A fork cannot inherit an open turn.",
+                                "zh": "分支不能继承未闭合的回合。"
+                          }
+                    },
+                    {
+                          "at": 419,
+                          "text": {
+                                "en": "Every copied event is retargeted.",
+                                "zh": "每个复制的事件都改指向新会话。"
+                          }
+                    },
+                    {
+                          "at": 432,
+                          "text": {
+                                "en": "ID collisions are refused, not resolved.",
+                                "zh": "ID 冲突直接拒绝，不做调和。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "Close interrupted work honestly; never invent a result.", zh: "诚实地收尾中断的工作；绝不编造结果。" },
     diagram: `load(id)
   └─ truncated tail ──► fail closed (normal read)

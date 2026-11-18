@@ -48,6 +48,32 @@ SYMBOLS: List[Tuple[str, str, str]] = [
     ("tools.atomic", "src/minidsh/tools.py", "atomic_write"),
     # Chapter 8 — streaming
     ("deepseek.sse", "src/minidsh/deepseek.py", "iter_sse"),
+    # Chapter 9 — sandbox policy
+    ("sandbox.resolve", "src/minidsh/sandbox.py", "SandboxPolicy.resolve"),
+    ("sandbox.context", "src/minidsh/sandbox.py", "SandboxPolicy.context"),
+    # Chapter 10 — approval
+    ("approval.request", "src/minidsh/approval.py", "ApprovalService.request"),
+    ("approval.policy", "src/minidsh/approval.py", "ApprovalService.effective_policy"),
+    # Chapter 11 — observations
+    ("observations.record", "src/minidsh/observations.py", "ObservationStore.record"),
+    ("observations.require", "src/minidsh/observations.py", "ObservationStore.require_current"),
+    # Chapter 12 — kernel sandbox
+    ("seatbelt.profile", "src/minidsh/seatbelt.py", "profile"),
+    ("seatbelt.argv", "src/minidsh/seatbelt.py", "SeatbeltService.argv"),
+    # Chapter 13 — processes and jobs
+    ("jobs.read", "src/minidsh/jobs.py", "JobService.read"),
+    ("jobs.kill", "src/minidsh/jobs.py", "JobService.kill"),
+    # Chapter 14 — credentials
+    ("shell.scrub", "src/minidsh/shell.py", "scrub_environment"),
+    ("deepseek.env", "src/minidsh/deepseek.py", "DeepSeekConfig.from_env"),
+    # Chapter 15 — sessions
+    ("session.append", "src/minidsh/session.py", "JsonlSessionStore._append_current"),
+    ("session.lease", "src/minidsh/session.py", "JsonlSessionStore._acquire"),
+    ("generations.publish", "src/minidsh/generations.py", "publish"),
+    # Chapter 16 — recovery
+    ("session.repair", "src/minidsh/session.py", "JsonlSessionStore.repair"),
+    ("recovery.closers", "src/minidsh/session_recovery.py", "open_turn_closers"),
+    ("session.fork", "src/minidsh/session.py", "JsonlSessionStore.fork"),
 ]
 
 # (key, path, (start, end)) — slices inside a larger definition, 1-based inclusive.
