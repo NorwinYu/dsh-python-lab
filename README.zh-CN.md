@@ -237,6 +237,8 @@ dsh-python-lab/
 ├── docs/
 │   ├── index.html            Textbook site shell (EN / 中文)
 │   ├── chapters.js           31 bilingual chapters: concept → cost
+│   ├── figures.js            Per-chapter architecture diagrams
+│   ├── snippets.js           Generated verbatim code slices
 │   ├── assets/               Workbench screenshots used by the site
 │   ├── modules.md            Module atlas: role, contracts, and traps per file
 │   ├── exercises.md          Runnable labs mapped to 2026 practice
@@ -1504,7 +1506,7 @@ MiniDSH 刻意做得很小，但它的接缝，和生产级智能体平台最终
 |---|---|---|
 | [README.md](README.md) | English | 本指南 |
 | [README.zh-CN.md](README.zh-CN.md) | 中文 | 中文指南 |
-| [docs/index.html](docs/index.html) | EN / 中文 | 教科书式站点：31 章，每章含概念、动机、实现、验证、代价与业界对照 |
+| [docs/index.html](docs/index.html) | EN / 中文 | 教科书式站点：31 章，每章含概念、动机、实现、架构图、代码走读、验证、代价与业界对照 |
 | [docs/modules.md](docs/modules.md) | English | 逐模块的职责、契约与陷阱 |
 | [docs/exercises.md](docs/exercises.md) | English | 与当下实践对应的可运行实验 |
 | [docs/mock-model.md](docs/mock-model.md) | English | 确定性的提示词语法 |

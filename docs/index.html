@@ -234,6 +234,42 @@
     .obs { margin: 8px 0 0; padding: 0 0 0 16px; display: grid; gap: 4px; }
     .obs li { color: var(--muted); font-size: 12px; line-height: 1.68; }
     .obs li::marker { color: var(--accent); }
+    .blk.diagram pre {
+      margin: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 9px;
+      background: var(--bg-soft); color: var(--text-2);
+      font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
+      white-space: pre; overflow-x: auto;
+    }
+    .blk.diagram .cap { margin: 9px 0 0; color: var(--faint); font-size: 11.5px; }
+    .blk.code h5 { color: var(--accent); }
+    .snippet { margin-top: 14px; }
+    .snippet:first-of-type { margin-top: 6px; }
+    .snip-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .snip-head b { font-size: 12.5px; font-weight: 650; color: var(--text); }
+    .snip-head em { color: var(--faint); font-family: var(--font-mono); font-size: 9.5px; font-style: normal; }
+    .listing {
+      margin: 7px 0 0; border: 1px solid var(--line); border-radius: 9px;
+      background: var(--bg-soft); overflow: hidden;
+    }
+    .listing .cl { display: grid; grid-template-columns: 44px minmax(0, 1fr); }
+    .listing .cl.hit { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+    .listing .ln {
+      padding: 0 8px 0 0; color: var(--faint); text-align: right;
+      font-family: var(--font-mono); font-size: 10px; line-height: 1.65;
+      user-select: none; border-right: 1px solid var(--line);
+    }
+    .listing .src {
+      padding: 0 10px; color: var(--text-2);
+      font-family: var(--font-mono); font-size: 10.5px; line-height: 1.65;
+      white-space: pre; overflow-x: auto;
+    }
+    .listing .cl:first-child .src, .listing .cl:first-child .ln { padding-top: 8px; }
+    .listing .cl:last-child .src, .listing .cl:last-child .ln { padding-bottom: 8px; }
+    .snippet .note { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.72; }
+    .linenotes { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 3px; }
+    .linenotes li { color: var(--faint); font-size: 11.5px; line-height: 1.6; }
+    .linenotes b { color: var(--accent); font-family: var(--font-mono); font-size: 10px; font-weight: 600; margin-right: 6px; }
+    .blk.code { border-top: 1px solid var(--line); }
     .blk.tradeoff { background: color-mix(in srgb, var(--warn) 4%, transparent); }
     .blk.tradeoff h5 { color: var(--warn); }
     .blk.industry h5 { color: var(--ok); }
@@ -597,6 +633,8 @@ python3 -m pip install -e .
 
   <div class="toast" id="toast"></div>
 
+  <script src="snippets.js"></script>
+  <script src="figures.js"></script>
   <script src="chapters.js"></script>
   <script>
     "use strict"
@@ -722,8 +760,8 @@ python3 -m pip install -e .
     ]
 
     const BLOCKS = {
-      en: { concept: "Concept", why: "Why it exists", how: "How it is implemented", tryit: "Verify it", observe: "What to observe", tradeoff: "Cost and boundary", industry: "Industry reference" },
-      zh: { concept: "概念", why: "为什么需要", how: "本仓库如何实现", tryit: "动手验证", observe: "观察什么", tradeoff: "代价与边界", industry: "业界对照" },
+      en: { concept: "Concept", why: "Why it exists", how: "How it is implemented", architecture: "Architecture", code: "Code walkthrough", tryit: "Verify it", observe: "What to observe", tradeoff: "Cost and boundary", industry: "Industry reference" },
+      zh: { concept: "概念", why: "为什么需要", how: "本仓库如何实现", architecture: "架构图", code: "代码走读", tryit: "动手验证", observe: "观察什么", tradeoff: "代价与边界", industry: "业界对照" },
     }
 
     const STORAGE = { lang: "minidsh-site.lang", theme: "minidsh-site.theme" }
@@ -735,6 +773,8 @@ python3 -m pip install -e .
 
     const t = (key) => (I18N[lang] || I18N.en)[key] || I18N.en[key] || key
     const CHAPTERS = window.MINIDSH_CHAPTERS || []
+    const SNIPPETS = window.MINIDSH_SNIPPETS || {}
+    const FIGURES = window.MINIDSH_FIGURES || {}
 
     function applyStatic() {
       document.documentElement.lang = lang === "zh" ? "zh-CN" : "en"
@@ -812,6 +852,9 @@ python3 -m pip install -e .
       body.append(block("concept", copy.concept))
       body.append(block("why", copy.why))
       body.append(block("how", copy.how, "wide", c.flags))
+      const figure = FIGURES[c.id]
+      if (figure && figure.diagram) body.append(diagramBlock(figure))
+      if (figure && figure.code && figure.code.length) body.append(codeBlock(figure))
       body.append(verifyBlock(copy))
       body.append(block("tradeoff", copy.tradeoff, "tradeoff"))
       body.append(industryBlock(c.en.industry || c.industry))
@@ -832,6 +875,59 @@ python3 -m pip install -e .
           row.append(tag)
         }
         node.append(row)
+      }
+      return node
+    }
+
+    function diagramBlock(figure) {
+      const node = el("div", "blk wide diagram")
+      node.append(el("h5", "", BLOCKS[lang].architecture))
+      node.append(el("pre", "diagram", figure.diagram))
+      if (figure.caption) {
+        const cap = el("p", "cap")
+        cap.append(rich(figure.caption[lang] || figure.caption.en))
+        node.append(cap)
+      }
+      return node
+    }
+
+    function codeBlock(figure) {
+      const node = el("div", "blk wide code")
+      node.append(el("h5", "", BLOCKS[lang].code))
+      for (const entry of figure.code) {
+        const snippet = SNIPPETS[entry.key]
+        if (!snippet) continue
+        const wrap = el("div", "snippet")
+        const head = el("div", "snip-head")
+        head.append(el("b", "", (entry.title || {})[lang] || entry.title.en))
+        const lines = snippet.code.split("\n")
+        head.append(el("em", "", `${snippet.file}:${snippet.start}-${snippet.start + lines.length - 1}`))
+        wrap.append(head)
+        const listing = el("div", "listing")
+        const marked = new Set((entry.lines || []).map((item) => item.at))
+        lines.forEach((text, index) => {
+          const number = snippet.start + index
+          const row = el("div", `cl${marked.has(number) ? " hit" : ""}`)
+          row.append(el("span", "ln", String(number)), el("span", "src", text))
+          listing.append(row)
+        })
+        wrap.append(listing)
+        if (entry.note) {
+          const note = el("p", "note")
+          note.append(rich(entry.note[lang] || entry.note.en))
+          wrap.append(note)
+        }
+        if (entry.lines && entry.lines.length) {
+          const notes = el("ul", "linenotes")
+          for (const item of entry.lines) {
+            const li = el("li")
+            li.append(el("b", "", `L${item.at}`))
+            li.append(rich((item.text || {})[lang] || item.text.en))
+            notes.append(li)
+          }
+          wrap.append(notes)
+        }
+        node.append(wrap)
       }
       return node
     }

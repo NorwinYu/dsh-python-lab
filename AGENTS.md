@@ -76,6 +76,20 @@ in both languages. A quick headless check:
    `README.md`, `README.zh-CN.md`, `docs/modules.md`, `docs/upstream-parity.md` and its `.zh-CN`
    counterpart, and `config.example.json` if it is a flag.
 
+## Generated documentation data
+
+`docs/snippets.js` is generated from the real source by `tools/build_snippets.py`. Never edit it by
+hand. After changing any file that a chapter quotes, run:
+
+```bash
+python3 tools/build_snippets.py           # regenerate
+python3 tools/build_snippets.py --check   # verify no drift (use in CI)
+```
+
+`docs/chapters.js` (prose) and `docs/figures.js` (diagrams, captions, snippet references) are hand
+written. A figure's `code[].key` must exist in `snippets.js`, otherwise the chapter silently renders
+without that snippet — check the browser console after editing.
+
 ## Where things live
 
 | Concern | File |
