@@ -248,7 +248,8 @@ dsh-python-lab/
 ├── config.example.json       Every feature flag in one place
 ├── pyproject.toml            Zero-dependency core; optional [desktop] extra
 ├── docs/
-│   ├── index.html            Bilingual GitHub Pages site (EN / 中文)
+│   ├── index.html            Textbook site shell (EN / 中文)
+│   ├── chapters.js           31 bilingual chapters: concept → cost
 │   ├── assets/               Workbench screenshots used by the site
 │   ├── modules.md            Module atlas: role, contracts, and traps per file
 │   ├── exercises.md          Runnable labs mapped to 2026 practice
@@ -1561,7 +1562,7 @@ Layers 0 → 1 → 2 → 3, then run the Web workbench and watch a session end t
 |---|---|---|
 | [README.md](README.md) | English | This guide |
 | [README.zh-CN.md](README.zh-CN.md) | 中文 | Chinese guide |
-| [docs/index.html](docs/index.html) | EN / 中文 | GitHub Pages site with the same structure |
+| [docs/index.html](docs/index.html) | EN / 中文 | Textbook site: 31 chapters, each with concept, rationale, implementation, verification, cost and industry reference |
 | [docs/modules.md](docs/modules.md) | English | Per-module role, contracts, traps |
 | [docs/exercises.md](docs/exercises.md) | English | Runnable labs tied to current practice |
 | [docs/mock-model.md](docs/mock-model.md) | English | Deterministic prompt grammar |

@@ -235,7 +235,8 @@ dsh-python-lab/
 ├── config.example.json       Every feature flag in one place
 ├── pyproject.toml            Zero-dependency core; optional [desktop] extra
 ├── docs/
-│   ├── index.html            Bilingual GitHub Pages site (EN / 中文)
+│   ├── index.html            Textbook site shell (EN / 中文)
+│   ├── chapters.js           31 bilingual chapters: concept → cost
 │   ├── assets/               Workbench screenshots used by the site
 │   ├── modules.md            Module atlas: role, contracts, and traps per file
 │   ├── exercises.md          Runnable labs mapped to 2026 practice

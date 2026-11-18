@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <meta name="description" content="MiniDSH is a layered, inspectable agent harness in Python: plugin kernel, agent loop, tools, permissions, sessions, subagents, MCP, skills, scheduling, goals, and PTC — every layer runnable and observable.">
-  <meta property="og:title" content="MiniDSH · Agent Harness Lab">
-  <meta property="og:description" content="Take an agent harness apart, layer by layer. Dependency-free Python, deterministic mock model, real processes.">
+  <meta name="description" content="MiniDSH is a layered, inspectable agent harness in Python. A textbook-style tour of every mechanism: plugin kernel, agent loop, tools, permissions, sessions, subagents, workflows, MCP, skills, scheduling, goals, and PTC.">
+  <meta property="og:title" content="MiniDSH · Agent Harness Textbook">
+  <meta property="og:description" content="Every mechanism explained like a textbook chapter: concept, why it exists, how it is implemented, how to verify it, and what it costs.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://norwinyu.github.io/dsh-python-lab/">
   <meta property="og:image" content="https://norwinyu.github.io/dsh-python-lab/assets/workbench-dark.png">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234c53d6'/%3E%3Cpath d='M9 10h5.2c4 0 6.8 2.4 6.8 6s-2.8 6-6.8 6H9V10zm3.4 2.9v6.2h1.7c2.2 0 3.5-1.2 3.5-3.1s-1.3-3.1-3.5-3.1h-1.7z' fill='white'/%3E%3C/svg%3E">
-  <title>MiniDSH · Agent Harness Lab</title>
+  <title>MiniDSH · Agent Harness Textbook</title>
   <style>
     :root {
       --font-sans: "Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -36,7 +36,7 @@
       --danger: #f07171;
       --radius: 16px;
       --radius-sm: 10px;
-      --max: 1180px;
+      --max: 1200px;
     }
     html[data-theme="light"] {
       --bg: #f6f7fb;
@@ -59,7 +59,7 @@
     }
 
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
+    html { scroll-behavior: smooth; scroll-padding-top: 80px; }
     body {
       margin: 0;
       background: var(--bg);
@@ -73,30 +73,25 @@
     button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
     code, pre { font-family: var(--font-mono); }
     ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
-
     .wrap { width: min(var(--max), calc(100% - 48px)); margin: 0 auto; }
 
-    /* nav */
+    /* ── nav ─────────────────────────────────────────────── */
     .nav {
-      position: sticky;
-      top: 0;
-      z-index: 30;
+      position: sticky; top: 0; z-index: 30;
       backdrop-filter: blur(14px);
-      background: color-mix(in srgb, var(--bg) 82%, transparent);
+      background: color-mix(in srgb, var(--bg) 84%, transparent);
       border-bottom: 1px solid var(--line);
     }
-    .nav-inner { display: flex; align-items: center; gap: 22px; height: 64px; }
+    .nav-inner { display: flex; align-items: center; gap: 20px; height: 62px; }
     .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -.3px; }
     .brand-mark {
       display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px;
       background: linear-gradient(150deg, var(--accent-2), var(--accent)); color: #fff;
       font-size: 12px; font-weight: 800;
     }
-    .nav-links { display: flex; gap: 4px; margin-left: 8px; }
-    .nav-links a {
-      padding: 6px 10px; border-radius: 8px; color: var(--muted);
-      font-size: 13px; font-weight: 550;
-    }
+    .brand small { display: block; color: var(--faint); font-size: 9.5px; font-weight: 600; letter-spacing: 1.4px; text-transform: uppercase; }
+    .nav-links { display: flex; gap: 2px; }
+    .nav-links a { padding: 6px 10px; border-radius: 8px; color: var(--muted); font-size: 13px; font-weight: 550; }
     .nav-links a:hover { color: var(--text); background: var(--surface); }
     .nav-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
     .icon-btn {
@@ -104,48 +99,40 @@
       border: 1px solid var(--line); border-radius: 8px; color: var(--muted);
       background: var(--surface); font-size: 12px; white-space: nowrap;
     }
-    #langToggle { font-weight: 600; letter-spacing: .2px; }
     .icon-btn:hover { color: var(--text); border-color: var(--line-strong); }
+    #langToggle { font-weight: 600; }
 
-    /* hero */
-    .hero { position: relative; overflow: hidden; padding: 84px 0 64px; }
+    /* ── hero ────────────────────────────────────────────── */
+    .hero { position: relative; overflow: hidden; padding: 78px 0 56px; }
     .hero::before {
-      content: "";
-      position: absolute; inset: -40% -20% auto -20%; height: 720px;
+      content: ""; position: absolute; inset: -40% -20% auto -20%; height: 700px;
       background:
-        radial-gradient(560px 320px at 30% 20%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%),
-        radial-gradient(520px 300px at 75% 0%, color-mix(in srgb, #35c7d8 14%, transparent), transparent 70%);
+        radial-gradient(560px 320px at 28% 18%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%),
+        radial-gradient(520px 300px at 76% 0%, color-mix(in srgb, #35c7d8 14%, transparent), transparent 70%);
       pointer-events: none;
     }
     .hero-grid {
       position: absolute; inset: 0;
       background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
       background-size: 64px 64px;
-      mask-image: radial-gradient(70% 60% at 50% 10%, black, transparent 75%);
-      opacity: .35;
-      pointer-events: none;
+      mask-image: radial-gradient(70% 60% at 50% 8%, black, transparent 75%);
+      opacity: .32; pointer-events: none;
     }
-    .hero-inner { position: relative; display: grid; gap: 26px; }
+    .hero-inner { position: relative; display: grid; gap: 22px; }
     .badge {
       display: inline-flex; align-items: center; gap: 8px; width: fit-content;
       padding: 5px 11px; border: 1px solid var(--accent-line); border-radius: 999px;
       background: var(--accent-soft); color: var(--accent);
-      font-size: 11.5px; font-weight: 600; letter-spacing: .2px;
+      font-size: 11.5px; font-weight: 600;
     }
     .badge .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ok); }
-    h1 {
-      margin: 0; max-width: 20ch;
-      font-size: clamp(38px, 6vw, 66px); line-height: 1.03; letter-spacing: -2.4px; font-weight: 720;
-    }
-    h1 .grad {
-      background: linear-gradient(100deg, var(--accent-2), #7dd3fc 55%, #c4b5fd);
-      -webkit-background-clip: text; background-clip: text; color: transparent;
-    }
-    .lede { margin: 0; max-width: 66ch; color: var(--text-2); font-size: clamp(15px, 1.6vw, 18px); line-height: 1.7; }
+    h1 { margin: 0; max-width: 22ch; font-size: clamp(36px, 5.6vw, 60px); line-height: 1.05; letter-spacing: -2.2px; font-weight: 720; }
+    h1 .grad { background: linear-gradient(100deg, var(--accent-2), #7dd3fc 55%, #c4b5fd); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .lede { margin: 0; max-width: 70ch; color: var(--text-2); font-size: clamp(15px, 1.5vw, 17.5px); line-height: 1.72; }
     .cta { display: flex; flex-wrap: wrap; gap: 10px; }
     .btn {
       display: inline-flex; align-items: center; gap: 8px;
-      padding: 11px 18px; border: 1px solid var(--line-strong); border-radius: 11px;
+      padding: 10px 17px; border: 1px solid var(--line-strong); border-radius: 11px;
       background: var(--surface); color: var(--text); font-size: 13.5px; font-weight: 600;
       transition: transform .1s, border-color .15s, background .15s;
     }
@@ -156,104 +143,153 @@
       box-shadow: 0 10px 30px -14px color-mix(in srgb, var(--accent) 90%, transparent);
     }
     .btn svg { width: 14px; height: 14px; }
-
     .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-    .stat { padding: 18px 20px; background: var(--surface); display: grid; gap: 2px; }
-    .stat b { font-size: 24px; font-weight: 700; letter-spacing: -.8px; }
-    .stat span { color: var(--muted); font-size: 11.5px; letter-spacing: .3px; }
+    .stat { padding: 16px 18px; background: var(--surface); display: grid; gap: 1px; }
+    .stat b { font-size: 22px; font-weight: 700; letter-spacing: -.8px; }
+    .stat span { color: var(--muted); font-size: 11px; letter-spacing: .3px; }
 
-    /* sections */
-    section.block { padding: 74px 0; border-top: 1px solid var(--line); }
-    .sec-head { display: grid; gap: 10px; margin-bottom: 34px; max-width: 72ch; }
-    .kicker { color: var(--accent); font-family: var(--font-mono); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }
-    h2 { margin: 0; font-size: clamp(24px, 3vw, 34px); letter-spacing: -1px; font-weight: 700; }
-    .sec-head p { margin: 0; color: var(--muted); font-size: 15px; }
+    /* ── sections ────────────────────────────────────────── */
+    section.block { padding: 68px 0; border-top: 1px solid var(--line); }
+    .sec-head { display: grid; gap: 9px; margin-bottom: 30px; max-width: 76ch; }
+    .kicker { color: var(--accent); font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 2px; text-transform: uppercase; }
+    h2 { margin: 0; font-size: clamp(23px, 2.8vw, 32px); letter-spacing: -.9px; font-weight: 700; }
+    .sec-head p { margin: 0; color: var(--muted); font-size: 14.5px; }
 
     .rules { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-    .rule {
-      padding: 24px; border: 1px solid var(--line); border-radius: var(--radius);
-      background: var(--surface); display: grid; gap: 8px;
-    }
-    .rule-n { color: var(--accent); font-family: var(--font-mono); font-size: 11px; letter-spacing: 1px; }
-    .rule h3 { margin: 0; font-size: 15.5px; font-weight: 650; letter-spacing: -.2px; }
-    .rule p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+    .rule { padding: 22px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); display: grid; gap: 7px; }
+    .rule-n { color: var(--accent); font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 1px; }
+    .rule h3 { margin: 0; font-size: 15px; font-weight: 650; }
+    .rule p { margin: 0; color: var(--muted); font-size: 12.8px; line-height: 1.7; }
 
-    /* architecture */
-    .arch { padding: 26px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
-    .arch-row { display: grid; gap: 10px; }
-    .arch-label { color: var(--faint); font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase; }
+    /* ── architecture ────────────────────────────────────── */
+    .arch { padding: 24px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .arch-row { display: grid; gap: 8px; }
+    .arch-label { color: var(--faint); font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 1.6px; text-transform: uppercase; }
     .arch-cols { display: flex; flex-wrap: wrap; gap: 8px; }
-    .arch-card {
-      flex: 1 1 176px; padding: 13px 14px; border: 1px solid var(--line);
-      border-radius: var(--radius-sm); background: var(--surface-2);
-    }
+    .arch-card { flex: 1 1 178px; padding: 12px 13px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
     .arch-card h4 { margin: 0 0 3px; font-size: 12.5px; font-weight: 650; }
-    .arch-card p { margin: 0; color: var(--faint); font-family: var(--font-mono); font-size: 10px; line-height: 1.6; }
+    .arch-card p { margin: 0; color: var(--faint); font-family: var(--font-mono); font-size: 9.5px; line-height: 1.6; }
     .arch-card.accent { border-color: var(--accent-line); background: var(--accent-soft); }
     .arch-card.accent h4 { color: var(--accent); }
-    .arch-arrow { display: grid; place-items: center; color: var(--faint); font-size: 14px; padding: 2px 0; }
+    .arch-arrow { display: grid; place-items: center; color: var(--faint); font-size: 13px; padding: 1px 0; }
 
-    /* features */
-    .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
-    .feature {
-      display: grid; gap: 10px; align-content: start;
-      padding: 20px 20px 16px; border: 1px solid var(--line); border-radius: var(--radius);
-      background: var(--surface); transition: border-color .16s, transform .16s;
+    /* ── curriculum shell ───────────────────────────────── */
+    .curriculum { display: grid; grid-template-columns: minmax(0, 1fr) 226px; gap: 40px; align-items: start; }
+    .reading-guide {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+      padding: 18px 20px; margin-bottom: 30px;
+      border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
     }
-    .feature:hover { border-color: var(--accent-line); transform: translateY(-2px); }
-    .feature-top { display: flex; align-items: center; gap: 9px; }
-    .feature-n {
-      display: grid; place-items: center; width: 24px; height: 24px; flex: 0 0 auto;
-      border-radius: 7px; background: var(--accent-soft); color: var(--accent);
-      font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+    .rg { display: grid; gap: 3px; }
+    .rg b { font-size: 12.5px; font-weight: 650; }
+    .rg span { color: var(--muted); font-size: 12px; line-height: 1.65; }
+
+    .part { margin: 0 0 14px; }
+    .part-head { display: flex; align-items: baseline; gap: 12px; padding: 26px 0 12px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+    .part-n { color: var(--accent); font-family: var(--font-mono); font-size: 11px; letter-spacing: 1.6px; }
+    .part-head h3 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.5px; }
+    .part-head p { margin: 0 0 0 auto; max-width: 52ch; color: var(--faint); font-size: 12px; text-align: right; }
+
+    /* chapter */
+    .chapter {
+      scroll-margin-top: 78px;
+      border: 1px solid var(--line); border-radius: var(--radius);
+      background: var(--surface); margin-bottom: 18px; overflow: hidden;
     }
-    .feature h3 { margin: 0; font-size: 14.5px; font-weight: 650; letter-spacing: -.2px; }
-    .feature p { margin: 0; color: var(--muted); font-size: 12.8px; line-height: 1.72; }
-    .feature .meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-top: 2px; }
+    .chapter[hidden] { display: none; }
+    .ch-head {
+      display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 14px; align-items: start;
+      padding: 20px 22px 16px; border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, var(--surface-2), var(--surface));
+    }
+    .ch-n {
+      display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px;
+      border: 1px solid var(--accent-line); background: var(--accent-soft);
+      color: var(--accent); font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+    }
+    .ch-head h4 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.4px; }
+    .ch-thesis { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.65; max-width: 74ch; }
+    .ch-files { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; max-width: 220px; }
+    .file {
+      padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px;
+      color: var(--faint); font-family: var(--font-mono); font-size: 9.5px; white-space: nowrap;
+    }
+    .ch-body { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+    .blk { padding: 16px 22px; border-top: 1px solid var(--line); }
+    .ch-body > .blk:nth-child(1), .ch-body > .blk:nth-child(2) { border-top: 0; }
+    .blk:nth-child(odd) { border-right: 1px solid var(--line); }
+    .blk.wide { grid-column: 1 / -1; border-right: 0; }
+    .blk h5 {
+      margin: 0 0 6px; color: var(--faint);
+      font-size: 9.5px; font-weight: 700; letter-spacing: 1.3px; text-transform: uppercase;
+    }
+    .blk p { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.78; }
+    .blk p + p { margin-top: 7px; }
+    .blk code { padding: 1px 4px; border-radius: 4px; background: var(--bg-soft); color: var(--accent); font-size: 11.5px; }
+    .blk pre {
+      margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--bg-soft); color: var(--text-2); font-size: 11px; line-height: 1.7;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .obs { margin: 8px 0 0; padding: 0 0 0 16px; display: grid; gap: 4px; }
+    .obs li { color: var(--muted); font-size: 12px; line-height: 1.68; }
+    .obs li::marker { color: var(--accent); }
+    .blk.tradeoff { background: color-mix(in srgb, var(--warn) 4%, transparent); }
+    .blk.tradeoff h5 { color: var(--warn); }
+    .blk.industry h5 { color: var(--ok); }
+    .ind-link {
+      display: inline-flex; align-items: center; gap: 5px; margin-top: 4px;
+      color: var(--ok); font-size: 12px; font-weight: 600;
+    }
+    .ind-link:hover { text-decoration: underline; }
+    .tagrow { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
     .tag {
-      padding: 2px 7px; border: 1px solid var(--line); border-radius: 6px;
-      color: var(--faint); font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .3px;
+      padding: 1px 7px; border: 1px solid var(--line); border-radius: 6px;
+      color: var(--faint); font-family: var(--font-mono); font-size: 9.5px;
     }
     .tag.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
     .tag.off { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
-    .tag.opt { color: var(--accent); border-color: var(--accent-line); }
-    .feature pre {
-      margin: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
-      background: var(--bg-soft); color: var(--text-2); font-size: 10.5px; line-height: 1.6;
-      white-space: pre-wrap; word-break: break-word;
-    }
 
-    /* layers */
-    .layers { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 2px 20px; }
-    .layer {
-      display: grid; grid-template-columns: 30px 1fr; gap: 8px; align-items: baseline;
-      padding: 8px 0; border-bottom: 1px dashed var(--line);
+    /* toc */
+    .toc { position: sticky; top: 82px; display: grid; gap: 12px; max-height: calc(100vh - 110px); overflow-y: auto; padding-right: 4px; }
+    .toc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .toc-head span { color: var(--faint); font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 1.4px; text-transform: uppercase; }
+    .toc-head b { color: var(--muted); font-family: var(--font-mono); font-size: 10px; font-weight: 600; }
+    .toc-search {
+      width: 100%; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px;
+      background: var(--surface); color: var(--text); font-size: 11.5px;
     }
-    .layer b { color: var(--accent); font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; }
-    .layer span { color: var(--text-2); font-size: 12.5px; }
-    .layer em { color: var(--faint); font-style: normal; font-size: 11px; }
+    .toc-search:focus { outline: none; border-color: var(--accent-line); }
+    .toc-part { display: grid; gap: 2px; }
+    .toc-part > b { color: var(--faint); font-size: 9.5px; font-weight: 650; letter-spacing: 1.1px; text-transform: uppercase; padding: 6px 0 2px; }
+    .toc a {
+      display: grid; grid-template-columns: 22px 1fr; gap: 5px;
+      padding: 3px 6px; border-radius: 6px; color: var(--muted); font-size: 11.5px; line-height: 1.45;
+    }
+    .toc a:hover { color: var(--text); background: var(--surface); }
+    .toc a.active { color: var(--accent); background: var(--accent-soft); }
+    .toc a em { color: var(--faint); font-style: normal; font-family: var(--font-mono); font-size: 9.5px; }
+    .toc-empty { color: var(--faint); font-size: 11.5px; padding: 6px; }
 
-    /* table */
+    /* ── table ───────────────────────────────────────────── */
     .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
     table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
     th, td { padding: 11px 15px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
-    th { color: var(--faint); font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; font-weight: 650; background: var(--surface-2); }
+    th { color: var(--faint); font-size: 9.5px; letter-spacing: 1.2px; text-transform: uppercase; font-weight: 650; background: var(--surface-2); }
     tr:last-child td { border-bottom: 0; }
-    td:first-child { color: var(--text); font-weight: 600; white-space: nowrap; }
+    td:first-child { color: var(--text); font-weight: 600; }
     td { color: var(--muted); }
     td code { color: var(--accent); font-size: 11px; }
 
-    /* shots */
+    /* ── shots / quickstart / docs ───────────────────────── */
     .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .shot { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
     .shot img { display: block; width: 100%; height: auto; }
-    .shot figcaption { padding: 10px 14px; color: var(--faint); font-size: 11px; border-top: 1px solid var(--line); }
-
-    /* quickstart */
+    .shot figcaption { padding: 9px 13px; color: var(--faint); font-size: 11px; border-top: 1px solid var(--line); }
     .quick-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 16px; align-items: start; }
     .code-card { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
     .code-head { display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
-    .code-head span { color: var(--faint); font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+    .code-head span { color: var(--faint); font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 1px; text-transform: uppercase; }
     .code-head button { color: var(--muted); font-size: 11px; font-weight: 600; }
     .code-head button:hover { color: var(--accent); }
     .code-card pre { margin: 0; padding: 16px; overflow-x: auto; color: var(--text-2); font-size: 12px; line-height: 1.85; }
@@ -263,27 +299,19 @@
     .note-item { display: grid; grid-template-columns: 18px 1fr; gap: 9px; font-size: 13px; color: var(--muted); }
     .note-item b { color: var(--text); font-weight: 620; }
     .note-item .mark { color: var(--accent); font-family: var(--font-mono); }
-
-    /* docs links */
-    .docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
-    .doc {
-      display: grid; gap: 4px; padding: 16px 18px; border: 1px solid var(--line);
-      border-radius: var(--radius-sm); background: var(--surface); transition: border-color .15s, transform .15s;
-    }
+    .docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+    .doc { display: grid; gap: 3px; padding: 15px 17px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); transition: border-color .15s, transform .15s; }
     .doc:hover { border-color: var(--accent-line); transform: translateY(-1px); }
-    .doc b { font-size: 13px; font-weight: 650; }
+    .doc b { font-size: 12.5px; font-weight: 650; }
     .doc span { color: var(--faint); font-size: 11.5px; }
-    .doc em { color: var(--accent); font-style: normal; font-family: var(--font-mono); font-size: 10px; }
-
+    .doc em { color: var(--accent); font-style: normal; font-family: var(--font-mono); font-size: 9.5px; }
     .boundaries { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px 24px; padding: 0; margin: 0; list-style: none; }
-    .boundaries li { display: grid; grid-template-columns: 16px 1fr; gap: 8px; color: var(--muted); font-size: 13px; }
+    .boundaries li { display: grid; grid-template-columns: 16px 1fr; gap: 8px; color: var(--muted); font-size: 12.8px; }
     .boundaries li::before { content: "×"; color: var(--danger); font-family: var(--font-mono); }
-
-    footer { padding: 40px 0 56px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; }
+    footer { padding: 38px 0 54px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; }
     .foot-inner { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between; }
     .foot-links { display: flex; gap: 14px; flex-wrap: wrap; }
     .foot-links a:hover { color: var(--accent); }
-
     .toast {
       position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(8px);
       padding: 9px 15px; border: 1px solid var(--line-strong); border-radius: 9px;
@@ -292,17 +320,34 @@
     }
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+    @media (max-width: 1080px) {
+      .curriculum { grid-template-columns: minmax(0, 1fr); }
+      .toc { display: none; }
+      .ch-head { grid-template-columns: 46px minmax(0, 1fr); }
+      .ch-files { grid-column: 2; justify-content: flex-start; max-width: none; }
+    }
     @media (max-width: 960px) {
-      .rules, .stats { grid-template-columns: repeat(2, 1fr); }
+      .rules, .stats, .reading-guide { grid-template-columns: repeat(2, 1fr); }
       .quick-grid, .shots { grid-template-columns: 1fr; }
       .nav-links { display: none; }
+      .part-head { flex-wrap: wrap; }
+      .part-head p { margin-left: 0; text-align: left; max-width: none; }
     }
-    @media (max-width: 600px) {
-      .wrap { width: calc(100% - 32px); }
-      .hero { padding: 56px 0 44px; }
-      .rules, .stats { grid-template-columns: 1fr; }
-      section.block { padding: 52px 0; }
-      .features { grid-template-columns: 1fr; }
+    @media (max-width: 720px) {
+      .wrap { width: calc(100% - 30px); }
+      .hero { padding: 52px 0 40px; }
+      section.block { padding: 48px 0; }
+      .ch-body { grid-template-columns: 1fr; }
+      .blk:nth-child(odd) { border-right: 0; }
+      .blk { border-top: 1px solid var(--line) !important; padding: 14px 16px; }
+      .ch-body > .blk:nth-child(1) { border-top: 0 !important; }
+      .ch-head { padding: 16px 16px 12px; }
+      .rules, .stats, .reading-guide { grid-template-columns: 1fr; }
+    }
+    @media print {
+      .nav, .toc, .cta, .toast { display: none !important; }
+      .chapter { break-inside: avoid; border-color: #ccc; }
+      body { background: #fff; color: #000; }
     }
     @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
   </style>
@@ -310,12 +355,12 @@
 <body>
   <header class="nav">
     <div class="wrap nav-inner">
-      <a class="brand" href="#top"><span class="brand-mark">DS</span><span>MiniDSH</span></a>
+      <a class="brand" href="#top"><span class="brand-mark">DS</span><span>MiniDSH<small>Harness Lab</small></span></a>
       <nav class="nav-links">
         <a href="#what" data-i18n="navWhat">Overview</a>
         <a href="#architecture" data-i18n="navArch">Architecture</a>
-        <a href="#features" data-i18n="navFeatures">Features</a>
-        <a href="#layers" data-i18n="navLayers">Path</a>
+        <a href="#curriculum" data-i18n="navCurriculum">Chapters</a>
+        <a href="#workbench" data-i18n="navWorkbench">Workbench</a>
         <a href="#start" data-i18n="navStart">Quickstart</a>
         <a href="#docs" data-i18n="navDocs">Docs</a>
       </nav>
@@ -336,23 +381,19 @@
         <span class="badge"><span class="dot"></span><span data-i18n="badge">Dependency-free · runs offline · Python 3.9+</span></span>
         <h1><span data-i18n="heroLine1">Take an agent harness</span><br><span class="grad" data-i18n="heroLine2">apart, layer by layer.</span></h1>
         <p class="lede" data-i18n="heroLede">
-          MiniDSH is a working agent harness in about 12,000 lines of Python: plugin kernel, agent loop,
-          tool registry, permission stack, event-sourced sessions, subagents, workflows, MCP, skills,
-          scheduling, goals, and programmatic tool calling. Every layer can be switched off, observed,
-          and verified on its own.
+          A working agent harness in about 12,000 lines of Python, explained as a textbook: for every
+          mechanism you get the concept, the failure it prevents, how this repository implements it,
+          a command that proves it, and what it costs.
         </p>
         <div class="cta">
-          <a class="btn primary" href="https://github.com/NorwinYu/dsh-python-lab" target="_blank" rel="noreferrer">
-            <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.64 0 8.13c0 3.59 2.29 6.64 5.47 7.72.4.07.55-.18.55-.4 0-.2-.01-.86-.01-1.56-2.01.37-2.53-.5-2.69-.96-.09-.23-.48-.96-.82-1.15-.28-.15-.68-.52-.01-.53.63-.01 1.08.59 1.23.83.72 1.23 1.87.88 2.33.67.07-.53.28-.88.51-1.08-1.78-.2-3.64-.9-3.64-4.02 0-.89.31-1.62.82-2.19-.08-.2-.36-1.04.08-2.16 0 0 .67-.22 2.2.83a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.05 2.2-.83 2.2-.83.44 1.12.16 1.96.08 2.16.51.57.82 1.3.82 2.19 0 3.13-1.87 3.82-3.65 4.02.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .22.15.48.55.4A8.13 8.13 0 0 0 16 8.13C16 3.64 12.42 0 8 0Z"/></svg>
-            <span data-i18n="ctaRepo">Open the repository</span>
-          </a>
-          <a class="btn" href="https://github.com/NorwinYu/dsh-python-lab/blob/main/README.md" target="_blank" rel="noreferrer" data-i18n="ctaReadme">Read the guide</a>
-          <a class="btn" href="#start" data-i18n="ctaStart">Run it in 60 seconds</a>
+          <a class="btn primary" href="#curriculum" data-i18n="ctaRead">Start reading</a>
+          <a class="btn" href="https://github.com/NorwinYu/dsh-python-lab/blob/main/README.md" target="_blank" rel="noreferrer" data-i18n="ctaGuide">Full guide</a>
+          <a class="btn" href="#start" data-i18n="ctaRun">Run it in 60 seconds</a>
         </div>
         <div class="stats">
-          <div class="stat"><b>12k</b><span data-i18n="statLines">lines of readable Python</span></div>
-          <div class="stat"><b>36</b><span data-i18n="statModules">modules, one job each</span></div>
-          <div class="stat"><b>25</b><span data-i18n="statLayers">switchable feature layers</span></div>
+          <div class="stat"><b>31</b><span data-i18n="statChapters">textbook chapters</span></div>
+          <div class="stat"><b>6</b><span data-i18n="statParts">parts, kernel to product</span></div>
+          <div class="stat"><b>53</b><span data-i18n="statFlags">feature flags</span></div>
           <div class="stat"><b>0</b><span data-i18n="statDeps">core dependencies</span></div>
         </div>
       </div>
@@ -390,7 +431,7 @@
         <div class="sec-head">
           <span class="kicker" data-i18n="kickerArch">Architecture</span>
           <h2 data-i18n="archTitle">One composition root, three products</h2>
-          <p data-i18n="archLede">CLI, HTTP workbench, and Desktop share a single Application. Below it, every capability is a service resolved from the same context.</p>
+          <p data-i18n="archLede">CLI, HTTP workbench, and Desktop share a single Application. Below it, every capability is a service resolved from the same context. The chapters follow this stack from the bottom up.</p>
         </div>
         <div class="arch">
           <div class="arch-row">
@@ -433,42 +474,25 @@
       </div>
     </section>
 
-    <section class="block" id="features">
+    <section class="block" id="curriculum">
       <div class="wrap">
         <div class="sec-head">
-          <span class="kicker" data-i18n="kickerFeatures">Feature map</span>
-          <h2 data-i18n="featuresTitle">Every layer, what it does, and how to try it</h2>
-          <p data-i18n="featuresLede">Twenty-five switchable layers. Each card is one capability: what it implements, whether it is on by default, and a command that proves it works.</p>
+          <span class="kicker" data-i18n="kickerCurriculum">Textbook</span>
+          <h2 data-i18n="curriculumTitle">Every mechanism, one chapter</h2>
+          <p data-i18n="curriculumLede">Each chapter has the same six blocks, so you can compare mechanisms directly: concept, why it exists, how it is implemented, how to verify it, what it costs, and where it sits in current practice.</p>
         </div>
-        <div class="features" id="featureGrid"></div>
-      </div>
-    </section>
-
-    <section class="block" id="layers">
-      <div class="wrap">
-        <div class="sec-head">
-          <span class="kicker" data-i18n="kickerPath">Learning path</span>
-          <h2 data-i18n="layersTitle">Twenty-seven stages, in reading order</h2>
-          <p data-i18n="layersLede">Read top to bottom the first time. Each layer names the module and the question it answers.</p>
+        <div class="reading-guide">
+          <div class="rg"><b data-i18n="rg1Title">Read in order</b><span data-i18n="rg1Body">Parts run kernel → runtime → safety → memory → collaboration → product. Later chapters assume the earlier ones.</span></div>
+          <div class="rg"><b data-i18n="rg2Title">Run as you read</b><span data-i18n="rg2Body">Every “verify” block is copy-paste runnable offline. Commands are the same ones the CLI uses.</span></div>
+          <div class="rg"><b data-i18n="rg3Title">Compare with practice</b><span data-i18n="rg3Body">Each chapter ends with the industry reference it maps to, so the lab and the standard can be read side by side.</span></div>
         </div>
-        <div class="layers" id="layerList"></div>
-      </div>
-    </section>
-
-    <section class="block" id="industry">
-      <div class="wrap">
-        <div class="sec-head">
-          <span class="kicker" data-i18n="kickerIndustry">Industry alignment</span>
-          <h2 data-i18n="industryTitle">Where this maps to 2026 practice</h2>
-          <p data-i18n="industryLede">Small on purpose, but the seams line up with how production agent platforms converged. Each row is a place to compare the lab with the current answer.</p>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th data-i18n="thPractice">Practice</th><th data-i18n="thWhere">In this repo</th><th data-i18n="thLearn">What it teaches</th></tr>
-            </thead>
-            <tbody id="industryBody"></tbody>
-          </table>
+        <div class="curriculum">
+          <div id="chapters"></div>
+          <aside class="toc" id="toc" aria-label="Chapter index">
+            <div class="toc-head"><span data-i18n="tocTitle">Chapters</span><b id="tocCount">31</b></div>
+            <input class="toc-search" id="tocSearch" data-i18n-placeholder="tocSearch" placeholder="Filter chapters…" aria-label="Filter chapters">
+            <div id="tocBody"></div>
+          </aside>
         </div>
       </div>
     </section>
@@ -502,10 +526,7 @@
         </div>
         <div class="quick-grid">
           <div class="code-card">
-            <div class="code-head">
-              <span>terminal</span>
-              <button id="copyCode" data-i18n="copy">Copy</button>
-            </div>
+            <div class="code-head"><span>terminal</span><button id="copyCode" data-i18n="copy">Copy</button></div>
             <pre id="codeBlock"><span class="c"># clone and install (stdlib only)</span>
 git clone https://github.com/NorwinYu/dsh-python-lab.git
 cd dsh-python-lab &amp;&amp; python3 -m venv .venv &amp;&amp; . .venv/bin/activate
@@ -530,8 +551,8 @@ python3 -m pip install -e .
           <div class="notes">
             <div class="note-item"><span class="mark">01</span><div><b data-i18n="note1Title">No key required.</b> <span data-i18n="note1Body">The mock model maps explicit prefixes to tool intents. Chinese aliases exist too, so sessions can mix languages.</span></div></div>
             <div class="note-item"><span class="mark">02</span><div><b data-i18n="note2Title">Read-only by default.</b> <span data-i18n="note2Body">Writes and shells need both a wider sandbox policy and an approval — two separate decisions on purpose.</span></div></div>
-            <div class="note-item"><span class="mark">03</span><div><b data-i18n="note3Title">Everything is inspectable.</b> <span data-i18n="note3Body">Sessions are JSONL generations. <code>minidsh session</code>, <code>surface</code>, and <code>stream</code> show raw events, the model view, and recorded chunks.</span></div></div>
-            <div class="note-item"><span class="mark">04</span><div><b data-i18n="note4Title">Real model is opt-in.</b> <span data-i18n="note4Body">Export <code>DEEPSEEK_API_KEY</code>, disable <code>llm.mock</code>, enable <code>llm.deepseek</code>. Keys are read from the environment only.</span></div></div>
+            <div class="note-item"><span class="mark">03</span><div><b data-i18n="note3Title">Everything is inspectable.</b> <span data-i18n="note3Body">Sessions are JSONL generations. session, surface, and stream commands show raw events, the model view, and recorded chunks.</span></div></div>
+            <div class="note-item"><span class="mark">04</span><div><b data-i18n="note4Title">Real model is opt-in.</b> <span data-i18n="note4Body">Export DEEPSEEK_API_KEY, disable llm.mock, enable llm.deepseek. Keys are read from the environment only.</span></div></div>
           </div>
         </div>
       </div>
@@ -562,10 +583,7 @@ python3 -m pip install -e .
 
   <footer>
     <div class="wrap foot-inner">
-      <div>
-        <strong style="color: var(--text-2)">MiniDSH</strong> ·
-        <span data-i18n="footNote">A teaching harness. Not an official DeepSeek Harness port, and not for public deployment.</span>
-      </div>
+      <div><strong style="color: var(--text-2)">MiniDSH</strong> · <span data-i18n="footNote">A teaching harness, MIT licensed. Not an official DeepSeek Harness port, and not for public deployment.</span></div>
       <div class="foot-links">
         <a href="https://github.com/NorwinYu/dsh-python-lab" target="_blank" rel="noreferrer">GitHub</a>
         <a href="https://github.com/NorwinYu/dsh-python-lab/blob/main/README.md" target="_blank" rel="noreferrer">README</a>
@@ -579,20 +597,21 @@ python3 -m pip install -e .
 
   <div class="toast" id="toast"></div>
 
+  <script src="chapters.js"></script>
   <script>
     "use strict"
     const REPO = "https://github.com/NorwinYu/dsh-python-lab/blob/main/"
 
     const I18N = {
       en: {
-        navWhat: "Overview", navArch: "Architecture", navFeatures: "Features", navLayers: "Path",
-        navStart: "Quickstart", navDocs: "Docs",
+        navWhat: "Overview", navArch: "Architecture", navCurriculum: "Chapters",
+        navWorkbench: "Workbench", navStart: "Quickstart", navDocs: "Docs",
         badge: "Dependency-free · runs offline · Python 3.9+",
         heroLine1: "Take an agent harness", heroLine2: "apart, layer by layer.",
-        heroLede: "MiniDSH is a working agent harness in about 12,000 lines of Python: plugin kernel, agent loop, tool registry, permission stack, event-sourced sessions, subagents, workflows, MCP, skills, scheduling, goals, and programmatic tool calling. Every layer can be switched off, observed, and verified on its own.",
-        ctaRepo: "Open the repository", ctaReadme: "Read the guide", ctaStart: "Run it in 60 seconds",
-        statLines: "lines of readable Python", statModules: "modules, one job each",
-        statLayers: "switchable feature layers", statDeps: "core dependencies",
+        heroLede: "A working agent harness in about 12,000 lines of Python, explained as a textbook: for every mechanism you get the concept, the failure it prevents, how this repository implements it, a command that proves it, and what it costs.",
+        ctaRead: "Start reading", ctaGuide: "Full guide", ctaRun: "Run it in 60 seconds",
+        statChapters: "textbook chapters", statParts: "parts, kernel to product",
+        statFlags: "feature flags", statDeps: "core dependencies",
         kickerDesign: "Design stance",
         whatTitle: "Most frameworks hide the interesting parts",
         whatLede: "MiniDSH optimizes for the opposite. Three rules make the whole harness inspectable — and make every failure explainable.",
@@ -603,22 +622,21 @@ python3 -m pip install -e .
         rule3Title: "Fail closed",
         rule3Body: "Missing approver, unknown flag, corrupted session, missing preset, oversized payload — every one stops the operation with an explicit error instead of degrading silently.",
         kickerArch: "Architecture", archTitle: "One composition root, three products",
-        archLede: "CLI, HTTP workbench, and Desktop share a single Application. Below it, every capability is a service resolved from the same context.",
+        archLede: "CLI, HTTP workbench, and Desktop share a single Application. Below it, every capability is a service resolved from the same context. The chapters follow this stack from the bottom up.",
         archProducts: "Products", archComposition: "Composition", archRuntime: "Runtime services", archModels: "Model adapters",
-        kickerFeatures: "Feature map", featuresTitle: "Every layer, what it does, and how to try it",
-        featuresLede: "Twenty-five switchable layers. Each card is one capability: what it implements, whether it is on by default, and a command that proves it works.",
-        kickerPath: "Learning path", layersTitle: "Twenty-seven stages, in reading order",
-        layersLede: "Stages are numbered 0–26. Read top to bottom the first time; each stage names the module and the question it answers.",
-        kickerIndustry: "Industry alignment", industryTitle: "Where this maps to 2026 practice",
-        industryLede: "Small on purpose, but the seams line up with how production agent platforms converged. Each row is a place to compare the lab with the current answer.",
-        thPractice: "Practice", thWhere: "In this repo", thLearn: "What it teaches",
+        kickerCurriculum: "Textbook", curriculumTitle: "Every mechanism, one chapter",
+        curriculumLede: "Each chapter has the same six blocks, so you can compare mechanisms directly: concept, why it exists, how it is implemented, how to verify it, what it costs, and where it sits in current practice.",
+        rg1Title: "Read in order", rg1Body: "Parts run kernel → runtime → safety → memory → collaboration → product. Later chapters assume the earlier ones.",
+        rg2Title: "Run as you read", rg2Body: "Every “verify” block is copy-paste runnable offline. Commands are the same ones the CLI uses.",
+        rg3Title: "Compare with practice", rg3Body: "Each chapter ends with the industry reference it maps to, so the lab and the standard can be read side by side.",
+        tocTitle: "Chapters", tocSearch: "Filter chapters…",
         kickerWorkbench: "Workbench", workbenchTitle: "Watch the harness think",
         workbenchLede: "The local workbench renders a structured trace: model events, tool calls, approvals, file observations, and job lifecycle — with live streaming text, English/中文 switch, and light/dark themes.",
         shotLight: "Light theme · session history with approval and observation events",
         shotDark: "Dark theme · the same session, same events",
         kickerStart: "Quickstart", startTitle: "Offline in sixty seconds",
         startLede: "No API key, no network, no third-party packages. The deterministic mock model makes every trajectory reproducible.",
-        copy: "Copy", copied: "Copied",
+        copy: "Copy", copied: "Copied", noMatch: "No chapter matches that filter.",
         note1Title: "No key required.", note1Body: "The mock model maps explicit prefixes to tool intents. Chinese aliases exist too, so sessions can mix languages.",
         note2Title: "Read-only by default.", note2Body: "Writes and shells need both a wider sandbox policy and an approval — two separate decisions on purpose.",
         note3Title: "Everything is inspectable.", note3Body: "Sessions are JSONL generations. session, surface, and stream commands show raw events, the model view, and recorded chunks.",
@@ -631,14 +649,14 @@ python3 -m pip install -e .
         footAtlas: "Module atlas", footParity: "Parity",
       },
       zh: {
-        navWhat: "概览", navArch: "架构", navFeatures: "功能", navLayers: "路线",
-        navStart: "快速开始", navDocs: "文档",
+        navWhat: "概览", navArch: "架构", navCurriculum: "章节",
+        navWorkbench: "工作台", navStart: "快速开始", navDocs: "文档",
         badge: "零依赖 · 可离线运行 · Python 3.9+",
         heroLine1: "把一个 Agent Harness", heroLine2: "逐层拆开来看。",
-        heroLede: "MiniDSH 用约 12000 行 Python 实现了一个可运行的 Agent Harness：插件内核、Agent Loop、工具注册表、权限栈、事件溯源会话、子代理、工作流、MCP、Skills、定时任务、目标与程序化工具调用。每一层都能单独关闭、观察与验证。",
-        ctaRepo: "打开仓库", ctaReadme: "阅读指南", ctaStart: "60 秒跑起来",
-        statLines: "行可读 Python", statModules: "个模块，各司其职",
-        statLayers: "个可开关功能层", statDeps: "个核心依赖",
+        heroLede: "一个约 12000 行的可运行 Agent Harness，用教科书的方式讲解：每一个机制都给出概念、它避免的失败、本仓库如何实现、一条能验证的命令，以及它的代价。",
+        ctaRead: "开始阅读", ctaGuide: "完整指南", ctaRun: "60 秒跑起来",
+        statChapters: "个教科书章节", statParts: "个部分，从内核到产品",
+        statFlags: "个功能开关", statDeps: "个核心依赖",
         kickerDesign: "设计立场",
         whatTitle: "大多数框架把最值得看的部分藏了起来",
         whatLede: "MiniDSH 反其道而行。三条规则让整个 Harness 可检查，也让每一次失败都能解释清楚。",
@@ -649,25 +667,24 @@ python3 -m pip install -e .
         rule3Title: "失败关闭",
         rule3Body: "缺少审批者、未知开关、会话损坏、预设缺失、载荷超限 —— 每一种都会以明确错误终止操作，而不是悄悄降级。",
         kickerArch: "架构", archTitle: "一个组装入口，三种产品形态",
-        archLede: "CLI、HTTP 工作台与 Desktop 共用同一个 Application。它之下，所有能力都是从同一个上下文解析出来的服务。",
+        archLede: "CLI、HTTP 工作台与 Desktop 共用同一个 Application。它之下，所有能力都是从同一个上下文解析出来的服务。章节按这套栈自下而上展开。",
         archProducts: "产品", archComposition: "组装", archRuntime: "运行时服务", archModels: "模型适配器",
-        kickerFeatures: "功能地图", featuresTitle: "每一层做什么，以及怎么验证",
-        featuresLede: "25 个可开关的层。每张卡片对应一项能力：它实现了什么、是否默认开启，以及一条能证明它工作的命令。",
-        kickerPath: "学习路径", layersTitle: "27 个阶段，按阅读顺序",
-        layersLede: "阶段编号 0–26。第一次从上往下读；每个阶段都会点明对应模块与它要回答的问题。",
-        kickerIndustry: "业界对照", industryTitle: "与 2026 年实践的对应关系",
-        industryLede: "体量刻意做小，但接缝与生产级 Agent 平台的收敛方向一致。每一行都是拿实验室和当下答案做对比的位置。",
-        thPractice: "实践", thWhere: "对应位置", thLearn: "它教会什么",
+        kickerCurriculum: "教科书", curriculumTitle: "每个机制一章",
+        curriculumLede: "每章都由同样六块组成，方便横向比较：概念、为什么需要、如何实现、如何验证、代价与边界、业界对照。",
+        rg1Title: "按顺序读", rg1Body: "六个部分依次是内核 → 运行时 → 安全 → 记忆 → 协作 → 产品。后面的章节默认你已读过前面的。",
+        rg2Title: "边读边跑", rg2Body: "每个「验证」块都能离线复制运行，命令与 CLI 完全一致。",
+        rg3Title: "对照业界", rg3Body: "每章结尾给出对应的业界参考，方便把实验室和现行标准并排阅读。",
+        tocTitle: "章节目录", tocSearch: "筛选章节…",
         kickerWorkbench: "工作台", workbenchTitle: "看着 Harness 思考",
         workbenchLede: "本地工作台把执行轨迹结构化呈现：模型事件、工具调用、审批、文件观察与任务生命周期 —— 支持实时流式文本、中英文切换、明暗主题。",
         shotLight: "浅色主题 · 带有审批与文件观察事件的会话历史",
         shotDark: "深色主题 · 同一个会话，同一批事件",
         kickerStart: "快速开始", startTitle: "60 秒离线跑通",
         startLede: "不需要 API Key、不需要联网、不需要第三方包。确定性的 Mock 模型让每条轨迹都可复现。",
-        copy: "复制", copied: "已复制",
+        copy: "复制", copied: "已复制", noMatch: "没有匹配该筛选的章节。",
         note1Title: "不需要密钥。", note1Body: "Mock 模型把显式前缀映射为工具意图，同样支持中文别名，所以一个会话可以混用两种语言。",
         note2Title: "默认只读。", note2Body: "写入与 Shell 需要同时放宽沙箱策略并获得审批 —— 这是两个刻意分开的决定。",
-        note3Title: "一切可检查。", note3Body: "会话是 JSONL 代际文件。session、surface、stream 分别查看原始事件、模型视图与记录的原始分片。",
+        note3Title: "一切可检查。", note3Body: "会话是 JSONL 代际文件。session、surface、stream 分别查看原始事件、模型视图与记录的分片。",
         note4Title: "真实模型按需启用。", note4Body: "导出 DEEPSEEK_API_KEY，关闭 llm.mock，启用 llm.deepseek。密钥只从环境变量读取。",
         kickerBoundaries: "边界", boundariesTitle: "它刻意不做的事",
         boundariesLede: "隐藏边界的实验室只是演示。这些边界写在最前面，并在一致性报告里逐条记录。",
@@ -678,93 +695,24 @@ python3 -m pip install -e .
       },
     }
 
-    const FEATURES = [
-      { n: "01", en: ["Plugin kernel", "Feature flags become a dependency-ordered service graph. Disabling a layer removes its service, schema, and prompt section together.", "minidsh plugins"], zh: ["插件内核", "功能开关会变成按依赖排序的服务图。关闭一层，它的服务、schema 与提示词段落一起消失。", "minidsh plugins"], tag: ["core", "on"] },
-      { n: "02", en: ["Agent loop", "One turn = model call → tool calls → model call, bounded by max_steps. Owns ordering, budgets, persistence, and failure handling.", "minidsh run \"read README.md\" --trace"], zh: ["Agent Loop", "一个回合 = 模型调用 → 工具调用 → 模型调用，受 max_steps 约束。负责顺序、预算、持久化与失败处理。", "minidsh run \"read README.md\" --trace"], tag: ["core", "on"] },
-      { n: "03", en: ["Prompt assembly", "Fixed identity, per-tool guidance ordered 1000–1600, and a runtime-context snapshot regenerated on resume.", "minidsh --disable tools.edit prompt"], zh: ["提示词组装", "固定身份段、按 1000–1600 排序的工具指引，以及 resume 时重新生成的 runtime context 快照。", "minidsh --disable tools.edit prompt"], tag: ["core", "on"] },
-      { n: "04", en: ["File tools", "read (2000 lines / 50 KiB), glob (100 results), write (atomic), edit (unique literal match). Read-before-write is enforced.", "minidsh run \"read README.md\""], zh: ["文件工具", "read（2000 行 / 50 KiB）、glob（100 条）、write（原子写）、edit（字面唯一匹配）。强制先读后写。", "minidsh run \"read README.md\""], tag: ["tools", "on"] },
-      { n: "05", en: ["Permissions", "Sandbox policy × approval × observations: where, who, and based-on-which-version. Every decision is an audit event.", "minidsh --sandbox-mode workspace-write --approval-policy never run \"write x.txt: hi\""], zh: ["权限栈", "沙箱策略 × 审批 × 文件观察：在哪写、谁批准、基于哪个版本。每个决定都有审计事件。", "minidsh --sandbox-mode workspace-write --approval-policy never run \"write x.txt: hi\""], tag: ["security", "on"] },
-      { n: "06", en: ["Kernel sandbox", "macOS Seatbelt enforces the policy for bash, jobs, and PTY. Refusals come from the kernel, not the harness.", "minidsh --enable core.kernel-sandbox run \"run printf x > blocked.txt\""], zh: ["内核沙箱", "macOS Seatbelt 对 bash、后台任务与 PTY 做真实强制。拒绝来自内核，而不是 Harness 的文案。", "minidsh --enable core.kernel-sandbox run \"run printf x > blocked.txt\""], tag: ["security", "off"] },
-      { n: "07", en: ["Shell and jobs", "Fresh bash -c per call, or one persistent PTY. Foreground timeouts move the job to background instead of killing it.", "minidsh run \"run in background sleep 10\""], zh: ["Shell 与任务", "每次调用新的 bash -c，或一个持久 PTY。前台超时会把任务转入后台，而不是杀掉它。", "minidsh run \"run in background sleep 10\""], tag: ["process", "on"] },
-      { n: "08", en: ["Sessions", "Immutable JSONL generations with a hash manifest, POSIX write lease, resume, fork, repair, and migration.", "minidsh sessions && minidsh transcript <id>"], zh: ["会话存储", "不可变 JSONL 代际 + 哈希清单、POSIX 写锁、resume、fork、修复与迁移。", "minidsh sessions && minidsh transcript <id>"], tag: ["memory", "on"] },
-      { n: "09", en: ["Surface and pruning", "The model sees a folded view; replacements shadow events without rewriting history. Pruning is manual and off by default.", "minidsh surface <id>"], zh: ["模型视图与裁剪", "模型看到折叠视图；替换事件遮蔽而不改写历史。裁剪默认关闭、手动执行。", "minidsh surface <id>"], tag: ["memory", "on"] },
-      { n: "10", en: ["Compaction", "At 80% of the context window, summarize the middle and keep the tail. The log keeps every original event.", "minidsh --context-window 100 run \"test auto compaction\""], zh: ["上下文压缩", "上下文达到 80% 时压缩中段、保留尾部。日志保留全部原始事件。", "minidsh --context-window 100 run \"test auto compaction\""], tag: ["memory", "on"] },
-      { n: "11", en: ["Streaming", "assistant/delta events carry session, run, turn, step, and attempt. Bounded SSE queues drop slow clients, not the run.", "minidsh serve --port 3080"], zh: ["流式传输", "assistant/delta 事件携带 session、run、turn、step、attempt。SSE 队列有界，丢弃慢客户端而不是运行。", "minidsh serve --port 3080"], tag: ["transport", "on"] },
-      { n: "12", en: ["Stream recording and replay", "Raw chunks are compressed into the assistant payload; Last-Event-ID replays the in-process ring without restarting the agent.", "minidsh stream <id>"], zh: ["流记录与续传", "原始分片压缩进 assistant 载荷；Last-Event-ID 回放进程内事件环，不会重启 Agent。", "minidsh stream <id>"], tag: ["transport", "on"] },
-      { n: "13", en: ["Questions and todos", "ask_user_question with stable ids, skip semantics, timed pending answers, and a whole-list todo projection.", "minidsh --enable tools.ask-user --enable tools.todo run \"ask Continue?\""], zh: ["提问与待办", "ask_user_question 支持稳定 id、跳过语义、定时待答与迟到回答；待办为整表投影。", "minidsh --enable tools.ask-user --enable tools.todo run \"ask Continue?\""], tag: ["interaction", "off"] },
-      { n: "14", en: ["Web tools", "Bounded fetch (redirect re-check, private ranges refused) and a replaceable search provider, both tagged as untrusted.", "minidsh --enable tools.web-fetch run \"fetch https://example.com\""], zh: ["Web 工具", "有界抓取（重定向复核、拒绝私网）与可替换搜索 provider，两者都标注为不可信内容。", "minidsh --enable tools.web-fetch run \"fetch https://example.com\""], tag: ["tools", "off"] },
-      { n: "15", en: ["Subagents", "Child agents with their own sessions and names; the parent receives a settlement summary, not the transcript.", "minidsh --enable core.subagents --enable tools.subagent run \"delegate analysis | read README.md\""], zh: ["子代理", "子级拥有独立会话与名称；父级只收到完成摘要，而不是子级 transcript。", "minidsh --enable core.subagents --enable tools.subagent run \"delegate analysis | read README.md\""], tag: ["collab", "off"] },
-      { n: "16", en: ["Workflow engine", "Deterministic orchestration in an isolated Node VM: agent, pipeline, parallel, phase, log, top-level await.", "minidsh --enable core.workflow --enable tools.workflow run \"workflow a|b\""], zh: ["工作流引擎", "隔离 Node VM 中的确定性编排：agent、pipeline、parallel、phase、log、顶层 await。", "minidsh --enable core.workflow --enable tools.workflow run \"workflow a|b\""], tag: ["collab", "off"] },
-      { n: "17", en: ["MCP client", "Real JSON-RPC handshake, namespaced tools, paginated discovery, credential redaction, fail-closed conflicts.", "minidsh --config mcp.json tools"], zh: ["MCP 客户端", "真实 JSON-RPC 握手、命名空间工具、分页发现、凭据脱敏、冲突时失败关闭。", "minidsh --config mcp.json tools"], tag: ["ecosystem", "off"] },
-      { n: "18", en: ["Skills", "Progressive disclosure: advertise a name and description, load the body only when the task needs it.", "minidsh --enable core.skills --enable tools.skill skills"], zh: ["Skills", "渐进式披露：先只公布名称与描述，任务真正需要时才加载正文。", "minidsh --enable core.skills --enable tools.skill skills"], tag: ["ecosystem", "off"] },
-      { n: "19", en: ["Agent presets", "Per-session capability profiles and persona. Switching is allowed only before the first model turn.", "minidsh --enable core.agent-presets presets"], zh: ["Agent 预设", "按会话绑定能力与 persona。只允许在首个模型回合之前切换。", "minidsh --enable core.agent-presets presets"], tag: ["ecosystem", "off"] },
-      { n: "20", en: ["Schedule", "Host-level timers with cron/RRULE timing, delivery receipts, catch-up policy, and a delivered ≠ done distinction.", "minidsh --enable core.schedule --enable tools.schedule run \"schedule list\""], zh: ["定时任务", "宿主级定时器，支持 cron/RRULE、投递回执、追赶策略，并区分「已投递」与「已完成」。", "minidsh --enable core.schedule --enable tools.schedule run \"schedule list\""], tag: ["long-running", "off"] },
-      { n: "21", en: ["Goals", "Revision-checked persistent objectives with a round budget, disarm-on-restore, and explicit blocked conditions.", "minidsh --enable core.goals --enable tools.goal run \"goal create migrate|4\""], zh: ["持久目标", "带版本校验的持久目标、回合预算、恢复即撤防，以及明确的阻塞条件。", "minidsh --enable core.goals --enable tools.goal run \"goal create migrate|4\""], tag: ["long-running", "off"] },
-      { n: "22", en: ["Programmatic tool calling", "run_code turns ten tool turns into one TypeScript program, with quotas, isolation, and the same approval path.", "minidsh --enable core.ptc --enable tools.run-code run \"run code {...}\""], zh: ["程序化工具调用", "run_code 把十次工具回合折叠成一段 TypeScript 程序，带配额、隔离与同样的审批链路。", "minidsh --enable core.ptc --enable tools.run-code run \"run code {...}\""], tag: ["execution", "off"] },
-      { n: "23", en: ["HTTP host and workbench", "Loopback-only by default, run_id correlation, one write turn per session, and a dependency-free single-file UI.", "minidsh serve --port 3080"], zh: ["HTTP 宿主与工作台", "默认只绑定回环地址，run_id 关联并发运行，每会话单个写回合，以及零依赖单文件 UI。", "minidsh serve --port 3080"], tag: ["product", "on"] },
-      { n: "24", en: ["External plugins", "importlib entry points, disabled by default, metadata-only while off, no core changes required.", "python3 -m pip install -e ./examples/minidsh-clock"], zh: ["外部插件", "importlib entry point，默认禁用，未启用时只读元数据，无需改动核心代码。", "python3 -m pip install -e ./examples/minidsh-clock"], tag: ["product", "opt"] },
-      { n: "25", en: ["DeepSeek adapter", "Messages protocol with SSE deltas, thinking replay, retries with jitter, images, and the Files API.", "minidsh --disable llm.mock --enable llm.deepseek run \"read README.md\""], zh: ["DeepSeek 适配器", "Messages 协议：SSE 增量、思考回放、带抖动的重试、图片与 Files API。", "minidsh --disable llm.mock --enable llm.deepseek run \"read README.md\""], tag: ["model", "off"] },
-    ]
-
-    const LAYERS = [
-      { n: "00", en: ["Plugin kernel", "config.py, plugins.py"], zh: ["插件内核", "config.py, plugins.py"] },
-      { n: "01", en: ["Model adapter", "llm.py, deepseek.py"], zh: ["模型适配器", "llm.py, deepseek.py"] },
-      { n: "02", en: ["Approval and writes", "sandbox.py, approval.py"], zh: ["审批与写操作", "sandbox.py, approval.py"] },
-      { n: "03", en: ["Shell and jobs", "shell.py, jobs.py"], zh: ["Shell 与任务", "shell.py, jobs.py"] },
-      { n: "04", en: ["Resume and compaction", "session.py, compaction.py"], zh: ["恢复与压缩", "session.py, compaction.py"] },
-      { n: "05", en: ["HTTP and hosting", "server.py"], zh: ["HTTP 与宿主", "server.py"] },
-      { n: "06", en: ["Plugins and products", "discovery.py, packages/"], zh: ["插件与产品", "discovery.py, packages/"] },
-      { n: "07", en: ["Retry and cancellation", "retry.py, cancellation.py"], zh: ["重试与取消", "retry.py, cancellation.py"] },
-      { n: "08", en: ["Images and Files API", "images.py, files.py"], zh: ["图片与 Files API", "images.py, files.py"] },
-      { n: "09", en: ["Persistent shell and PTY", "pty_shell.py"], zh: ["持久 Shell 与 PTY", "pty_shell.py"] },
-      { n: "10", en: ["Migration and recovery", "generations.py, session_recovery.py"], zh: ["迁移与崩溃恢复", "generations.py, session_recovery.py"] },
-      { n: "11", en: ["Surface and pruning", "surface.py, pruner.py"], zh: ["模型视图与裁剪", "surface.py, pruner.py"] },
-      { n: "12", en: ["Questions, todos, web", "questions.py, todo.py, web_tools.py"], zh: ["提问、待办、Web", "questions.py, todo.py, web_tools.py"] },
-      { n: "13", en: ["Streaming and backpressure", "stream_codec.py, server.py"], zh: ["流式与背压", "stream_codec.py, server.py"] },
-      { n: "14", en: ["Stream recording", "stream_codec.py"], zh: ["流记录", "stream_codec.py"] },
-      { n: "15", en: ["Timed questions", "questions.py"], zh: ["定时提问", "questions.py"] },
-      { n: "16", en: ["Immutable generations", "generations.py"], zh: ["不可变代际", "generations.py"] },
-      { n: "17", en: ["Kernel sandbox", "seatbelt.py"], zh: ["内核沙箱", "seatbelt.py"] },
-      { n: "18", en: ["Subagents", "subagents.py"], zh: ["子代理", "subagents.py"] },
-      { n: "19", en: ["Workflow", "workflow.py, workflow_guest.js"], zh: ["工作流", "workflow.py, workflow_guest.js"] },
-      { n: "20", en: ["Workflow jobs and recovery", "jobs.py, workflow.py"], zh: ["工作流任务与恢复", "jobs.py, workflow.py"] },
-      { n: "21", en: ["MCP", "mcp.py"], zh: ["MCP", "mcp.py"] },
-      { n: "22", en: ["Skills", "skills.py"], zh: ["Skills", "skills.py"] },
-      { n: "23", en: ["Schedule", "schedule.py, schedule_time.py"], zh: ["定时任务", "schedule.py, schedule_time.py"] },
-      { n: "24", en: ["Goals", "goals.py"], zh: ["持久目标", "goals.py"] },
-      { n: "25", en: ["Programmatic tool calling", "ptc.py, ptc_runner.js"], zh: ["程序化工具调用", "ptc.py, ptc_runner.js"] },
-      { n: "26", en: ["Presets and persona", "presets.py"], zh: ["预设与 persona", "presets.py"] },
-    ]
-
-    const INDUSTRY = [
-      { ref: "https://agents.md", en: ["AGENTS.md as cross-vendor agent instructions", "AGENTS.md", "Instructions for coding agents live in a predictable place, separate from the human README"], zh: ["AGENTS.md 作为跨厂商 Agent 指令", "AGENTS.md", "给编码 Agent 的说明放在可预期的地方，与面向人类的 README 分离"] },
-      { ref: "https://agentskills.io/specification", en: ["Agent Skills and progressive disclosure", "skills.py", "Advertise name and description; load the body only when needed"], zh: ["Agent Skills 与渐进式披露", "skills.py", "只公布名称与描述，真正需要时才加载正文"] },
-      { ref: "https://modelcontextprotocol.io/specification/2026-07-28/changelog", en: ["MCP as the tool interop layer", "mcp.py", "Namespacing, credential redaction, cancellation, fail-closed discovery"], zh: ["MCP 作为工具互操作层", "mcp.py", "命名空间、凭据脱敏、取消传播、发现失败即关闭"] },
-      { ref: "https://github.com/Xwh630/ai-agent-handbook/blob/3ee41090a6bd12d7bcd851f2ff468e1e3c6991fc/en/chapters/25-harness-engineering.md", en: ["Harness engineering as its own discipline", "entire repo", "The harness, not the model, owns ordering, limits, persistence, and failure handling"], zh: ["把 Harness 工程当作独立学科", "整个仓库", "顺序、边界、持久化与失败处理属于 Harness，而不属于模型"] },
-      { ref: "https://opentelemetry.io/docs/specs/semconv/gen-ai/", en: ["OpenTelemetry GenAI semantic conventions", "events.py, server.py", "Session/run/turn/step/attempt correlation is already span-shaped; export is the missing edge"], zh: ["OpenTelemetry GenAI 语义约定", "events.py, server.py", "session/run/turn/step/attempt 关联已是 span 形状；缺的只是导出器"] },
-      { ref: "https://github.com/zeroclaw-labs/zeroclaw/blob/a56c345d51dd8ab562e9351e0d4ab83f6a741db9/docs/book/src/security/sandboxing.md", en: ["Sandboxing at the kernel, not the prompt", "sandbox.py, seatbelt.py", "\"Please don't write\" is not a boundary; Operation not permitted is"], zh: ["在内核而非提示词层做沙箱", "sandbox.py, seatbelt.py", "「请不要写」不是边界；Operation not permitted 才是"] },
-      { ref: "https://benchlm.ai/benchmarks/terminal-bench-2", en: ["Agent evaluation and reproducible trajectories", "docs/exercises.md", "A deterministic mock makes regressions measurable instead of anecdotal"], zh: ["Agent 评测与可复现轨迹", "docs/exercises.md", "确定性 Mock 让回归可度量，而不是靠个例"] },
-      { ref: "https://agent2agent.info/blog/a2a-v1-announcement/", en: ["Agent-to-agent interoperability (A2A)", "boundary", "In-process subagents today; cross-process interop is a documented next edge"], zh: ["Agent 间互操作（A2A）", "边界", "目前是进程内子代理；跨进程互操作是明确记录的下一步"] },
-    ]
-
     const BOUNDARIES = [
-      { en: ["Session format is a learning v2, not the upstream Zstandard multi-generation format."], zh: ["会话格式是学习版 v2，不是上游的 Zstandard 多代际格式。"] },
-      { en: ["Kernel isolation is macOS Seatbelt only; no Landlock/bwrap, no Windows."], zh: ["内核隔离仅 macOS Seatbelt；没有 Landlock/bwrap 与 Windows 实现。"] },
-      { en: ["PTY is Unix /bin/bash only; no ConPTY, no cross-process terminal recovery."], zh: ["PTY 仅支持 Unix /bin/bash；没有 ConPTY，也不支持跨进程终端恢复。"] },
-      { en: ["MCP implements the handshake protocol; the 2026-07-28 stateless revision is not implemented."], zh: ["MCP 实现的是握手协议；2026-07-28 的无状态修订尚未实现。"] },
-      { en: ["Subagents are in-process only; no ACP, Codex, or remote SDK backends."], zh: ["子代理只在进程内；没有 ACP、Codex 或远程 SDK 后端。"] },
-      { en: ["Events are span-shaped but no OpenTelemetry exporter ships."], zh: ["事件形状已接近 span，但没有随附 OpenTelemetry 导出器。"] },
-      { en: ["Token accounting is a heuristic estimate, not a tokenizer."], zh: ["Token 统计是启发式估算，不是真正的 tokenizer。"] },
-      { en: ["Approval is a human control, not a security boundary."], zh: ["审批是人工控制手段，不是安全边界。"] },
-      { en: ["Real DeepSeek calls are not validated in CI; keys come from the environment only."], zh: ["真实 DeepSeek 调用未在 CI 中验证；密钥只从环境变量读取。"] },
-      { en: ["Teaching code. Do not expose the HTTP host to the public internet."], zh: ["教学代码。不要把 HTTP 宿主暴露到公网。"] },
+      { en: "Session format is a learning v2, not the upstream Zstandard multi-generation format.", zh: "会话格式是学习版 v2，不是上游的 Zstandard 多代际格式。" },
+      { en: "Kernel isolation is macOS Seatbelt only; no Landlock/bwrap, no Windows.", zh: "内核隔离仅 macOS Seatbelt；没有 Landlock/bwrap 与 Windows 实现。" },
+      { en: "PTY is Unix /bin/bash only; no ConPTY, no cross-process terminal recovery.", zh: "PTY 仅支持 Unix /bin/bash；没有 ConPTY，也不支持跨进程终端恢复。" },
+      { en: "MCP implements the handshake protocol; the 2026-07-28 stateless revision is not implemented.", zh: "MCP 实现的是握手协议；2026-07-28 的无状态修订尚未实现。" },
+      { en: "Subagents are in-process only; no ACP, Codex, or remote SDK backends.", zh: "子代理只在进程内；没有 ACP、Codex 或远程 SDK 后端。" },
+      { en: "Events are span-shaped but no OpenTelemetry exporter ships.", zh: "事件形状已接近 span，但没有随附 OpenTelemetry 导出器。" },
+      { en: "Token accounting is a heuristic estimate, not a tokenizer.", zh: "Token 统计是启发式估算，不是真正的 tokenizer。" },
+      { en: "Approval is a human control, not a security boundary.", zh: "审批是人工控制手段，不是安全边界。" },
+      { en: "Real DeepSeek calls are not validated in CI; keys come from the environment only.", zh: "真实 DeepSeek 调用未在 CI 中验证；密钥只从环境变量读取。" },
+      { en: "Teaching code. Do not expose the HTTP host to the public internet.", zh: "教学代码。不要把 HTTP 宿主暴露到公网。" },
     ]
 
     const DOCS = [
       { en: ["README.md", "The full English guide: every layer explained"], zh: ["README.md", "英文完整指南：逐层讲解"], href: REPO + "README.md", lang: "EN" },
       { en: ["README.zh-CN.md", "The same guide in Chinese"], zh: ["README.zh-CN.md", "同样的完整指南中文版"], href: REPO + "README.zh-CN.md", lang: "中文" },
       { en: ["docs/modules.md", "Module atlas: role, contracts, and traps per file"], zh: ["docs/modules.md", "模块地图：每个文件的职责、契约与陷阱"], href: REPO + "docs/modules.md", lang: "EN" },
-      { en: ["docs/exercises.md", "Runnable labs mapped to current practice"], zh: ["docs/exercises.md", "与当下实践对应的可运行实验"], href: REPO + "docs/exercises.md", lang: "EN" },
+      { en: ["docs/exercises.md", "18 runnable labs with expected observations"], zh: ["docs/exercises.md", "18 个可运行实验与预期观察"], href: REPO + "docs/exercises.md", lang: "EN" },
       { en: ["docs/mock-model.md", "The deterministic prompt grammar, EN and 中文"], zh: ["docs/mock-model.md", "确定性提示词语法，中英文"], href: REPO + "docs/mock-model.md", lang: "EN" },
       { en: ["docs/upstream-parity.md", "What matches upstream, and what does not"], zh: ["docs/upstream-parity.md", "与上游一致的部分，以及不一致的部分"], href: REPO + "docs/upstream-parity.md", lang: "EN" },
       { en: ["AGENTS.md", "Instructions for coding agents working in this repo"], zh: ["AGENTS.md", "给在本仓库工作的编码 Agent 的说明"], href: REPO + "AGENTS.md", lang: "EN" },
@@ -772,6 +720,11 @@ python3 -m pip install -e .
       { en: ["LICENSE", "MIT, plus the upstream attribution in third-party notices"], zh: ["LICENSE", "MIT 许可，以及第三方声明中的上游署名"], href: REPO + "LICENSE", lang: "—" },
       { en: ["THIRD_PARTY_NOTICES.md", "What prose is derived from DeepSeek Harness"], zh: ["THIRD_PARTY_NOTICES.md", "复述了 DeepSeek Harness 的哪些文案"], href: REPO + "THIRD_PARTY_NOTICES.md", lang: "EN" },
     ]
+
+    const BLOCKS = {
+      en: { concept: "Concept", why: "Why it exists", how: "How it is implemented", tryit: "Verify it", observe: "What to observe", tradeoff: "Cost and boundary", industry: "Industry reference" },
+      zh: { concept: "概念", why: "为什么需要", how: "本仓库如何实现", tryit: "动手验证", observe: "观察什么", tradeoff: "代价与边界", industry: "业界对照" },
+    }
 
     const STORAGE = { lang: "minidsh-site.lang", theme: "minidsh-site.theme" }
     const params = new URLSearchParams(location.search)
@@ -781,105 +734,166 @@ python3 -m pip install -e .
     if (!["light", "dark"].includes(theme)) theme = "dark"
 
     const t = (key) => (I18N[lang] || I18N.en)[key] || I18N.en[key] || key
+    const CHAPTERS = window.MINIDSH_CHAPTERS || []
 
     function applyStatic() {
       document.documentElement.lang = lang === "zh" ? "zh-CN" : "en"
       for (const node of document.querySelectorAll("[data-i18n]")) node.textContent = t(node.dataset.i18n)
+      for (const node of document.querySelectorAll("[data-i18n-placeholder]")) node.placeholder = t(node.dataset.i18nPlaceholder)
       document.getElementById("langToggle").textContent = lang === "zh" ? "EN" : "中文"
       document.documentElement.dataset.theme = theme
       document.getElementById("themeToggle").textContent = theme === "dark" ? "☀" : "☾"
     }
 
-    function renderFeatures() {
-      const root = document.getElementById("featureGrid")
+    function rich(text) {
+      const frag = document.createDocumentFragment()
+      const parts = String(text === undefined || text === null ? "" : text).split("`")
+      parts.forEach((part, index) => {
+        if (!part) return
+        if (index % 2 === 1) frag.append(el("code", "", part))
+        else frag.append(document.createTextNode(part))
+      })
+      return frag
+    }
+
+    function el(tag, className, text) {
+      const node = document.createElement(tag)
+      if (className) node.className = className
+      if (text !== undefined) node.textContent = text
+      return node
+    }
+
+    function renderChapters() {
+      const root = document.getElementById("chapters")
       root.replaceChildren()
-      for (const item of FEATURES) {
-        const [title, body, cmd] = item[lang] || item.en
-        const card = document.createElement("article")
-        card.className = "feature"
-        const top = document.createElement("div")
-        top.className = "feature-top"
-        const n = document.createElement("span")
-        n.className = "feature-n"
-        n.textContent = item.n
-        const h3 = document.createElement("h3")
-        h3.textContent = title
-        top.append(n, h3)
-        const p = document.createElement("p")
-        p.textContent = body
-        const pre = document.createElement("pre")
-        pre.textContent = "$ " + cmd
-        const meta = document.createElement("div")
-        meta.className = "meta"
-        const kind = document.createElement("span")
-        kind.className = "tag"
-        kind.textContent = item.tag[0]
-        const state = document.createElement("span")
-        state.className = `tag ${item.tag[1] === "on" ? "on" : item.tag[1] === "opt" ? "opt" : "off"}`
-        state.textContent = item.tag[1] === "on"
-          ? (lang === "zh" ? "默认启用" : "default on")
-          : item.tag[1] === "opt"
-            ? (lang === "zh" ? "安装后可选" : "opt-in")
-            : (lang === "zh" ? "默认关闭" : "default off")
-        meta.append(kind, state)
-        card.append(top, p, meta, pre)
-        root.append(card)
+      const parts = []
+      for (const chapter of CHAPTERS) {
+        if (!parts.length || parts[parts.length - 1].id !== chapter.part) {
+          parts.push({ id: chapter.part, chapters: [] })
+        }
+        parts[parts.length - 1].chapters.push(chapter)
+      }
+      for (const part of parts) {
+        const section = el("section", "part")
+        section.id = `part-${part.id}`
+        const head = el("div", "part-head")
+        const label = CHAPTERS.find((c) => c.part === part.id)
+        head.append(el("span", "part-n", label.partNo))
+        head.append(el("h3", "", (label.partTitle || {})[lang] || label.partTitle.en))
+        head.append(el("p", "", (label.partDesc || {})[lang] || partDesc(part.id)))
+        section.append(head)
+        for (const chapter of part.chapters) section.append(renderChapter(chapter))
+        root.append(section)
       }
     }
 
-    function renderLayers() {
-      const root = document.getElementById("layerList")
-      root.replaceChildren()
-      for (const layer of LAYERS) {
-        const [title, module] = layer[lang] || layer.en
-        const row = document.createElement("div")
-        row.className = "layer"
-        const b = document.createElement("b")
-        b.textContent = layer.n
-        const span = document.createElement("span")
-        span.textContent = title + " "
-        const em = document.createElement("em")
-        em.textContent = module
-        span.append(em)
-        row.append(b, span)
-        root.append(row)
-      }
+    function partDesc(id) { return "" }
+
+    function renderChapter(c) {
+      const copy = c[lang] || c.en
+      const article = el("article", "chapter")
+      article.id = `ch-${c.id}`
+      article.dataset.title = `${copy.title} ${copy.thesis}`.toLowerCase()
+
+      const head = el("header", "ch-head")
+      head.append(el("span", "ch-n", c.n))
+      const titleWrap = el("div")
+      titleWrap.append(el("h4", "", copy.title))
+      const thesis = el("p", "ch-thesis")
+      thesis.append(rich(copy.thesis))
+      titleWrap.append(thesis)
+      head.append(titleWrap)
+      const files = el("div", "ch-files")
+      for (const f of c.files || []) files.append(el("span", "file", f))
+      head.append(files)
+      article.append(head)
+
+      const body = el("div", "ch-body")
+      body.append(block("concept", copy.concept))
+      body.append(block("why", copy.why))
+      body.append(block("how", copy.how, "wide", c.flags))
+      body.append(verifyBlock(copy))
+      body.append(block("tradeoff", copy.tradeoff, "tradeoff"))
+      body.append(industryBlock(c.en.industry || c.industry))
+      article.append(body)
+      return article
     }
 
-    function renderIndustry() {
-      const body = document.getElementById("industryBody")
+    function block(kind, text, extra = "", flags) {
+      const node = el("div", `blk ${extra}`.trim())
+      node.append(el("h5", "", BLOCKS[lang][kind]))
+      const para = el("p")
+      para.append(rich(text))
+      node.append(para)
+      if (flags && flags.length) {
+        const row = el("div", "tagrow")
+        for (const flag of flags) {
+          const tag = el("span", `tag ${flag[1] === "on" ? "on" : "off"}`, flag[0])
+          row.append(tag)
+        }
+        node.append(row)
+      }
+      return node
+    }
+
+    function verifyBlock(copy) {
+      const node = el("div", "blk wide")
+      node.append(el("h5", "", BLOCKS[lang].tryit))
+      const pre = el("pre", "", copy.try)
+      node.append(pre)
+      if (copy.observe && copy.observe.length) {
+        const list = el("ul", "obs")
+        for (const item of copy.observe) {
+          const li = el("li")
+          li.append(rich(item))
+          list.append(li)
+        }
+        node.append(list)
+      }
+      return node
+    }
+
+    function industryBlock(industry) {
+      const node = el("div", "blk industry")
+      node.append(el("h5", "", BLOCKS[lang].industry))
+      if (industry) {
+        const para = el("p")
+        para.append(rich(industry[lang === "zh" ? 2 : 1] || industry[1]))
+        node.append(para)
+        const link = el("a", "ind-link", `${industry[0]} ↗`)
+        link.href = industry[3]
+        link.target = "_blank"
+        link.rel = "noreferrer"
+        node.append(link)
+      }
+      return node
+    }
+
+    function renderToc() {
+      const body = document.getElementById("tocBody")
       body.replaceChildren()
-      for (const row of INDUSTRY) {
-        const [practice, where, learn] = row[lang] || row.en
-        const tr = document.createElement("tr")
-        const td1 = document.createElement("td")
-        const a = document.createElement("a")
-        a.href = row.ref
-        a.target = "_blank"
-        a.rel = "noreferrer"
-        a.textContent = practice
-        a.style.color = "var(--text)"
-        a.style.borderBottom = "1px dashed var(--line-strong)"
-        td1.append(a)
-        const td2 = document.createElement("td")
-        const code = document.createElement("code")
-        code.textContent = where
-        td2.append(code)
-        const td3 = document.createElement("td")
-        td3.textContent = learn
-        tr.append(td1, td2, td3)
-        body.append(tr)
+      let currentPart = null
+      for (const chapter of CHAPTERS) {
+        if (chapter.part !== currentPart) {
+          currentPart = chapter.part
+          const group = el("div", "toc-part")
+          group.append(el("b", "", (chapter.partTitle || {})[lang] || chapter.partTitle.en))
+          body.append(group)
+        }
+        const link = el("a")
+        link.href = `#ch-${chapter.id}`
+        link.dataset.target = `ch-${chapter.id}`
+        link.append(el("em", "", chapter.n))
+        link.append(el("span", "", (chapter[lang] || chapter.en).title))
+        ;(body.lastChild || body).append(link)
       }
+      document.getElementById("tocCount").textContent = String(CHAPTERS.length)
     }
 
     function renderBoundaries() {
       const root = document.getElementById("boundaryList")
       root.replaceChildren()
-      for (const item of BOUNDARIES) {
-        const li = document.createElement("li")
-        li.textContent = (item[lang] || item.en)[0]
-        root.append(li)
-      }
+      for (const item of BOUNDARIES) root.append(el("li", "", item[lang] || item.en))
     }
 
     function renderDocs() {
@@ -887,30 +901,66 @@ python3 -m pip install -e .
       root.replaceChildren()
       for (const doc of DOCS) {
         const [title, body] = doc[lang] || doc.en
-        const a = document.createElement("a")
-        a.className = "doc"
+        const a = el("a", "doc")
         a.href = doc.href
         a.target = "_blank"
         a.rel = "noreferrer"
-        const b = document.createElement("b")
-        b.textContent = title
-        const span = document.createElement("span")
-        span.textContent = body
-        const em = document.createElement("em")
-        em.textContent = doc.lang
-        a.append(b, span, em)
+        a.append(el("b", "", title), el("span", "", body), el("em", "", doc.lang))
         root.append(a)
       }
     }
 
     function renderAll() {
       applyStatic()
-      renderFeatures()
-      renderLayers()
-      renderIndustry()
+      renderChapters()
+      renderToc()
       renderBoundaries()
       renderDocs()
+      observeToc()
     }
+
+    /* sticky TOC active state */
+    let observer = null
+    function observeToc() {
+      if (observer) observer.disconnect()
+      const links = new Map([...document.querySelectorAll("#tocBody a")].map((a) => [a.dataset.target, a]))
+      if (!links.size || !("IntersectionObserver" in window)) return
+      observer = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue
+          for (const link of links.values()) link.classList.remove("active")
+          const active = links.get(entry.target.id)
+          if (active) active.classList.add("active")
+        }
+      }, { rootMargin: "-80px 0px -70% 0px", threshold: 0 })
+      for (const chapter of document.querySelectorAll(".chapter")) observer.observe(chapter)
+    }
+
+    /* filter */
+    document.getElementById("tocSearch").addEventListener("input", (event) => {
+      const q = event.target.value.trim().toLowerCase()
+      let visible = 0
+      for (const chapter of document.querySelectorAll(".chapter")) {
+        const hit = !q || chapter.dataset.title.includes(q) || chapter.id.includes(q)
+        chapter.hidden = !hit
+        if (hit) visible += 1
+      }
+      for (const part of document.querySelectorAll(".part")) {
+        const any = [...part.querySelectorAll(".chapter")].some((c) => !c.hidden)
+        part.hidden = !any
+      }
+      let empty = document.getElementById("tocEmptyNote")
+      if (!visible) {
+        if (!empty) {
+          empty = el("div", "toc-empty")
+          empty.id = "tocEmptyNote"
+          document.getElementById("chapters").append(empty)
+        }
+        empty.textContent = t("noMatch")
+      } else if (empty) {
+        empty.remove()
+      }
+    })
 
     function toast(message) {
       const node = document.getElementById("toast")
@@ -930,19 +980,17 @@ python3 -m pip install -e .
       applyStatic()
     })
     document.getElementById("copyCode").addEventListener("click", async () => {
-      const block = document.getElementById("codeBlock")
-      const text = block.textContent
+      const text = document.getElementById("codeBlock").textContent
       try {
         await navigator.clipboard.writeText(text)
-        toast(t("copied"))
       } catch {
         const range = document.createRange()
-        range.selectNodeContents(block)
+        range.selectNodeContents(document.getElementById("codeBlock"))
         const selection = window.getSelection()
         selection.removeAllRanges()
         selection.addRange(range)
-        toast(t("copied"))
       }
+      toast(t("copied"))
     })
 
     renderAll()
