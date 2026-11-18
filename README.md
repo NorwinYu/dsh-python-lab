@@ -8,6 +8,7 @@ English | [简体中文](README.zh-CN.md)
 [![Dependencies: none](https://img.shields.io/badge/core%20dependencies-none-2ea44f)](pyproject.toml)
 [![Docs site](https://img.shields.io/badge/docs-github%20pages-4c53d6)](https://norwinyu.github.io/dsh-python-lab/)
 [![Upstream parity](https://img.shields.io/badge/upstream-dsh%20parity%20report-6b74f0)](docs/upstream-parity.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f)](LICENSE)
 
 MiniDSH re-implements the *shape* of a modern coding-agent harness in about 12,000 lines of
 dependency-free Python. It is not a chatbot demo and not a wrapper around an SDK: it contains a
@@ -242,6 +243,8 @@ dsh-python-lab/
 ├── README.md                 English guide (this file)
 ├── README.zh-CN.md           Chinese guide
 ├── AGENTS.md                 Instructions for coding agents working in this repo
+├── LICENSE                   MIT
+├── THIRD_PARTY_NOTICES.md    Upstream MIT notice and what prose is derived
 ├── config.example.json       Every feature flag in one place
 ├── pyproject.toml            Zero-dependency core; optional [desktop] extra
 ├── docs/
@@ -1566,6 +1569,8 @@ Layers 0 → 1 → 2 → 3, then run the Web workbench and watch a session end t
 | [docs/upstream-parity.zh-CN.md](docs/upstream-parity.zh-CN.md) | 中文 | Same report in Chinese |
 | [AGENTS.md](AGENTS.md) | English | Instructions for coding agents |
 | [config.example.json](config.example.json) | — | Every flag with defaults |
+| [LICENSE](LICENSE) | — | MIT license |
+| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | English | Upstream attribution and derived prose |
 
 ## Publishing the documentation site
 
@@ -1585,5 +1590,13 @@ correct, the repository just does not have Pages enabled yet. The site URL will 
 
 ## License
 
-No license file is present yet. Treat the code as **all rights reserved** until the repository owner
-adds one; open an issue if you want to reuse it.
+MIT — see [LICENSE](LICENSE).
+
+This project is an independent re-implementation, not a fork. It does reproduce a small amount of
+upstream **prose** (the identity sentence, tool descriptions, tool guidance, and compaction summary
+headings) so that behaviour can be compared line by line. DeepSeek Harness is MIT licensed,
+Copyright (c) 2026 DeepSeek, so that reuse is permitted with attribution. What is derived, and the
+upstream license text, are recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+If you build something on top of MiniDSH, keep both notices: this repository's `LICENSE` and the
+third-party notice.

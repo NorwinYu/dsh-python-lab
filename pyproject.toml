@@ -8,6 +8,11 @@ version = "0.1.0"
 description = "A dependency-free, layered agent harness in Python: plugin kernel, agent loop, tools, permissions, sessions, subagents, MCP, skills, schedule, goals, and PTC"
 requires-python = ">=3.9"
 dependencies = []
+license = { text = "MIT" }
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+]
 
 [project.optional-dependencies]
 desktop = ["pywebview>=5,<7"]

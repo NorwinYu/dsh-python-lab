@@ -8,6 +8,7 @@
 [![Dependencies: none](https://img.shields.io/badge/core%20dependencies-none-2ea44f)](pyproject.toml)
 [![Docs site](https://img.shields.io/badge/docs-github%20pages-4c53d6)](https://norwinyu.github.io/dsh-python-lab/)
 [![Upstream parity](https://img.shields.io/badge/upstream-dsh%20parity%20report-6b74f0)](docs/upstream-parity.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f)](LICENSE)
 
 MiniDSH 用约 12,000 行零依赖的 Python 重新实现了现代编码智能体框架的*形状*。它既不是聊天机器人
 demo，也不是对某个 SDK 的封装：里面有一个插件内核、一个智能体循环、一张工具注册表、一套权限栈、
@@ -229,6 +230,8 @@ dsh-python-lab/
 ├── README.md                 English guide (this file)
 ├── README.zh-CN.md           Chinese guide
 ├── AGENTS.md                 Instructions for coding agents working in this repo
+├── LICENSE                   MIT
+├── THIRD_PARTY_NOTICES.md    Upstream MIT notice and what prose is derived
 ├── config.example.json       Every feature flag in one place
 ├── pyproject.toml            Zero-dependency core; optional [desktop] extra
 ├── docs/
@@ -1508,6 +1511,8 @@ MiniDSH 刻意做得很小，但它的接缝，和生产级智能体平台最终
 | [docs/upstream-parity.zh-CN.md](docs/upstream-parity.zh-CN.md) | 中文 | 同一份报告的中文版 |
 | [AGENTS.md](AGENTS.md) | English | 给编码智能体的指令 |
 | [config.example.json](config.example.json) | — | 每个开关及其默认值 |
+| [LICENSE](LICENSE) | — | MIT 许可 |
+| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | English | 上游署名与复述范围 |
 
 ## 发布文档站点
 
@@ -1525,5 +1530,11 @@ MiniDSH 刻意做得很小，但它的接缝，和生产级智能体平台最终
 
 ## 许可证
 
-目前还没有许可证文件。在仓库所有者补上之前，请把代码视为**保留所有权利**；如果你想复用它，
-请开一个 issue。
+MIT，见 [LICENSE](LICENSE)。
+
+本项目是独立重实现，不是 fork。它确实复述了少量上游**文案**（身份句、工具描述、工具使用指引、
+压缩摘要小标题），目的是让行为可以逐行对照。DeepSeek Harness 同样采用 MIT 许可，Copyright (c) 2026
+DeepSeek，因此这种复用只要保留署名即被允许。具体复述了什么、以及上游许可原文，都记录在
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 中。
+
+如果你基于 MiniDSH 继续构建，请同时保留两份声明：本仓库的 `LICENSE` 与第三方声明。
