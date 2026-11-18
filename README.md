@@ -261,6 +261,7 @@ dsh-python-lab/
 ├── src/minidsh/              The harness: 36 modules, ~12k lines
 │   └── web/index.html        The local workbench UI
 ├── packages/                 headless / web / desktop distribution entry points
+├── tools/build_snippets.py   Regenerates docs/snippets.js from src/
 └── examples/minidsh-clock/   A standalone external plugin (installable)
 ```
 
