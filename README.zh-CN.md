@@ -1517,16 +1517,16 @@ MiniDSH 刻意做得很小，但它的接缝，和生产级智能体平台最终
 ## 发布文档站点
 
 `docs/index.html` 是一个自包含的中英双语站点（无需构建步骤，除 `docs/assets/` 下两张截图外没有外部资源）。
-`.github/workflows/pages.yml` 会在每次改动 `docs/` 的推送后把该目录发布到 GitHub Pages。
+`.github/workflows/pages.yml` 会在每次改动 `docs/` 的推送后把该目录发布到 GitHub Pages。站点已上线：
+<https://norwinyu.github.io/dsh-python-lab/>。
 
-**一次性设置（仓库所有者操作）：**
+**一次性设置（fork 后需要重新做）：**
 
 1. 打开 **Settings → Pages**。
 2. 在 *Build and deployment* 下把 **Source** 设为 **GitHub Actions**。
 3. 重新运行 `Pages` 工作流（或再推送一次 `docs/` 下的改动）。
 
 在该开关打开之前，`Configure Pages` 步骤会以 404 失败 —— 工作流本身没有问题，只是仓库尚未启用 Pages。
-站点地址将是 `https://norwinyu.github.io/dsh-python-lab/`。
 
 ## 许可证
 
