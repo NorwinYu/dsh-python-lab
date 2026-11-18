@@ -74,6 +74,30 @@ SYMBOLS: List[Tuple[str, str, str]] = [
     ("session.repair", "src/minidsh/session.py", "JsonlSessionStore.repair"),
     ("recovery.closers", "src/minidsh/session_recovery.py", "open_turn_closers"),
     ("session.fork", "src/minidsh/session.py", "JsonlSessionStore.fork"),
+    # Chapter 17 — surface
+    ("surface.fold", "src/minidsh/surface.py", "fold_surface"),
+    ("surface.validate", "src/minidsh/surface.py", "_validate_tool_rewrite"),
+    # Chapter 18 — compaction and pruning
+    ("compaction.needed", "src/minidsh/compaction.py", "CompactionService.compact_if_needed"),
+    ("pruner.content", "src/minidsh/pruner.py", "ToolResultPruner.prune_content"),
+    # Chapter 19 — stream recording
+    ("codec.pack", "src/minidsh/stream_codec.py", "pack_stream"),
+    # Chapter 20 — subagents
+    ("subagents.child", "src/minidsh/subagents.py", "SubagentService._run_child"),
+    ("subagents.inputs", "src/minidsh/subagents.py", "SubagentService.consume_inputs"),
+    # Chapter 21 — workflow
+    ("workflow.member", "src/minidsh/workflow.py", "WorkflowRun._start_member"),
+    ("workflow.settle", "src/minidsh/workflow.py", "WorkflowRun._settle_members"),
+    # Chapter 22 — MCP
+    ("mcp.name", "src/minidsh/mcp.py", "public_tool_name"),
+    ("mcp.request", "src/minidsh/mcp.py", "McpConnection.request"),
+    ("mcp.tool", "src/minidsh/mcp.py", "McpConnection._make_tool"),
+    # Chapter 23 — skills
+    ("skills.parse", "src/minidsh/skills.py", "parse_skill_file"),
+    ("skills.catalog", "src/minidsh/skills.py", "render_catalog"),
+    # Chapter 24 — schedule
+    ("schedule.deliver", "src/minidsh/schedule.py", "ScheduleService._deliver"),
+    ("schedule.inbox", "src/minidsh/schedule.py", "ScheduleService._inbox"),
 ]
 
 # (key, path, (start, end)) — slices inside a larger definition, 1-based inclusive.
@@ -90,6 +114,8 @@ RANGES: List[Tuple[str, str, Tuple[int, int]]] = [
     ("agent.steps", "src/minidsh/agent.py", (168, 240)),
     # Chapter 8 — forwarding deltas
     ("agent.streaming", "src/minidsh/agent.py", (205, 262)),
+    # Chapter 19 — expansion checks
+    ("codec.expand", "src/minidsh/stream_codec.py", (75, 108)),
 ]
 
 

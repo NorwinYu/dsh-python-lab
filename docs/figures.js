@@ -1385,6 +1385,97 @@ repair(id) / resume
 fork(id) ──► copy prefix ──► close open turn (forked) ──► new session`,
   },
   "surface": {
+    code: [
+        {
+              "key": "surface.fold",
+              "title": {
+                    "en": "Folding is a validated replay",
+                    "zh": "折叠是一次带校验的重放"
+              },
+              "note": {
+                    "en": "The fold walks the log in order, keeps the visible node ids, and applies append or replace. Every replacement is checked against the current list before it is applied, so an invalid view can never be persisted or served.",
+                    "zh": "折叠按顺序遍历日志，维护可见节点 id，并应用追加或替换。每个替换在生效前都对照当前列表校验，因此非法视图既不会被持久化，也不会被提供出去。"
+              },
+              "lines": [
+                    {
+                          "at": 50,
+                          "text": {
+                                "en": "Sequence numbers must be dense; a gap means corruption.",
+                                "zh": "序号必须稠密；出现空洞即视为损坏。"
+                          }
+                    },
+                    {
+                          "at": 57,
+                          "text": {
+                                "en": "Append is the default operation.",
+                                "zh": "追加是默认操作。"
+                          }
+                    },
+                    {
+                          "at": 61,
+                          "text": {
+                                "en": "surfaceOp must be exactly {op, startSeq, endSeq}.",
+                                "zh": "surfaceOp 必须恰好是 {op, startSeq, endSeq}。"
+                          }
+                    },
+                    {
+                          "at": 67,
+                          "text": {
+                                "en": "Only nodes still on the surface can be shadowed.",
+                                "zh": "只有仍在视图上的节点才能被遮蔽。"
+                          }
+                    },
+                    {
+                          "at": 73,
+                          "text": {
+                                "en": "The replaced range is recorded, not deleted.",
+                                "zh": "被替换的区间被记录下来，而不是删除。"
+                          }
+                    },
+                    {
+                          "at": 85,
+                          "text": {
+                                "en": "A replacement occupies the old position.",
+                                "zh": "替换节点占据原来的位置。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "surface.validate",
+              "title": {
+                    "en": "A tool rewrite may only touch content",
+                    "zh": "工具结果改写只能改 content"
+              },
+              "note": {
+                    "en": "Both payloads are deep-copied, content is blanked on each, and the remainder must be identical. The view can therefore shrink a tool result without the call identity being forged.",
+                    "zh": "两份载荷都被深拷贝，各自的 content 置空后余下部分必须完全相同。视图因此可以缩短工具结果，却不能伪造调用身份。"
+              },
+              "lines": [
+                    {
+                          "at": 34,
+                          "text": {
+                                "en": "Deep copy: the comparison must not mutate the log.",
+                                "zh": "深拷贝：比较不能改动日志。"
+                          }
+                    },
+                    {
+                          "at": 40,
+                          "text": {
+                                "en": "Blank the only field that may change.",
+                                "zh": "把唯一允许变化的字段置空。"
+                          }
+                    },
+                    {
+                          "at": 42,
+                          "text": {
+                                "en": "Anything else differing is a rejection.",
+                                "zh": "其余任何差异都视为拒绝。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "The log appends; the view folds. Pruning only touches the view.", zh: "日志只追加，视图做折叠；裁剪只动视图。" },
     diagram: `event log (append-only)
   seq 1  user/message
@@ -1400,6 +1491,97 @@ transcript()
   └─► raw view:  [1, 2, 3]    (humans keep the original)`,
   },
   "compaction": {
+    code: [
+        {
+              "key": "compaction.needed",
+              "title": {
+                    "en": "Pressure, keep the tail, record the cut",
+                    "zh": "压力触发、保留尾部、记录切割"
+              },
+              "note": {
+                    "en": "Compaction is a projection: it appends start and end events that carry the replacement message. The retained tail is a fraction of the message count, and the source sequences name exactly which events were folded into the summary.",
+                    "zh": "压缩是一次投影：它追加携带替换消息的 start 与 end 事件。保留的尾部按消息数的比例计算，sourceEventSeqs 精确指明哪些事件被折进摘要。"
+              },
+              "lines": [
+                    {
+                          "at": 75,
+                          "text": {
+                                "en": "The threshold is 80% of the window.",
+                                "zh": "阈值是窗口的 80%。"
+                          }
+                    },
+                    {
+                          "at": 82,
+                          "text": {
+                                "en": "Keep roughly the last 16% of messages.",
+                                "zh": "保留大约最后 16% 的消息。"
+                          }
+                    },
+                    {
+                          "at": 89,
+                          "text": {
+                                "en": "Source sequences tie the summary to the events it replaces.",
+                                "zh": "sourceEventSeqs 把摘要与被替换事件绑定。"
+                          }
+                    },
+                    {
+                          "at": 95,
+                          "text": {
+                                "en": "The summarizer is the same model with the compaction prompt.",
+                                "zh": "摘要器是同一个模型加压缩提示词。"
+                          }
+                    },
+                    {
+                          "at": 115,
+                          "text": {
+                                "en": "The end event carries the replacement message and usage.",
+                                "zh": "end 事件携带替换消息与用量。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "pruner.content",
+              "title": {
+                    "en": "Prune in code points, with invariants",
+                    "zh": "按码点裁剪，并带不变量检查"
+              },
+              "note": {
+                    "en": "The pruner works on character offsets across several text blocks and inserts the marker once. Before returning it proves that something was cut and that the result is both smaller and within the threshold.",
+                    "zh": "裁剪器跨多个文本块按字符偏移工作，标记只插入一次。返回前它证明确实发生了裁剪，且结果既更小又不超阈值。"
+              },
+              "lines": [
+                    {
+                          "at": 48,
+                          "text": {
+                                "en": "Under the threshold: nothing to do.",
+                                "zh": "低于阈值：什么都不做。"
+                          }
+                    },
+                    {
+                          "at": 50,
+                          "text": {
+                                "en": "Head and tail are kept; the middle goes.",
+                                "zh": "保留头尾，切掉中间。"
+                          }
+                    },
+                    {
+                          "at": 64,
+                          "text": {
+                                "en": "Only blocks intersecting the cut range change.",
+                                "zh": "只有与切割区间相交的块会改变。"
+                          }
+                    },
+                    {
+                          "at": 73,
+                          "text": {
+                                "en": "The result must be smaller: a no-op is a bug.",
+                                "zh": "结果必须更小：无变化即 bug。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "Estimate, summarize the middle, keep the tail, and record the cut.", zh: "估算、摘要中段、保留尾部，并记录这次切割。" },
     diagram: `estimate_tokens(messages)
    │
@@ -1416,6 +1598,90 @@ prune (manual, off by default)
         └─ compaction/prune ──► replacement (content only)`,
   },
   "stream-record": {
+    code: [
+        {
+              "key": "codec.pack",
+              "title": {
+                    "en": "Run-length packing of deltas",
+                    "zh": "增量的行程编码"
+              },
+              "note": {
+                    "en": "Consecutive deltas of the same type and index merge into one record with a text array and inter-arrival times. Only the immediately previous record is merged, so expansion stays a single linear pass.",
+                    "zh": "同类型同索引的连续增量合并为一条记录，保存文本数组与到达间隔。只有紧邻的上一条会被合并，展开因此保持一次线性遍历。"
+              },
+              "lines": [
+                    {
+                          "at": 27,
+                          "text": {
+                                "en": "Only text and reasoning deltas are merged.",
+                                "zh": "只有文本与思考增量会被合并。"
+                          }
+                    },
+                    {
+                          "at": 34,
+                          "text": {
+                                "en": "Same type and index, and it must be the previous record.",
+                                "zh": "同类型同索引，且必须是紧邻的上一条。"
+                          }
+                    },
+                    {
+                          "at": 40,
+                          "text": {
+                                "en": "Tool arguments merge only for the same call id.",
+                                "zh": "工具参数只在同一 call id 下合并。"
+                          }
+                    },
+                    {
+                          "at": 65,
+                          "text": {
+                                "en": "Usage, block-start and finish stay raw.",
+                                "zh": "usage、block-start 与 finish 保持原始。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "codec.expand",
+              "title": {
+                    "en": "Expansion validates before it trusts",
+                    "zh": "展开先校验再信任"
+              },
+              "note": {
+                    "en": "Every record is shape-checked: arrays must be strings, deltas must be integers, and the delta count must be exactly one less than the member count. Corruption fails the read instead of producing a plausible but wrong stream.",
+                    "zh": "每条记录都做形状校验：数组元素必须是字符串，时间差必须是整数，且个数恰比成员数少一。损坏会让读取失败，而不是产出看似合理却错误的流。"
+              },
+              "lines": [
+                    {
+                          "at": 84,
+                          "text": {
+                                "en": "Raw chunk records have a fixed key set.",
+                                "zh": "原始分片记录的键集合固定。"
+                          }
+                    },
+                    {
+                          "at": 93,
+                          "text": {
+                                "en": "Deltas are integers, not floats or booleans.",
+                                "zh": "时间差是整数，不是浮点或布尔。"
+                          }
+                    },
+                    {
+                          "at": 102,
+                          "text": {
+                                "en": "Off-by-one is the most common corruption.",
+                                "zh": "差一错误是最常见的损坏形式。"
+                          }
+                    },
+                    {
+                          "at": 104,
+                          "text": {
+                                "en": "Timestamps are reconstructed by accumulation.",
+                                "zh": "时间戳通过累加重建。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "Compress the recording; keep a ring for the reconnect.", zh: "压缩录制内容；用一个环支撑断线重连。" },
     diagram: `raw chunks
   ├─ text-chunks       [texts, time0, dt]
@@ -1431,6 +1697,90 @@ SSE broker
   listener queue[256] ── overflow ──► drop that listener`,
   },
   "subagents": {
+    code: [
+        {
+              "key": "subagents.child",
+              "title": {
+                    "en": "A child is a loop over an inbox",
+                    "zh": "子代理就是围绕收件箱的循环"
+              },
+              "note": {
+                    "en": "The child runs on its own thread with its own session id. Input can arrive while it runs, so the loop drains the inbox, runs a turn, and repeats until the inbox stays empty. The final notice goes to the parent only.",
+                    "zh": "子代理在自己的线程与会话里运行。运行期间仍可能有输入到达，因此循环排空收件箱、跑一个回合，直到收件箱保持为空。最终通知只发给父级。"
+              },
+              "lines": [
+                    {
+                          "at": 198,
+                          "text": {
+                                "en": "The child inherits the parent preset.",
+                                "zh": "子代理继承父级预设。"
+                          }
+                    },
+                    {
+                          "at": 204,
+                          "text": {
+                                "en": "Run until the inbox no longer refills.",
+                                "zh": "一直运行到收件箱不再新增。"
+                          }
+                    },
+                    {
+                          "at": 211,
+                          "text": {
+                                "en": "First turn may create the session; later turns resume it.",
+                                "zh": "首个回合可创建会话，之后恢复它。"
+                          }
+                    },
+                    {
+                          "at": 216,
+                          "text": {
+                                "en": "Cancellation is a normal stop reason, not an error.",
+                                "zh": "取消是正常停止原因，不是错误。"
+                          }
+                    },
+                    {
+                          "at": 239,
+                          "text": {
+                                "en": "Only parent-delivered children notify the parent.",
+                                "zh": "只有投递给父级的子代理才通知父级。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "subagents.inputs",
+              "title": {
+                    "en": "Messages and notices share one queue",
+                    "zh": "消息与通知共用一个队列"
+              },
+              "note": {
+                    "en": "The parent's next step sees relayed messages and settled notices in one list, each with a source. That provenance is what lets a resumed session explain an unexpected user message.",
+                    "zh": "父级的下一个步骤同时看到转发消息与结算通知，每条都带来源。正是这种来源信息，让恢复的会话能解释一条意外的用户消息。"
+              },
+              "lines": [
+                    {
+                          "at": 257,
+                          "text": {
+                                "en": "Drain the child's inbox under the lock.",
+                                "zh": "在锁内排空子代理收件箱。"
+                          }
+                    },
+                    {
+                          "at": 264,
+                          "text": {
+                                "en": "Relayed messages carry sender and message id.",
+                                "zh": "转发消息携带发送者与消息 id。"
+                          }
+                    },
+                    {
+                          "at": 267,
+                          "text": {
+                                "en": "Settled notices are popped exactly once.",
+                                "zh": "结算通知只会被取出一次。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "Children do the reading; the parent only receives the settled result.", zh: "子级负责阅读，父级只收到结算后的结果。" },
     diagram: `lead  (session A)
   ├─ subagent(description, prompt) ──► agent-1 (session B)
@@ -1444,6 +1794,90 @@ child finishes
         (summary only; the child transcript never enters A)`,
   },
   "workflow": {
+    code: [
+        {
+              "key": "workflow.member",
+              "title": {
+                    "en": "Validate options before starting an agent",
+                    "zh": "启动代理之前先校验选项"
+              },
+              "note": {
+                    "en": "The guest script is untrusted input. Before a subagent starts, the host checks option keys, rejects what it cannot honour, validates the schema, then spawns the child with delivery=caller so the result returns to the script.",
+                    "zh": "guest 脚本是不可信输入。启动子代理前，宿主检查选项键、拒绝无法兑现的选项、校验 schema，然后用 delivery=caller 启动子级，让结果回到脚本。"
+              },
+              "lines": [
+                    {
+                          "at": 376,
+                          "text": {
+                                "en": "Unknown options are rejected, not ignored.",
+                                "zh": "未知选项被拒绝，而不是忽略。"
+                          }
+                    },
+                    {
+                          "at": 378,
+                          "text": {
+                                "en": "Provider overrides need a selectable route.",
+                                "zh": "provider 覆盖需要有可选的模型路由。"
+                          }
+                    },
+                    {
+                          "at": 382,
+                          "text": {
+                                "en": "The schema is validated once, at start.",
+                                "zh": "schema 在启动时校验一次。"
+                          }
+                    },
+                    {
+                          "at": 383,
+                          "text": {
+                                "en": "delivery=caller keeps the result inside the script.",
+                                "zh": "delivery=caller 让结果留在脚本内。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "workflow.settle",
+              "title": {
+                    "en": "Settlement maps child state to script values",
+                    "zh": "结算把子级状态映射为脚本值"
+              },
+              "note": {
+                    "en": "Each pass looks at finished children, converts their output through the optional schema, replies to the waiting Node request, and emits lifecycle events. Running children are interrupted only when the run is finalising.",
+                    "zh": "每一轮检查已完成的子级，按可选 schema 转换输出，回复等待中的 Node 请求并发出生命周期事件。只有整次运行收尾时才中断仍在运行的子级。"
+              },
+              "lines": [
+                    {
+                          "at": 405,
+                          "text": {
+                                "en": "A running child is skipped unless we are final.",
+                                "zh": "运行中的子级会被跳过，除非正在收尾。"
+                          }
+                    },
+                    {
+                          "at": 418,
+                          "text": {
+                                "en": "Schema mismatch yields null, never a crash.",
+                                "zh": "schema 不匹配产出 null，而不是崩溃。"
+                          }
+                    },
+                    {
+                          "at": 422,
+                          "text": {
+                                "en": "Reply only if the Node process is still alive.",
+                                "zh": "只有 Node 进程还活着才回复。"
+                          }
+                    },
+                    {
+                          "at": 430,
+                          "text": {
+                                "en": "Final pass clears the pending set.",
+                                "zh": "收尾轮清空待定集合。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "Deterministic control flow in a VM, with every agent call crossing a JSON-RPC boundary.", zh: "VM 里的确定性控制流，每次 agent 调用都跨一次 JSON-RPC 边界。" },
     diagram: `workflow(script, meta, args)
    │
@@ -1462,6 +1896,124 @@ Node vm  (no require / process / fs / net / timers)
    limits: 1000 agents · min(32, cpu) concurrent · 4096 items`,
   },
   "mcp": {
+    code: [
+        {
+              "key": "mcp.name",
+              "title": {
+                    "en": "Deterministic, collision-resistant names",
+                    "zh": "确定且抗冲突的命名"
+              },
+              "note": {
+                    "en": "The public name joins server and raw tool with double underscores. If that is too long or invalid, a hash suffix preserves uniqueness while the visible prefix stays readable.",
+                    "zh": "公开名用双下划线连接服务器名与原始工具名。若过长或非法，则用哈希后缀保持唯一，同时让可见前缀仍然可读。"
+              },
+              "lines": [
+                    {
+                          "at": 33,
+                          "text": {
+                                "en": "The readable form.",
+                                "zh": "可读形式。"
+                          }
+                    },
+                    {
+                          "at": 34,
+                          "text": {
+                                "en": "Fast path: short, valid, no hash needed.",
+                                "zh": "快路径：短、合法，无需哈希。"
+                          }
+                    },
+                    {
+                          "at": 36,
+                          "text": {
+                                "en": "The hash is derived from both halves.",
+                                "zh": "哈希由两段共同派生。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "mcp.request",
+              "title": {
+                    "en": "One request, two transports, one deadline",
+                    "zh": "一次请求、两种传输、一个截止时间"
+              },
+              "note": {
+                    "en": "Both transports share the cancellation and timeout contract. The waiter polls in short slices so cancellation is observed promptly, and a dead stdio process is detected rather than waited on forever.",
+                    "zh": "两种传输共用取消与超时契约。等待循环以很短的时间片轮询，及时观察取消；已死的 stdio 进程会被发现，而不是永远等待。"
+              },
+              "lines": [
+                    {
+                          "at": 221,
+                          "text": {
+                                "en": "Per-call timeout, with a configured default.",
+                                "zh": "每次调用可设超时，并有配置默认值。"
+                          }
+                    },
+                    {
+                          "at": 226,
+                          "text": {
+                                "en": "HTTP transport is a different code path.",
+                                "zh": "HTTP 传输是另一条代码路径。"
+                          }
+                    },
+                    {
+                          "at": 229,
+                          "text": {
+                                "en": "The waiter is registered before writing.",
+                                "zh": "等待者先注册，再写出请求。"
+                          }
+                    },
+                    {
+                          "at": 238,
+                          "text": {
+                                "en": "Deadline exceeded: a typed error.",
+                                "zh": "超过截止时间：类型化错误。"
+                          }
+                    },
+                    {
+                          "at": 252,
+                          "text": {
+                                "en": "Cancellation is announced to the server.",
+                                "zh": "取消会通知服务器。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "mcp.tool",
+              "title": {
+                    "en": "Remote tool, local contract",
+                    "zh": "远端工具，本地契约"
+              },
+              "note": {
+                    "en": "An MCP tool becomes an ordinary registry tool: same execution object, same approval path, same events. isError is translated into a raised error so a failed remote call cannot look like an empty result.",
+                    "zh": "MCP 工具变成普通注册表工具：同样的 execution、审批路径与事件。isError 被翻译成抛出错误，失败的远端调用不会被误认为空结果。"
+              },
+              "lines": [
+                    {
+                          "at": 393,
+                          "text": {
+                                "en": "Schemas are passed through, not rewritten.",
+                                "zh": "schema 原样透传，不改写。"
+                          }
+                    },
+                    {
+                          "at": 397,
+                          "text": {
+                                "en": "The call carries the caller's cancel token.",
+                                "zh": "调用携带调用方的取消令牌。"
+                          }
+                    },
+                    {
+                          "at": 399,
+                          "text": {
+                                "en": "isError becomes a raised tool error.",
+                                "zh": "isError 变成抛出的工具错误。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "Discover, namespace, call with a timeout, fail closed on conflict.", zh: "发现、命名空间、带超时调用、冲突时失败关闭。" },
     diagram: `mcp_servers config
    ├─ stdio  ──► spawn child, scrubbed env, JSON-RPC
@@ -1479,6 +2031,90 @@ resources/list ──► list_mcp_resources / read_mcp_resource
 name conflict ──► reject the whole new tool generation`,
   },
   "skills": {
+    code: [
+        {
+              "key": "skills.parse",
+              "title": {
+                    "en": "A deliberately small frontmatter parser",
+                    "zh": "刻意很小的 frontmatter 解析器"
+              },
+              "note": {
+                    "en": "Skills are plain Markdown. The parser requires both fences, accepts only top-level key: value pairs, validates the name, and treats a missing description as a non-skill. Everything after the fence is the body.",
+                    "zh": "技能就是普通 Markdown。解析器要求首尾分隔线，只接受顶层 key: value，校验名称，描述缺失即视为非技能。分隔线之后都是正文。"
+              },
+              "lines": [
+                    {
+                          "at": 135,
+                          "text": {
+                                "en": "No frontmatter, no skill.",
+                                "zh": "没有 frontmatter 就不是技能。"
+                          }
+                    },
+                    {
+                          "at": 147,
+                          "text": {
+                                "en": "Only top-level keys; indented lines are skipped.",
+                                "zh": "只接受顶层键，缩进行被跳过。"
+                          }
+                    },
+                    {
+                          "at": 153,
+                          "text": {
+                                "en": "Name and description are mandatory.",
+                                "zh": "名称与描述是必需的。"
+                          }
+                    },
+                    {
+                          "at": 155,
+                          "text": {
+                                "en": "Model invocation can be disabled independently.",
+                                "zh": "可以单独关闭模型调用。"
+                          }
+                    },
+                    {
+                          "at": 163,
+                          "text": {
+                                "en": "The body's directory becomes the resource base.",
+                                "zh": "正文所在目录成为资源基址。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "skills.catalog",
+              "title": {
+                    "en": "The catalog is a contract, not a list",
+                    "zh": "目录是一份契约，不只是一份清单"
+              },
+              "note": {
+                    "en": "The catalog text carries explicit instructions: only confirmed names are usable, and a replacement supersedes earlier catalogs. Descriptions are HTML-escaped, because a skill file is untrusted input.",
+                    "zh": "目录文本带有明确指令：只有被确认的名字可用，替换目录会取代之前的目录。描述做了 HTML 转义，因为技能文件同样不可信。"
+              },
+              "lines": [
+                    {
+                          "at": 263,
+                          "text": {
+                                "en": "Descriptions are escaped, not interpolated raw.",
+                                "zh": "描述被转义，而不是原样插入。"
+                          }
+                    },
+                    {
+                          "at": 265,
+                          "text": {
+                                "en": "Initial catalog versus replacement catalog.",
+                                "zh": "初始目录与替换目录是两条路径。"
+                          }
+                    },
+                    {
+                          "at": 281,
+                          "text": {
+                                "en": "The replacement explicitly supersedes older ones.",
+                                "zh": "替换目录明确取代之前的所有目录。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "A catalog of names, a body on demand, and two independent visibility switches.", zh: "名称目录、按需加载正文，以及两个独立的可见性开关。" },
     diagram: `roots (in order)
   .dsh/skills · .agents/skills · configured · ~/.dsh/skills · ...
@@ -1494,6 +2130,104 @@ flags
   user-invocable: false           ──► /name is refused`,
   },
   "schedule": {
+    code: [
+        {
+              "key": "schedule.deliver",
+              "title": {
+                    "en": "Deliver into a running session, or spin one up",
+                    "zh": "投递到运行中的会话，或新起一个"
+              },
+              "note": {
+                    "en": "Delivery carries a stable source object: schedule id, occurrence time and message id. If the target session is active the message is queued for its next step; otherwise a worker starts the session.",
+                    "zh": "投递携带稳定的 source 对象：任务 id、发生时点与消息 id。目标会话活跃时消息排入其下一个步骤，否则由工作线程启动会话。"
+              },
+              "lines": [
+                    {
+                          "at": 368,
+                          "text": {
+                                "en": "The source object is the delivery identity.",
+                                "zh": "source 对象就是投递身份。"
+                          }
+                    },
+                    {
+                          "at": 369,
+                          "text": {
+                                "en": "The prompt is wrapped so the model knows it is scheduled.",
+                                "zh": "提示词被包裹，让模型知道这是定时消息。"
+                          }
+                    },
+                    {
+                          "at": 372,
+                          "text": {
+                                "en": "Active session: queue, do not restart.",
+                                "zh": "活跃会话：排队，不重启。"
+                          }
+                    },
+                    {
+                          "at": 375,
+                          "text": {
+                                "en": "Idle or new target: start a worker.",
+                                "zh": "空闲或新目标：启动工作线程。"
+                          }
+                    }
+              ]
+        },
+        {
+              "key": "schedule.inbox",
+              "title": {
+                    "en": "The receipt closes the loop",
+                    "zh": "回执闭合整个环"
+              },
+              "note": {
+                    "en": "When the message is confirmed persisted, this callback records a receipt, trims history by count and age, promotes a new_once target to a concrete session, and advances the next occurrence. A stale message id is ignored.",
+                    "zh": "消息确认持久化后，这个回调记录回执、按条数与时间裁剪历史、把 new_once 目标提升为具体会话，并推进下一次发生时点。过期消息 id 被忽略。"
+              },
+              "lines": [
+                    {
+                          "at": 401,
+                          "text": {
+                                "en": "Only the current in-flight message may settle.",
+                                "zh": "只有当前在途消息可以结算。"
+                          }
+                    },
+                    {
+                          "at": 412,
+                          "text": {
+                                "en": "The receipt is appended to delivery history.",
+                                "zh": "回执追加进投递历史。"
+                          }
+                    },
+                    {
+                          "at": 414,
+                          "text": {
+                                "en": "History is bounded by count.",
+                                "zh": "历史按条数有界。"
+                          }
+                    },
+                    {
+                          "at": 417,
+                          "text": {
+                                "en": "and by age.",
+                                "zh": "并按时间有界。"
+                          }
+                    },
+                    {
+                          "at": 419,
+                          "text": {
+                                "en": "new_once becomes a concrete session here.",
+                                "zh": "new_once 在这里变成具体会话。"
+                          }
+                    },
+                    {
+                          "at": 421,
+                          "text": {
+                                "en": "Advancement only happens when the schedule moves.",
+                                "zh": "只有会推进的任务才推进下一次。"
+                          }
+                    }
+              ]
+        }
+  ],
     caption: { en: "Persisted intent, latest-only catch-up, and a receipt that means exactly one thing.", zh: "持久化的意图、只补最近的追赶策略，以及含义唯一的回执。" },
     diagram: `.minidsh/schedule.json  (atomic write)
    task {
